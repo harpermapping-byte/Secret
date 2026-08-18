@@ -1,38 +1,48 @@
 'use strict';
 
 /**
- * Generador de tablero placeholder para la demo v1 — estilo Risk: un rectángulo
- * dividido en `tileCount` territorios irregulares (nada de cuadrícula uniforme).
- * Las plantillas de mapa "de verdad" (arte + diseño a mano) son trabajo futuro
- * (ver docs/GDD, sección 11). Mientras tanto, esto reemplaza al anillo anterior
- * y es también quien decide la adyacencia REAL del motor: dos territorios son
- * vecinos si sus formas se tocan en el rectángulo (ver docs/ACCIONES.md).
+ * Generador de tablero para la demo v1 — el mapa mundial real (silueta de
+ * continentes/océanos, ver `server/worldLandMask.js`) dividido en `tileCount`
+ * territorios irregulares SOLO sobre tierra — estilo Risk, nada de cuadrícula
+ * uniforme, y las piezas no respetan fronteras de países reales (dependen
+ * únicamente de cuántas ponga el admin). El océano nunca se reparte: no tiene
+ * dueño, no es territorio, es solo el fondo. Las plantillas de mapa "de
+ * verdad" (arte final) siguen siendo trabajo futuro (ver docs/GDD, sección
+ * 11) — esto sigue siendo placeholder de color, pero ya con la forma real del
+ * planeta en vez de un rectángulo abstracto.
  *
  * Cómo se genera (todo determinista dentro de una única pasada, sin librerías
- * de geometría): se colocan `tileCount` puntos semilla repartidos por el
- * rectángulo (una rejilla aproximada con una posición aleatoria dentro de cada
- * casilla de esa rejilla, para que no queden alineados), y luego se rellena un
- * raster fino asignando cada punto del raster a su semilla más cercana — el
- * resultado visual es el mismo efecto que un diagrama de Voronoi, pero sin
- * tener que calcular polígonos. La adyacencia real sale de recorrer el raster
- * una vez y anotar qué territorios quedan pegados pixel con pixel.
+ * de geometría): se colocan `tileCount` puntos semilla, cada uno sobre una
+ * celda de tierra distinta (con una distancia mínima entre ellos para que
+ * salgan repartidos por el planeta y no amontonados, ver `placeSeedsOnLand`),
+ * y luego se rellena un raster fino asignando cada celda de TIERRA a su
+ * semilla más cercana — el resultado visual es el mismo efecto que un
+ * diagrama de Voronoi, pero recortado a la silueta real y sin tener que
+ * calcular polígonos. Las celdas de océano se quedan fuera de cualquier tile
+ * (sentinel `OCEAN`). La adyacencia real sale de recorrer el raster una vez y
+ * anotar qué territorios de tierra quedan pegados pixel con pixel.
  *
  * Forma de una Tile: { id, neighborIds: [id...], ownerFactionNumber: number|null, neutral: bool, garrison: number }
  * Forma de mapLayout (estático, no cambia durante la partida, se manda al cliente
- * una única vez para poder dibujar el rectángulo): { cols, rows, cellTileIds: [tileId por celda del raster], centroids: [{x,y} por tile] }
+ * una única vez para poder dibujar el mapa): { cols, rows, cellTileIds: [tileId por celda del raster, o OCEAN], centroids: [{x,y} por tile] }
  */
 
 const { shuffle } = require('./rules/shared');
+const { decodeLandMask, COLS: RASTER_COLS, ROWS: RASTER_ROWS } = require('./worldLandMask');
 
 const NEUTRAL_GARRISON = 3;
-// Resolucion del raster: a mas celdas, fronteras mas finas al hacer zoom (el
-// mapa ahora se comporta como un fondo tipo Google Maps sobre el que se hace
-// zoom de cerca, ver public/mapRenderer.js). Se duplico frente a la version
-// anterior (220x140) porque generar el mapa sigue siendo barato (rasterize
-// es O(tileCount * cols * rows) pero solo se ejecuta una vez por partida,
-// no por frame: ~60ms para 60 tiles con esta resolucion, medido a mano).
-const RASTER_COLS = 440;
-const RASTER_ROWS = 280;
+const OCEAN = -1; // sentinel en cellTileIds: la celda es oceano, no pertenece a ningun tile
+
+// La mascara y la lista de celdas de tierra se decodifican una unica vez al
+// cargar el modulo (no por partida) — server/worldLandMask.js seccion "Como
+// se genera" tiene el detalle de donde sale esta silueta.
+const landMask = decodeLandMask();
+const landCells = [];
+for (let ry = 0; ry < RASTER_ROWS; ry++) {
+  for (let rx = 0; rx < RASTER_COLS; rx++) {
+    if (landMask[ry * RASTER_COLS + rx]) landCells.push({ x: rx, y: ry });
+  }
+}
 
 /**
  * modo: 'total' (todo el mapa repartido, sin neutral) o 'neutral' (zonas pequenas + territorio neutral)
@@ -40,9 +50,10 @@ const RASTER_ROWS = 280;
 function generateMap({ tileCount, factionCount, mode }) {
   if (factionCount < 2) throw new Error('generateMap: se necesitan al menos 2 facciones');
   if (tileCount < factionCount * 2) throw new Error('generateMap: tileCount demasiado pequenio para factionCount');
+  if (tileCount > landCells.length) throw new Error('generateMap: tileCount demasiado grande, no caben tantos territorios en la tierra del mapa');
 
-  const seeds = placeSeeds(tileCount, RASTER_COLS, RASTER_ROWS);
-  const { cellTileIds, centroids } = rasterize(seeds, RASTER_COLS, RASTER_ROWS);
+  const seeds = placeSeedsOnLand(tileCount);
+  const { cellTileIds, centroids } = rasterizeLand(seeds, RASTER_COLS, RASTER_ROWS);
   const neighborSets = computeNeighbors(cellTileIds, RASTER_COLS, RASTER_ROWS, tileCount);
   const ownerByTile = assignInitialOwners({ tileCount, factionCount, mode, seeds, neighborSets });
 
@@ -62,33 +73,56 @@ function generateMap({ tileCount, factionCount, mode }) {
   return { tiles, mode, mapLayout };
 }
 
-/** Un punto semilla por tile, repartido en una rejilla aproximada con jitter para que las formas salgan irregulares. */
-function placeSeeds(tileCount, rasterCols, rasterRows) {
-  const gridCols = Math.max(1, Math.ceil(Math.sqrt(tileCount * (rasterCols / rasterRows))));
-  const gridRows = Math.max(1, Math.ceil(tileCount / gridCols));
-  const cellW = rasterCols / gridCols;
-  const cellH = rasterRows / gridRows;
+/**
+ * Un punto semilla por tile, cada uno sobre una celda de tierra distinta.
+ * Usa muestreo tipo Poisson-disc (rechazar candidatos demasiado cerca de una
+ * semilla ya puesta) para que los territorios salgan de tamaño parecido y
+ * repartidos por todo el planeta, en vez de amontonados en un solo
+ * continente — si con la distancia mínima actual no caben las `tileCount`
+ * semillas, se relaja un poco y se reintenta.
+ */
+function placeSeedsOnLand(tileCount) {
+  let minDist = Math.sqrt(landCells.length / tileCount) * 0.7;
+  const seeds = [];
 
-  const slots = [];
-  for (let gy = 0; gy < gridRows; gy++) {
-    for (let gx = 0; gx < gridCols; gx++) slots.push({ gx, gy });
+  for (let round = 0; round < 25 && seeds.length < tileCount; round++) {
+    for (const candidate of shuffle(landCells)) {
+      if (seeds.length >= tileCount) break;
+      const minDistSq = minDist * minDist;
+      const farEnough = seeds.every((s) => (s.x - candidate.x) ** 2 + (s.y - candidate.y) ** 2 >= minDistSq);
+      if (farEnough) seeds.push(candidate);
+    }
+    minDist *= 0.8;
   }
-  const chosenSlots = shuffle(slots).slice(0, tileCount);
 
-  // El orden de `seeds` define el id de cada tile (seeds[i] -> tile id i).
-  return chosenSlots.map(({ gx, gy }) => ({
-    x: gx * cellW + cellW * (0.2 + Math.random() * 0.6),
-    y: gy * cellH + cellH * (0.2 + Math.random() * 0.6),
-  }));
+  // Fallback si aun faltan (tileCount muy alto relativo al espacio de tierra
+  // disponible): se rellena con celdas de tierra libres al azar, sin exigir
+  // distancia minima — el orden de `seeds` define el id de cada tile.
+  if (seeds.length < tileCount) {
+    const used = new Set(seeds.map((s) => `${s.x},${s.y}`));
+    for (const candidate of shuffle(landCells)) {
+      if (seeds.length >= tileCount) break;
+      const key = `${candidate.x},${candidate.y}`;
+      if (!used.has(key)) {
+        seeds.push(candidate);
+        used.add(key);
+      }
+    }
+  }
+
+  return seeds;
 }
 
-/** Recorre el raster una vez: cada celda se queda con la semilla mas cercana. */
-function rasterize(seeds, cols, rows) {
-  const cellTileIds = new Array(cols * rows);
+/** Recorre el raster una vez: cada celda de TIERRA se queda con la semilla mas cercana; el oceano se queda en OCEAN. */
+function rasterizeLand(seeds, cols, rows) {
+  const cellTileIds = new Array(cols * rows).fill(OCEAN);
   const sums = seeds.map(() => ({ x: 0, y: 0, count: 0 }));
 
   for (let ry = 0; ry < rows; ry++) {
     for (let rx = 0; rx < cols; rx++) {
+      const idx = ry * cols + rx;
+      if (!landMask[idx]) continue; // oceano: no pertenece a ningun tile
+
       const px = rx + 0.5;
       const py = ry + 0.5;
       let bestId = 0;
@@ -102,7 +136,7 @@ function rasterize(seeds, cols, rows) {
           bestId = i;
         }
       }
-      cellTileIds[ry * cols + rx] = bestId;
+      cellTileIds[idx] = bestId;
       sums[bestId].x += rx;
       sums[bestId].y += ry;
       sums[bestId].count++;
@@ -113,7 +147,7 @@ function rasterize(seeds, cols, rows) {
   return { cellTileIds, centroids };
 }
 
-/** Dos tiles son vecinos si en algun punto del raster quedan pegados (misma fila/columna, id distinto). */
+/** Dos tiles son vecinos si en algun punto del raster quedan pegados (misma fila/columna, id distinto, ninguno oceano). */
 function computeNeighbors(cellTileIds, cols, rows, tileCount) {
   const sets = Array.from({ length: tileCount }, () => new Set());
 
@@ -121,17 +155,18 @@ function computeNeighbors(cellTileIds, cols, rows, tileCount) {
     for (let rx = 0; rx < cols; rx++) {
       const idx = ry * cols + rx;
       const id = cellTileIds[idx];
+      if (id === OCEAN) continue;
 
       if (rx + 1 < cols) {
         const rightId = cellTileIds[idx + 1];
-        if (rightId !== id) {
+        if (rightId !== id && rightId !== OCEAN) {
           sets[id].add(rightId);
           sets[rightId].add(id);
         }
       }
       if (ry + 1 < rows) {
         const downId = cellTileIds[idx + cols];
-        if (downId !== id) {
+        if (downId !== id && downId !== OCEAN) {
           sets[id].add(downId);
           sets[downId].add(id);
         }
@@ -143,7 +178,7 @@ function computeNeighbors(cellTileIds, cols, rows, tileCount) {
 }
 
 /**
- * Reparto inicial. 'total': el rectangulo se corta en `factionCount` bandas
+ * Reparto inicial. 'total': la tierra se corta en `factionCount` bandas
  * verticales (por posicion X de la semilla de cada tile), sin territorio neutral.
  * 'neutral': cada faccion recibe una tile "capital" al azar dentro de su banda
  * mas una tile vecina suya (vecindad real, ver computeNeighbors) — el resto
@@ -184,4 +219,4 @@ function assignInitialOwners({ tileCount, factionCount, mode, seeds, neighborSet
   return owner;
 }
 
-module.exports = { generateMap, NEUTRAL_GARRISON };
+module.exports = { generateMap, NEUTRAL_GARRISON, OCEAN };

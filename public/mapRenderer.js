@@ -15,11 +15,16 @@
 (function () {
   const BLOCK_PX = 6; // tamaño en pantalla (a escala 1) de cada celda del raster
   const NEUTRAL_COLOR = '#3a3f45';
-  const BORDER_COLOR = '#050a10';
+  const BORDER_COLOR = '#050a10'; // borde entre dos territorios de tierra
+  const COAST_COLOR = '#5fb8d9'; // borde entre tierra y oceano (linea de costa)
+  const OCEAN_COLOR = '#0b2436';
+  const OCEAN = -1; // mismo sentinel que server/mapTemplates.js — celda de oceano, sin tile
   // No hay MIN_SCALE fijo: el mapa se comporta como un fondo (estilo Google
   // Maps) que nunca puede ser mas pequeño que el viewport. La escala minima
-  // se recalcula siempre con coverScale() — ver mas abajo.
-  const MAX_SCALE = 6;
+  // se recalcula siempre con coverScale() — ver mas abajo. El oceano (sin
+  // repartir entre territorios) ya deja aire alrededor de la tierra incluso
+  // al zoom minimo, asi que no hace falta ningun margen artificial aparte.
+  const MAX_SCALE = 2.5; // zoom moderado: lo justo para ver bien un territorio y sus vecinos, no arte de detalle
 
   function createMapController({ viewportEl, canvasEl, showLabels = true }) {
     let layout = null; // { cols, rows, cellTileIds, centroids }
@@ -89,18 +94,41 @@
           const idx = ry * cols + rx;
           const tileId = cellTileIds[idx];
 
-          const isBorder =
-            (rx + 1 < cols && cellTileIds[idx + 1] !== tileId) ||
-            (ry + 1 < rows && cellTileIds[idx + cols] !== tileId) ||
-            (rx > 0 && cellTileIds[idx - 1] !== tileId) ||
-            (ry > 0 && cellTileIds[idx - cols] !== tileId);
+          let hex;
+          if (tileId === OCEAN) {
+            // Oceano: solo se pinta de un color distinto al borde con tierra
+            // (linea de costa) si algun vecino es tierra — el resto es oceano liso.
+            const touchesLand =
+              (rx + 1 < cols && cellTileIds[idx + 1] !== OCEAN) ||
+              (ry + 1 < rows && cellTileIds[idx + cols] !== OCEAN) ||
+              (rx > 0 && cellTileIds[idx - 1] !== OCEAN) ||
+              (ry > 0 && cellTileIds[idx - cols] !== OCEAN);
+            hex = touchesLand ? COAST_COLOR : OCEAN_COLOR;
+          } else {
+            const touchesOcean =
+              (rx + 1 < cols && cellTileIds[idx + 1] === OCEAN) ||
+              (ry + 1 < rows && cellTileIds[idx + cols] === OCEAN) ||
+              (rx > 0 && cellTileIds[idx - 1] === OCEAN) ||
+              (ry > 0 && cellTileIds[idx - cols] === OCEAN);
+            const touchesOtherTile =
+              (rx + 1 < cols && cellTileIds[idx + 1] !== tileId && cellTileIds[idx + 1] !== OCEAN) ||
+              (ry + 1 < rows && cellTileIds[idx + cols] !== tileId && cellTileIds[idx + cols] !== OCEAN) ||
+              (rx > 0 && cellTileIds[idx - 1] !== tileId && cellTileIds[idx - 1] !== OCEAN) ||
+              (ry > 0 && cellTileIds[idx - cols] !== tileId && cellTileIds[idx - cols] !== OCEAN);
 
-          // colorByTileId[tileId] puede faltar por un instante justo al recrear
-          // partida (un `state:*` con las tiles nuevas puede llegar un mensaje
-          // antes que su `map:layout`, ver docs/ACCIONES.md seccion 5) — se
-          // pinta neutral ese frame en vez de romper, el siguiente repintado
-          // (con el layout correcto) ya lo corrige.
-          const hex = isBorder ? BORDER_COLOR : colorByTileId[tileId] || NEUTRAL_COLOR;
+            if (touchesOtherTile) {
+              hex = BORDER_COLOR;
+            } else if (touchesOcean) {
+              hex = COAST_COLOR;
+            } else {
+              // colorByTileId[tileId] puede faltar por un instante justo al
+              // recrear partida (un `state:*` con las tiles nuevas puede
+              // llegar un mensaje antes que su `map:layout`, ver
+              // docs/ACCIONES.md seccion 5) — se pinta neutral ese frame en
+              // vez de romper, el siguiente repintado ya lo corrige.
+              hex = colorByTileId[tileId] || NEUTRAL_COLOR;
+            }
+          }
           const rgb = rgbFor(hex, rgbByColor);
           const p = idx * 4;
           image.data[p] = rgb[0];
