@@ -1,0 +1,41 @@
+/*
+ * Estilos compartidos por la web pública y el panel de admin: el mapa a
+ * pantalla completa, la cabecera flotante y el panel lateral desplegable.
+ * Es el único sitio del proyecto con estas reglas — ninguna de las dos
+ * páginas las reimplementa por su cuenta (ver docs/ACCIONES.md sección 6).
+ * Cada página añade encima, en su propio <style>, solo lo que le es propio
+ * (formularios de admin, popups de la web pública, etc).
+ */
+:root { color-scheme: dark; }
+html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, sans-serif; background:#070d13; color:#eaf7ff; }
+
+#mapViewport { position:fixed; inset:0; overflow:hidden; background:#070d13; cursor:grab; touch-action:none; }
+#mapViewport.dragging { cursor:grabbing; }
+#mapCanvas { position:absolute; top:0; left:0; transform-origin:0 0; }
+
+.overlayTopBar { position:fixed; top:0; left:0; right:0; z-index:20; display:flex; justify-content:space-between;
+                 align-items:center; gap:12px; padding:12px 18px; background:linear-gradient(#0c1720ee, #0c172000);
+                 pointer-events:none; flex-wrap:wrap; }
+.overlayTopBar > * { pointer-events:auto; }
+.overlayTopBar h1 { font-size: 16px; margin:0; }
+.topRight { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+
+.headerBtn { background:#152029ee; color:#8fd9f5; border:1px solid #223140; border-radius:8px; padding:8px 14px;
+             font-size:13px; cursor:pointer; }
+.headerBtn:hover { background:#1c2b38; }
+.headerBtn.secondary { background:#223140ee; color:#eaf7ff; }
+.headerBtn.danger { background:#ffb4a2ee; color:#3a0a0a; }
+
+.dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+
+.mapToolbar { position:fixed; bottom:18px; left:18px; z-index:20; display:flex; gap:6px; }
+.mapToolbar button { background:#152029ee; color:#8fd9f5; border:1px solid #223140; border-radius:8px;
+                      padding:8px 12px; font-size:15px; cursor:pointer; }
+.mapToolbar button:hover { background:#1c2b38; }
+
+/* Panel lateral desplegable (roster en la web pública, facciones+debug en el admin). */
+.sidePanel { position:fixed; top:0; right:0; bottom:0; width:280px; z-index:19; background:#0c1720f0;
+             border-left:1px solid #223140; padding:60px 16px 16px; overflow-y:auto; transform:translateX(100%);
+             transition:transform .2s ease; }
+.sidePanel.open { transform:translateX(0); }
+.sidePanel h2 { font-size:13px; margin: 0 0 12px; color:#8fd9f5; }

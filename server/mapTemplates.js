@@ -1,26 +1,32 @@
 'use strict';
 
 /**
- * Generador de tablero placeholder para la demo v1.
- * Las plantillas de mapa "de verdad" (arte + disenio a mano) son trabajo futuro
- * (ver docs/GDD, seccion 11). Por ahora el tablero es un anillo de casillas
- * numeradas con adyacencia circular, suficiente para probar todas las reglas
- * sin depender de arte final.
+ * Generador de tablero placeholder para la demo v1 — estilo Risk: un rectángulo
+ * dividido en `tileCount` territorios irregulares (nada de cuadrícula uniforme).
+ * Las plantillas de mapa "de verdad" (arte + diseño a mano) son trabajo futuro
+ * (ver docs/GDD, sección 11). Mientras tanto, esto reemplaza al anillo anterior
+ * y es también quien decide la adyacencia REAL del motor: dos territorios son
+ * vecinos si sus formas se tocan en el rectángulo (ver docs/ACCIONES.md).
  *
- * Forma de una Tile: { id, neighborIds: [id, id], ownerFactionNumber: number|null, neutral: bool, garrison: number }
+ * Cómo se genera (todo determinista dentro de una única pasada, sin librerías
+ * de geometría): se colocan `tileCount` puntos semilla repartidos por el
+ * rectángulo (una rejilla aproximada con una posición aleatoria dentro de cada
+ * casilla de esa rejilla, para que no queden alineados), y luego se rellena un
+ * raster fino asignando cada punto del raster a su semilla más cercana — el
+ * resultado visual es el mismo efecto que un diagrama de Voronoi, pero sin
+ * tener que calcular polígonos. La adyacencia real sale de recorrer el raster
+ * una vez y anotar qué territorios quedan pegados pixel con pixel.
+ *
+ * Forma de una Tile: { id, neighborIds: [id...], ownerFactionNumber: number|null, neutral: bool, garrison: number }
+ * Forma de mapLayout (estático, no cambia durante la partida, se manda al cliente
+ * una única vez para poder dibujar el rectángulo): { cols, rows, cellTileIds: [tileId por celda del raster], centroids: [{x,y} por tile] }
  */
 
-const NEUTRAL_GARRISON = 3;
+const { shuffle } = require('./rules/shared');
 
-function buildRingAdjacency(tileCount) {
-  const neighborIds = [];
-  for (let i = 0; i < tileCount; i++) {
-    const prev = (i - 1 + tileCount) % tileCount;
-    const next = (i + 1) % tileCount;
-    neighborIds.push([prev, next]);
-  }
-  return neighborIds;
-}
+const NEUTRAL_GARRISON = 3;
+const RASTER_COLS = 220;
+const RASTER_ROWS = 140;
 
 /**
  * modo: 'total' (todo el mapa repartido, sin neutral) o 'neutral' (zonas pequenas + territorio neutral)
@@ -29,42 +35,147 @@ function generateMap({ tileCount, factionCount, mode }) {
   if (factionCount < 2) throw new Error('generateMap: se necesitan al menos 2 facciones');
   if (tileCount < factionCount * 2) throw new Error('generateMap: tileCount demasiado pequenio para factionCount');
 
-  const neighborIds = buildRingAdjacency(tileCount);
-  const ownerByTile = new Array(tileCount).fill(null);
-
-  if (mode === 'total') {
-    // Reparto total: el anillo se divide en factionCount arcos contiguos.
-    const zoneSize = Math.floor(tileCount / factionCount);
-    for (let f = 0; f < factionCount; f++) {
-      const start = f * zoneSize;
-      const end = f === factionCount - 1 ? tileCount : start + zoneSize;
-      for (let i = start; i < end; i++) ownerByTile[i] = f + 1; // numero de faccion, 1-indexado
-    }
-  } else {
-    // Zonas pequenias + neutral: cada faccion recibe 2 casillas, repartidas de forma equidistante.
-    const zoneSizePerFaction = 2;
-    const spacing = Math.floor(tileCount / factionCount);
-    for (let f = 0; f < factionCount; f++) {
-      const start = f * spacing;
-      for (let i = 0; i < zoneSizePerFaction; i++) {
-        ownerByTile[(start + i) % tileCount] = f + 1;
-      }
-    }
-  }
+  const seeds = placeSeeds(tileCount, RASTER_COLS, RASTER_ROWS);
+  const { cellTileIds, centroids } = rasterize(seeds, RASTER_COLS, RASTER_ROWS);
+  const neighborSets = computeNeighbors(cellTileIds, RASTER_COLS, RASTER_ROWS, tileCount);
+  const ownerByTile = assignInitialOwners({ tileCount, factionCount, mode, seeds, neighborSets });
 
   const tiles = [];
   for (let i = 0; i < tileCount; i++) {
     const owner = ownerByTile[i];
     tiles.push({
       id: i,
-      neighborIds: neighborIds[i],
+      neighborIds: [...neighborSets[i]],
       ownerFactionNumber: owner,
       neutral: owner === null,
       garrison: owner === null ? NEUTRAL_GARRISON : 0,
     });
   }
 
-  return { tiles, mode };
+  const mapLayout = { cols: RASTER_COLS, rows: RASTER_ROWS, cellTileIds, centroids };
+  return { tiles, mode, mapLayout };
+}
+
+/** Un punto semilla por tile, repartido en una rejilla aproximada con jitter para que las formas salgan irregulares. */
+function placeSeeds(tileCount, rasterCols, rasterRows) {
+  const gridCols = Math.max(1, Math.ceil(Math.sqrt(tileCount * (rasterCols / rasterRows))));
+  const gridRows = Math.max(1, Math.ceil(tileCount / gridCols));
+  const cellW = rasterCols / gridCols;
+  const cellH = rasterRows / gridRows;
+
+  const slots = [];
+  for (let gy = 0; gy < gridRows; gy++) {
+    for (let gx = 0; gx < gridCols; gx++) slots.push({ gx, gy });
+  }
+  const chosenSlots = shuffle(slots).slice(0, tileCount);
+
+  // El orden de `seeds` define el id de cada tile (seeds[i] -> tile id i).
+  return chosenSlots.map(({ gx, gy }) => ({
+    x: gx * cellW + cellW * (0.2 + Math.random() * 0.6),
+    y: gy * cellH + cellH * (0.2 + Math.random() * 0.6),
+  }));
+}
+
+/** Recorre el raster una vez: cada celda se queda con la semilla mas cercana. */
+function rasterize(seeds, cols, rows) {
+  const cellTileIds = new Array(cols * rows);
+  const sums = seeds.map(() => ({ x: 0, y: 0, count: 0 }));
+
+  for (let ry = 0; ry < rows; ry++) {
+    for (let rx = 0; rx < cols; rx++) {
+      const px = rx + 0.5;
+      const py = ry + 0.5;
+      let bestId = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < seeds.length; i++) {
+        const dx = seeds[i].x - px;
+        const dy = seeds[i].y - py;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestId = i;
+        }
+      }
+      cellTileIds[ry * cols + rx] = bestId;
+      sums[bestId].x += rx;
+      sums[bestId].y += ry;
+      sums[bestId].count++;
+    }
+  }
+
+  const centroids = sums.map((s) => (s.count ? { x: s.x / s.count, y: s.y / s.count } : { x: 0, y: 0 }));
+  return { cellTileIds, centroids };
+}
+
+/** Dos tiles son vecinos si en algun punto del raster quedan pegados (misma fila/columna, id distinto). */
+function computeNeighbors(cellTileIds, cols, rows, tileCount) {
+  const sets = Array.from({ length: tileCount }, () => new Set());
+
+  for (let ry = 0; ry < rows; ry++) {
+    for (let rx = 0; rx < cols; rx++) {
+      const idx = ry * cols + rx;
+      const id = cellTileIds[idx];
+
+      if (rx + 1 < cols) {
+        const rightId = cellTileIds[idx + 1];
+        if (rightId !== id) {
+          sets[id].add(rightId);
+          sets[rightId].add(id);
+        }
+      }
+      if (ry + 1 < rows) {
+        const downId = cellTileIds[idx + cols];
+        if (downId !== id) {
+          sets[id].add(downId);
+          sets[downId].add(id);
+        }
+      }
+    }
+  }
+
+  return sets;
+}
+
+/**
+ * Reparto inicial. 'total': el rectangulo se corta en `factionCount` bandas
+ * verticales (por posicion X de la semilla de cada tile), sin territorio neutral.
+ * 'neutral': cada faccion recibe una tile "capital" al azar dentro de su banda
+ * mas una tile vecina suya (vecindad real, ver computeNeighbors) — el resto
+ * del mapa queda neutral.
+ */
+function assignInitialOwners({ tileCount, factionCount, mode, seeds, neighborSets }) {
+  const orderByX = [...Array(tileCount).keys()].sort((a, b) => seeds[a].x - seeds[b].x);
+  const bandSize = Math.ceil(tileCount / factionCount);
+
+  if (mode === 'total') {
+    const owner = new Array(tileCount).fill(null);
+    orderByX.forEach((tileId, index) => {
+      const factionIndex = Math.min(factionCount - 1, Math.floor(index / bandSize));
+      owner[tileId] = factionIndex + 1;
+    });
+    return owner;
+  }
+
+  const owner = new Array(tileCount).fill(null);
+  const used = new Set();
+
+  for (let f = 0; f < factionCount; f++) {
+    const bandTiles = shuffle(orderByX.slice(f * bandSize, (f + 1) * bandSize).filter((id) => !used.has(id)));
+    const fallback = orderByX.find((id) => !used.has(id));
+    const capital = bandTiles[0] ?? fallback;
+    if (capital == null) continue;
+    owner[capital] = f + 1;
+    used.add(capital);
+
+    const neighborCandidates = shuffle([...neighborSets[capital]].filter((id) => !used.has(id)));
+    const second = neighborCandidates[0] ?? orderByX.find((id) => !used.has(id));
+    if (second != null) {
+      owner[second] = f + 1;
+      used.add(second);
+    }
+  }
+
+  return owner;
 }
 
 module.exports = { generateMap, NEUTRAL_GARRISON };

@@ -54,13 +54,13 @@ Cuando cambiemos código más adelante, solo hace falta volver a subir los archi
 
 ## Novedades de interfaz (panel de admin y web pública)
 
-- **Panel de admin**: la partida en curso ya no se ve como JSON en crudo. Ahora hay tarjetas por facción (industria, territorios, bajas causadas, jugadores) y un mapa navegable en "modo espectador" — arrastra para moverte, rueda del ratón o botones **+ / −** para hacer zoom. El JSON en crudo sigue disponible, plegado en "Ver estado en crudo" por si hace falta para depurar.
-- **Web pública**: al entrar en la Fase de Resumen se abre automáticamente un popup con lo que pasó esa ronda, separado en Conquistas / Industria / Combates / Bajas. También hay un botón **🏆 Clasificación** arriba que abre un popup con la tabla de facciones (soldados, tanques, territorios, maravillas — reservado para más adelante —, industria de la última ronda, bajas causadas).
-- El mapa (tanto en admin como en la web pública) sigue siendo el tablero placeholder (casillas de colores, sin arte). La interacción de zoom/arrastre del panel de admin ya está lista para cuando se ponga la imagen real del mapa — solo habrá que cambiar el fondo, no la lógica.
+- **Mapa estilo Risk**: el mapa es un rectángulo a pantalla completa dividido en tantos territorios irregulares como casillas haya puesto el admin (nada de cuadrícula uniforme) — fronteras dibujadas tipo Voronoi, con zoom (rueda del ratón o botones **+ / −**) y arrastre para moverte. Es la misma adyacencia que usa el motor de verdad: si dos territorios se tocan en el mapa, son vecinos para ataques/expansión. Sigue siendo placeholder de color, sin arte final — ver `server/mapTemplates.js` y `public/mapRenderer.js` (el módulo que dibuja el mapa, compartido entre la web pública y el panel de admin, para que ambos lo vean igual).
+- **Web pública**: al entrar en la Fase de Resumen se abre automáticamente un popup con lo que pasó esa ronda, separado en Conquistas / Industria / Combates / Bajas. También hay un botón **🏆 Clasificación** arriba que abre un popup con la tabla de facciones (soldados, tanques, territorios, maravillas — reservado para más adelante —, industria de la última ronda, bajas causadas). El roster de jugadores se despliega desde la derecha con el botón **👥 Jugadores**.
+- **Panel de admin**: mismo mapa a pantalla completa que la web pública, con un panel lateral (botón **📋 Facciones**) con tarjetas por facción (industria, territorios, bajas causadas, jugadores) y el JSON en crudo plegado por si hace falta para depurar.
 
 ## Notas técnicas
 
 - El bot de Twitch y el servidor WebSocket están implementados a mano sobre los módulos nativos de Node (sin `tmi.js` ni `ws`) porque el entorno donde se construyó esta demo tenía bloqueado el registro de npm. Si en tu máquina npm funciona con normalidad, se puede migrar a las librerías estándar sin tocar `server/gameEngine.js` ni `server/rules/*.js` (el motor de reglas no depende de nada de esto).
 - La variable de entorno `NODE_USE_ENV_PROXY=1` en el script de arranque solo tiene efecto si tienes configurado un proxy HTTP en tu sistema; si no, no hace nada.
 - El estado de la partida vive en memoria: si reinicias el servidor, se pierde la partida en curso (decisión de diseño de la v1, ver `docs/GDD_Condejorge_v1.md`).
-- El mapa es un anillo de casillas generado, no una plantilla con arte real (eso es trabajo futuro).
+- El mapa se genera por partida (rectángulo raster repartido entre `tileCount` territorios, ver `server/mapTemplates.js`), no es una plantilla con arte real (eso es trabajo futuro).

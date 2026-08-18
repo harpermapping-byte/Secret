@@ -62,7 +62,7 @@ function createMatch(config) {
     killsCaused: 0,
   }));
 
-  const { tiles } = generateMap({
+  const { tiles, mapLayout } = generateMap({
     tileCount: normalizedConfig.map.tileCount,
     factionCount: factions.length,
     mode: normalizedConfig.map.mode,
@@ -79,6 +79,7 @@ function createMatch(config) {
     config: normalizedConfig,
     factions,
     tiles,
+    mapLayout, // estatico durante toda la partida, ver getMapLayout() y docs/ACCIONES.md
     players: new Map(),
     round: 0,
     roundActions: new Map(),
@@ -415,6 +416,16 @@ function getAdminState() {
   return { ...getPublicState(), config: match.config, timerPaused: !!match.timer?.paused };
 }
 
+/**
+ * Geometria estatica del mapa (rejilla raster + que tile posee cada celda),
+ * igual para la web publica y el panel de admin. No cambia durante la partida,
+ * asi que se manda una unica vez (mensaje `map:layout`, ver docs/ACCIONES.md
+ * seccion 5) en vez de ir dentro de cada `state:public`/`state:admin`.
+ */
+function getMapLayout() {
+  return match?.mapLayout ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers internos
 // ---------------------------------------------------------------------------
@@ -452,4 +463,5 @@ module.exports = {
   endMatch,
   getPublicState,
   getAdminState,
+  getMapLayout,
 };

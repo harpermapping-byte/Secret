@@ -53,6 +53,7 @@ wsApp.onMessage((client, rawText) => {
         pendingChannels = message.payload.channels || [];
         engine.createMatch(message.payload);
         console.log('[server] partida creada, canales configurados:', pendingChannels);
+        broadcastMapLayout();
         break;
       case 'admin:startMatch':
         engine.startMatch();
@@ -78,6 +79,19 @@ wsApp.onMessage((client, rawText) => {
   }
 });
 
+/**
+ * La geometria del mapa (rejilla raster) es estatica durante toda la partida,
+ * asi que se manda una unica vez por este mensaje aparte en vez de repetirla
+ * en cada `state:public`/`state:admin` (ver docs/ACCIONES.md seccion 5).
+ */
+function broadcastMapLayout() {
+  const layout = engine.getMapLayout();
+  if (!layout) return;
+  const text = JSON.stringify({ type: 'map:layout', payload: layout });
+  wsApp.broadcast(text, 'public');
+  wsApp.broadcast(text, 'admin');
+}
+
 function connectBotOnce() {
   if (botConnected) {
     console.log('[server] el bot ya estaba conectado, no se vuelve a conectar');
@@ -100,6 +114,12 @@ engine.setStateChangeListener(() => {
 });
 
 wsApp.onConnect((client) => {
+  // La geometria del mapa se manda antes que el estado (aunque el cliente ya
+  // no depende estrictamente de este orden, ver mapRenderer.js) para que el
+  // primer pintado no tenga que esperar a un segundo mensaje.
+  const layout = engine.getMapLayout();
+  if (layout) wsApp.send(client, JSON.stringify({ type: 'map:layout', payload: layout }));
+
   const payload = client.role === 'admin' ? engine.getAdminState() : engine.getPublicState();
   wsApp.send(client, JSON.stringify({ type: client.role === 'admin' ? 'state:admin' : 'state:public', payload }));
 });

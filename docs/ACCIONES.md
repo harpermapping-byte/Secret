@@ -60,6 +60,7 @@ Es el único módulo con autoridad sobre las reglas y el estado. Una función = 
 | `endMatch()` | Control admin: finaliza la partida en cualquier momento. |
 | `getPublicState()` | Serializa el estado para la web pública (sin datos privados de admin). |
 | `getAdminState()` | Serializa el estado para el panel de admin. |
+| `getMapLayout()` | Devuelve la geometría estática del mapa (`match.mapLayout`) o `null` si no hay partida. Ver sección 6. |
 | `setStateChangeListener(fn)` | Registra el callback que el servidor WS usa para retransmitir el estado cada vez que algo cambia (unión, acción, cambio de fase, controles admin). |
 
 ## 4. Eventos del bot de Twitch (`server/twitchBot.js`)
@@ -77,6 +78,7 @@ Es el único módulo con autoridad sobre las reglas y el estado. Una función = 
 |---|---|---|
 | `state:public` | Web pública | Resultado de `getPublicState()` |
 | `state:admin` | Panel admin (autenticado) | Resultado de `getAdminState()` |
+| `map:layout` | Ambos | Resultado de `getMapLayout()` (ver sección 6). Se manda una única vez por partida — al crearla (`admin:createMatch`) y a cualquier cliente que se conecte mientras ya hay una partida en curso — nunca dentro de `state:public`/`state:admin`, porque no cambia ronda a ronda y pesa demasiado para repetirlo en cada broadcast. |
 
 **Panel admin → servidor** (requieren sesión admin válida):
 
@@ -103,6 +105,14 @@ Match    { phase, config, players: Map<userId, Player>, factions: [Faction], til
 ```
 
 Estos nombres de campo son fijos en todo el proyecto. No se usan sinónimos (por ejemplo, siempre `factionNumber`, nunca `faction_id` ni `teamId`).
+
+**Geometría del mapa (`match.mapLayout`, ver `server/mapTemplates.js`):**
+
+```
+mapLayout { cols, rows, cellTileIds: [tileId por celda del raster, longitud cols*rows], centroids: [{x,y} por tile, en coordenadas de raster] }
+```
+
+El mapa es un rectángulo raster (`RASTER_COLS` x `RASTER_ROWS`, constantes de `mapTemplates.js`) repartido entre los `tileCount` territorios mediante puntos semilla (efecto visual tipo Voronoi, sin librería de geometría). `tile.neighborIds` sale de recorrer ese raster una vez: dos territorios son vecinos si en algún punto quedan pegados — es la adyacencia REAL que usa el motor (combate, expansión, adyacencia para habilidades), no una capa aparte solo visual. `mapLayout` no cambia durante la partida, así que viaja por su propio mensaje `map:layout` (sección 5), no dentro de `tiles`. Tanto la web pública como el panel de admin dibujan el mismo rectángulo con el mismo módulo cliente, `public/mapRenderer.js` (servido también en `/mapRenderer.js` desde el panel de admin) — es el único sitio del proyecto que sabe pintar el mapa; ninguna otra pantalla reimplementa este dibujado.
 
 `getPublicState().factions[i]` añade además dos campos derivados solo para mostrar en la web (no viven en `Faction`, se calculan al serializar): `territoryCount` (= `territoryIds.length`) y `wondersCount` (siempre `0` en v1, reservado para cuando se implementen las maravillas — ver GDD "Alcance de v1 vs futuro").
 
