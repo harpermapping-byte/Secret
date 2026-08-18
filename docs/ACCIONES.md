@@ -19,6 +19,8 @@ Convención: identificadores de código en inglés (estándar de programación),
 
 Solo `gameEngine.js` puede cambiar la fase actual. Ningún otro módulo la modifica directamente.
 
+**Comportamiento de los clientes en `PHASE_END`:** ni la web pública ni el panel de admin borran nada al llegar a esta fase — siguen mostrando el mapa y las estadísticas finales tal cual estaban (`getPublicState()`/`getAdminState()` no cambian sus campos al terminar, solo `phase`). La web pública añade un banner flotante NO bloqueante (`#winner` en `public/index.html`, función `renderEndBanner()`) que avisa de que la partida terminó sin tapar el mapa/clasificación. El panel de admin cambia los botones de "en curso" por uno de "🔄 Nueva partida" (`resetToConfig()`), que solo muestra de nuevo el formulario de configuración — la partida anterior sigue existiendo en el servidor hasta que se manda un `admin:createMatch` de verdad.
+
 ## 2. Comandos de chat → tipo de acción (`server/commands.js`)
 
 | Comando en chat | Constante de acción | Fase en la que es válido |
@@ -39,7 +41,7 @@ Es el único módulo con autoridad sobre las reglas y el estado. Una función = 
 
 | Función | Qué hace |
 |---|---|
-| `createMatch(config)` | Fase 0. Crea el estado inicial de partida a partir de la configuración del admin. |
+| `createMatch(config)` | Fase 0. Crea el estado inicial de partida a partir de la configuración del admin — **reemplaza** `match` entero, sin importar si ya había una partida en curso o terminada (no hay guardia de fase). Es la misma función que usa el flujo de "reiniciar partida" tras `PHASE_END`: el panel de admin (`resetToConfig()` en `admin/index.html`) simplemente vuelve a mostrar el formulario de configuración y el admin manda otro `admin:createMatch` con los ajustes nuevos, ver sección 5. |
 | `startMatch()` | `PHASE_CONFIG` → `PHASE_RECRUITMENT`. Arranca el timer de reclutamiento. |
 | `handleChatCommand(userId, username, channel, text)` | **Único punto de entrada** para cualquier mensaje de chat. Parsea con `commands.js`, valida fase y estado del usuario, y delega en la función concreta de abajo. |
 | `joinFaction(userId, username, factionNumber)` | Registra o cambia la facción de un usuario. Solo llamable durante `PHASE_RECRUITMENT`. |
@@ -115,6 +117,8 @@ mapLayout { cols, rows, cellTileIds: [tileId por celda del raster, longitud cols
 El mapa es un rectángulo raster (`RASTER_COLS` x `RASTER_ROWS`, constantes de `mapTemplates.js`) repartido entre los `tileCount` territorios mediante puntos semilla (efecto visual tipo Voronoi, sin librería de geometría). `tile.neighborIds` sale de recorrer ese raster una vez: dos territorios son vecinos si en algún punto quedan pegados — es la adyacencia REAL que usa el motor (combate, expansión, adyacencia para habilidades), no una capa aparte solo visual. `mapLayout` no cambia durante la partida, así que viaja por su propio mensaje `map:layout` (sección 5), no dentro de `tiles`. Tanto la web pública como el panel de admin dibujan el mismo rectángulo con el mismo módulo cliente, `public/mapRenderer.js` (servido también en `/mapRenderer.js` desde el panel de admin) — es el único sitio del proyecto que sabe pintar el mapa; ninguna otra pantalla reimplementa este dibujado.
 
 `getPublicState().factions[i]` añade además dos campos derivados solo para mostrar en la web (no viven en `Faction`, se calculan al serializar): `territoryCount` (= `territoryIds.length`) y `wondersCount` (siempre `0` en v1, reservado para cuando se implementen las maravillas — ver GDD "Alcance de v1 vs futuro").
+
+**Zoom/paneo del mapa (`public/mapRenderer.js`):** el mapa se comporta como un fondo tipo Google Maps, nunca como un elemento suelto dentro del viewport. No hay una escala mínima fija (`MIN_SCALE`) — la escala mínima siempre se recalcula con `coverScale()` = `max(viewport.width/canvas.width, viewport.height/canvas.height)`, así que el zoom-out máximo siempre deja el mapa ocupando toda la pantalla, nunca más pequeño. Todo cambio de escala o de posición (`reset()`, `zoom()`, arrastrar con el ratón, `resize` de ventana) pasa por el único punto `setView(scale, x, y)`, que aplica ese límite de escala y además recorta `x`/`y` con `clampPan()` para que nunca se pueda arrastrar el mapa dejando hueco vacío en ningún borde. La resolución del raster (`RASTER_COLS`/`RASTER_ROWS` en `server/mapTemplates.js`, 440×280) se dobló respecto a la primera versión (220×140) para que las fronteras se vean nítidas también al hacer zoom de cerca a una sola división — generar el mapa sigue costando poco (una sola vez por partida, no por frame).
 
 **Búsqueda de facción por número:** una única función en todo el proyecto, `factionByNumber(match, number)`, exportada desde `server/rules/territory.js`. Todo módulo que necesite buscar una facción por su número la importa de ahí — no se reimplementa `.find()` inline ni se duplica con otro nombre. La única excepción es `findInFactionList(factions, number)` dentro de `gameEngine.js`, usada solo en `createMatch()` en el instante en que el array de facciones existe pero `match` todavía no.
 

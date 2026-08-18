@@ -25,8 +25,14 @@
 const { shuffle } = require('./rules/shared');
 
 const NEUTRAL_GARRISON = 3;
-const RASTER_COLS = 220;
-const RASTER_ROWS = 140;
+// Resolucion del raster: a mas celdas, fronteras mas finas al hacer zoom (el
+// mapa ahora se comporta como un fondo tipo Google Maps sobre el que se hace
+// zoom de cerca, ver public/mapRenderer.js). Se duplico frente a la version
+// anterior (220x140) porque generar el mapa sigue siendo barato (rasterize
+// es O(tileCount * cols * rows) pero solo se ejecuta una vez por partida,
+// no por frame: ~60ms para 60 tiles con esta resolucion, medido a mano).
+const RASTER_COLS = 440;
+const RASTER_ROWS = 280;
 
 /**
  * modo: 'total' (todo el mapa repartido, sin neutral) o 'neutral' (zonas pequenas + territorio neutral)

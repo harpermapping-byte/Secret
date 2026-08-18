@@ -16,8 +16,10 @@
   const BLOCK_PX = 6; // tamaño en pantalla (a escala 1) de cada celda del raster
   const NEUTRAL_COLOR = '#3a3f45';
   const BORDER_COLOR = '#050a10';
-  const MIN_SCALE = 0.2;
-  const MAX_SCALE = 4;
+  // No hay MIN_SCALE fijo: el mapa se comporta como un fondo (estilo Google
+  // Maps) que nunca puede ser mas pequeño que el viewport. La escala minima
+  // se recalcula siempre con coverScale() — ver mas abajo.
+  const MAX_SCALE = 6;
 
   function createMapController({ viewportEl, canvasEl, showLabels = true }) {
     let layout = null; // { cols, rows, cellTileIds, centroids }
@@ -66,10 +68,14 @@
       paintRaster(colorByTileId);
       if (showLabels) paintLabels(tiles);
 
-      if (!hasFitOnce) {
-        hasFitOnce = true;
-        reset();
-      }
+      // `hasFitOnce` solo se marca a true si reset() de verdad pudo encajar
+      // el mapa (viewport con medidas reales). En el panel de admin el mapa
+      // se pinta por primera vez mientras #liveControls todavia esta oculto
+      // (display:none, viewport a 0x0) — si marcaramos hasFitOnce aqui de
+      // todos modos, coverScale() saldria 0 y el mapa se quedaria invisible
+      // para siempre (nadie volveria a llamar a reset()). Dejandolo en false
+      // se reintenta solo en el proximo pintado (cuando el panel ya es visible).
+      if (!hasFitOnce) hasFitOnce = reset();
     }
 
     function paintRaster(colorByTileId) {
@@ -89,7 +95,12 @@
             (rx > 0 && cellTileIds[idx - 1] !== tileId) ||
             (ry > 0 && cellTileIds[idx - cols] !== tileId);
 
-          const hex = isBorder ? BORDER_COLOR : colorByTileId[tileId];
+          // colorByTileId[tileId] puede faltar por un instante justo al recrear
+          // partida (un `state:*` con las tiles nuevas puede llegar un mensaje
+          // antes que su `map:layout`, ver docs/ACCIONES.md seccion 5) — se
+          // pinta neutral ese frame en vez de romper, el siguiente repintado
+          // (con el layout correcto) ya lo corrige.
+          const hex = isBorder ? BORDER_COLOR : colorByTileId[tileId] || NEUTRAL_COLOR;
           const rgb = rgbFor(hex, rgbByColor);
           const p = idx * 4;
           image.data[p] = rgb[0];
@@ -131,19 +142,48 @@
       canvasEl.style.transform = `translate(${mapView.x}px, ${mapView.y}px) scale(${mapView.scale})`;
     }
 
-    function reset() {
-      if (!canvasEl.width) return;
-      const fitScale =
-        Math.min(viewportEl.clientWidth / canvasEl.width, viewportEl.clientHeight / canvasEl.height) * 0.94;
-      mapView.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, fitScale));
-      mapView.x = (viewportEl.clientWidth - canvasEl.width * mapView.scale) / 2;
-      mapView.y = (viewportEl.clientHeight - canvasEl.height * mapView.scale) / 2;
+    /**
+     * Escala minima permitida: el mapa (canvasEl, a escala 1) nunca puede ser
+     * mas pequeño que el viewport en ningun eje — igual que un mapa de fondo
+     * tipo Google Maps, el zoom-out maximo siempre deja la pantalla llena de
+     * mapa, nunca hueco vacio alrededor.
+     */
+    function coverScale() {
+      if (!canvasEl.width || !canvasEl.height) return 1;
+      return Math.max(viewportEl.clientWidth / canvasEl.width, viewportEl.clientHeight / canvasEl.height);
+    }
+
+    /** Recorta x/y para que, a la escala dada, no se pueda arrastrar el mapa dejando hueco vacio en ningun borde. */
+    function clampPan(x, y, scale) {
+      const scaledW = canvasEl.width * scale;
+      const scaledH = canvasEl.height * scale;
+      const minX = Math.min(0, viewportEl.clientWidth - scaledW);
+      const minY = Math.min(0, viewportEl.clientHeight - scaledH);
+      return { x: Math.min(0, Math.max(minX, x)), y: Math.min(0, Math.max(minY, y)) };
+    }
+
+    /** Punto unico por el que pasan reset/zoom/drag: aplica los limites de escala y de paneo siempre juntos. */
+    function setView(scale, x, y) {
+      mapView.scale = Math.min(MAX_SCALE, Math.max(coverScale(), scale));
+      const clamped = clampPan(x, y, mapView.scale);
+      mapView.x = clamped.x;
+      mapView.y = clamped.y;
       applyTransform();
     }
 
+    /** Devuelve true si pudo encajar el mapa de verdad; false si el viewport todavia no tiene medidas (oculto). */
+    function reset() {
+      if (!canvasEl.width) return false;
+      if (!viewportEl.clientWidth || !viewportEl.clientHeight) return false;
+      const scale = coverScale();
+      const x = (viewportEl.clientWidth - canvasEl.width * scale) / 2;
+      const y = (viewportEl.clientHeight - canvasEl.height * scale) / 2;
+      setView(scale, x, y);
+      return true;
+    }
+
     function zoom(factor) {
-      mapView.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, mapView.scale * factor));
-      applyTransform();
+      setView(mapView.scale * factor, mapView.x, mapView.y);
     }
 
     function setupInteraction() {
@@ -158,9 +198,7 @@
       });
       window.addEventListener('mousemove', (e) => {
         if (!dragging) return;
-        mapView.x = dragStart.viewX + (e.clientX - dragStart.x);
-        mapView.y = dragStart.viewY + (e.clientY - dragStart.y);
-        applyTransform();
+        setView(mapView.scale, dragStart.viewX + (e.clientX - dragStart.x), dragStart.viewY + (e.clientY - dragStart.y));
       });
       viewportEl.addEventListener(
         'wheel',
@@ -170,6 +208,13 @@
         },
         { passive: false }
       );
+      // Si cambia el tamaño de la ventana, la escala de cobertura (coverScale)
+      // cambia con ella — recalcula limites para que el mapa siga sin dejar
+      // hueco vacio ni quedar descentrado tras el resize.
+      window.addEventListener('resize', () => {
+        if (!canvasEl.width) return;
+        setView(mapView.scale, mapView.x, mapView.y);
+      });
     }
 
     setupInteraction();
