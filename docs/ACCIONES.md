@@ -104,7 +104,7 @@ Un único `switch` en `wsServer.js` traduce cada tipo de mensaje a su función d
 Player   { userId, username, factionNumber, alive, unitType, participation, diedOnRound }
 Faction  { id, number, name, color, territoryIds: [], industry, industryGainedLastRound, industryTierIndex,
            industryPenaltyNextRound, specialEnabled, specialAbility, specialUsed, killsCaused }
-Tile     { id, neighborIds: [], ownerFactionNumber | null, neutral, garrison }
+Tile     { id, neighborIds: [], ownerFactionNumber | null, neutral }
 Match    { phase, config, players: Map<userId, Player>, factions: [Faction], tiles: [Tile], round, timers,
            lastAttackerOf, activeAlliancePairsThisRound, combatModifiers, summaryBlocks, winnerFactionNumber }
 ```

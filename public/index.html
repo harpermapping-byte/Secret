@@ -352,7 +352,8 @@
   function fchip(state, factionNumber) {
     const f = factionByNumber(state, factionNumber);
     if (!f) return 'territorio neutral';
-    return `<span class="fchip"><span class="dot" style="background:${f.color}"></span>${f.name}</span>`;
+    const { escapeHtml } = window.CondejorgeFactionCards;
+    return `<span class="fchip"><span class="dot" style="background:${escapeHtml(f.color)}"></span>${escapeHtml(f.name)}</span>`;
   }
 
   function conquestLine(state, c) {
@@ -489,7 +490,8 @@
       const column = document.createElement('div');
       column.className = 'roster-column';
       column.style.borderTopColor = f.color;
-      column.innerHTML = `<h3><span><span class="dot" style="background:${f.color}"></span> ${f.name}</span><span>${playersInFaction.length}</span></h3>`;
+      const { escapeHtml } = window.CondejorgeFactionCards;
+      column.innerHTML = `<h3><span><span class="dot" style="background:${escapeHtml(f.color)}"></span> ${escapeHtml(f.name)}</span><span>${playersInFaction.length}</span></h3>`;
       if (playersInFaction.length === 0) {
         column.innerHTML += '<div class="roster-empty">nadie unido todavía</div>';
       } else {

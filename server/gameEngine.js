@@ -67,7 +67,8 @@ function createMatch(config) {
     industry: 0,
     industryGainedLastRound: 0,
     industryTierIndex: 0,
-    industryPenaltyNextRound: false,
+    industryPenaltyNextRound: false, // armado por Sabotaje esta ronda, se activa en la siguiente
+    industryPenaltyActive: false, // Sabotaje activo ESTA ronda (armado la ronda anterior)
     specialEnabled: !!f.specialEnabled,
     specialAbility: f.specialAbility || null,
     specialUsed: false,
@@ -227,6 +228,18 @@ function closeActionPhase() {
 function resolveRound() {
   const context = tallyActions();
 
+  // El Sabotaje lanzado en una ronda penaliza la industria de la RONDA
+  // SIGUIENTE (ver docs/GDD seccion 11 "Sabotaje"), no la ronda en que se
+  // lanza. Por eso el flag que arma resolveSpecialAbilities() de esta misma
+  // llamada (industryPenaltyNextRound) no debe leerse todavia: primero se
+  // "activa" aqui lo que quedo armado la ronda anterior, y solo despues se
+  // deja que resolveSpecialAbilities() pueda armar un sabotaje nuevo para la
+  // ronda que viene.
+  for (const faction of match.factions) {
+    faction.industryPenaltyActive = faction.industryPenaltyNextRound;
+    faction.industryPenaltyNextRound = false;
+  }
+
   resolveAlliances(match, context);
   resolveSpecialAbilities(match, context);
   context.allInactiveUserIds = new Set([...context.inactiveUserIds, ...context.forceInactive]);
@@ -319,32 +332,33 @@ function tallyActions() {
 }
 
 /**
- * Construye los bloques del popup de resumen de ronda, uno por tipo de suceso.
- * Cada bloque es { kind, data }; ver docs/ACCIONES.md seccion 6 para la forma exacta de `data`
- * de cada kind. No contiene logica de reglas, solo lee lo que las funciones de resolveRound()
- * ya dejaron en `context.roundEvents` y en los campos de cada faccion/jugador.
+ * Construye los bloques del popup de resumen de ronda, uno por tipo de suceso
+ * QUE DE VERDAD OCURRIO — un bloque sin nada que contar no se incluye, tanto
+ * para no hacerle leer a nadie "Sin novedades" cinco veces seguidas como para
+ * que la duracion de la fase de resumen (`SUMMARY_MS_PER_BLOCK` por bloque,
+ * ver resolveRound()) escale con lo que de verdad paso en la ronda en vez de
+ * ser siempre fija. Cada bloque es { kind, data }; ver docs/ACCIONES.md
+ * seccion 6 para la forma exacta de `data` de cada kind. No contiene logica
+ * de reglas, solo lee lo que las funciones de resolveRound() ya dejaron en
+ * `context.roundEvents` y en los campos de cada faccion/jugador.
  */
 function buildRoundSummary(context) {
-  return [
-    {
-      kind: 'industry',
-      data: match.factions.map((f) => ({ faction: f.number, industry: f.industry, gained: f.industryGainedLastRound })),
-    },
-    {
-      kind: 'territory',
-      data: match.factions.map((f) => ({ faction: f.number, territories: f.territoryIds.length })),
-    },
-    { kind: 'conquests', data: context.roundEvents.conquests },
-    { kind: 'combats', data: context.roundEvents.combats },
-    { kind: 'industryUnlocks', data: context.roundEvents.industryUnlocks },
-    { kind: 'eliminations', data: context.roundEvents.eliminations },
-    {
-      kind: 'casualties',
-      data: [...match.players.values()]
-        .filter((p) => p.diedOnRound === match.round)
-        .map((p) => ({ username: p.username, factionNumber: p.factionNumber })),
-    },
-  ];
+  const blocks = [];
+
+  const industryData = match.factions.map((f) => ({ faction: f.number, industry: f.industry, gained: f.industryGainedLastRound }));
+  if (industryData.some((d) => d.gained > 0)) blocks.push({ kind: 'industry', data: industryData });
+
+  if (context.roundEvents.conquests.length > 0) blocks.push({ kind: 'conquests', data: context.roundEvents.conquests });
+  if (context.roundEvents.combats.length > 0) blocks.push({ kind: 'combats', data: context.roundEvents.combats });
+  if (context.roundEvents.industryUnlocks.length > 0) blocks.push({ kind: 'industryUnlocks', data: context.roundEvents.industryUnlocks });
+  if (context.roundEvents.eliminations.length > 0) blocks.push({ kind: 'eliminations', data: context.roundEvents.eliminations });
+
+  const casualties = [...match.players.values()]
+    .filter((p) => p.diedOnRound === match.round)
+    .map((p) => ({ username: p.username, factionNumber: p.factionNumber }));
+  if (casualties.length > 0) blocks.push({ kind: 'casualties', data: casualties });
+
+  return blocks;
 }
 
 // ---------------------------------------------------------------------------
