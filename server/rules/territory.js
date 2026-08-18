@@ -12,6 +12,7 @@ function transferTile(match, tileId, newOwnerFactionNumber) {
 
   tile.ownerFactionNumber = newOwnerFactionNumber;
   tile.neutral = false;
+  tile.garrison = 0;
 
   const newFaction = factionByNumber(match, newOwnerFactionNumber);
   newFaction.territoryIds.push(tileId);
@@ -29,6 +30,7 @@ function neutralizeTile(match, tileId) {
 
   tile.ownerFactionNumber = null;
   tile.neutral = true;
+  tile.garrison = 0;
 }
 
 /**
@@ -64,35 +66,24 @@ function checkFactionElimination(match, context, factionNumber, eliminatedByFact
   context.roundEvents.eliminations.push({ factionNumber, eliminatedByFactionNumber });
 }
 
-/**
- * Elige, al azar, una casilla propia de defendingFactionNumber que sea
- * frontera con attackingFactionNumber (es decir, tenga al menos una casilla
- * vecina de attackingFactionNumber) para que el ataque ganador se la
- * quede. No hay ningun concepto de "guarnicion" o "punto mas debil" que
- * distinga una casilla fronteriza de otra en esta v1 (ver docs/GDD seccion 6
- * "Combate") — cualquiera de ellas es un blanco igual de valido, asi que se
- * sortea entre todas en vez de fingir una prioridad que no existe.
- */
-function pickBorderTileToConquer(match, defendingFactionNumber, attackingFactionNumber) {
+/** Casilla propia de defendingFactionNumber, adyacente a attackingFactionNumber, con menos guarnicion. */
+function findWeakestBorderTile(match, defendingFactionNumber, attackingFactionNumber) {
   const candidates = match.tiles.filter(
     (tile) =>
       tile.ownerFactionNumber === defendingFactionNumber &&
       tile.neighborIds.some((id) => match.tiles[id].ownerFactionNumber === attackingFactionNumber)
   );
-  return pickRandomTile(candidates);
+  if (candidates.length === 0) return null;
+  return candidates.sort((a, b) => a.garrison - b.garrison)[0];
 }
 
-/** Elige, al azar, una casilla neutral adyacente al territorio de una faccion, para !expansion. */
-function pickExpandableNeutralTile(match, factionNumber) {
+/** Casilla neutral adyacente al territorio de una faccion, para !expansion. */
+function findExpandableNeutralTile(match, factionNumber) {
   const candidates = match.tiles.filter(
     (tile) => tile.neutral && tile.neighborIds.some((id) => match.tiles[id].ownerFactionNumber === factionNumber)
   );
-  return pickRandomTile(candidates);
-}
-
-function pickRandomTile(candidates) {
   if (candidates.length === 0) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  return candidates.sort((a, b) => a.garrison - b.garrison)[0];
 }
 
 /** true si factionA tiene alguna casilla adyacente a una casilla de factionB. */
@@ -113,8 +104,8 @@ module.exports = {
   transferTile,
   neutralizeTile,
   checkFactionElimination,
-  pickBorderTileToConquer,
-  pickExpandableNeutralTile,
+  findWeakestBorderTile,
+  findExpandableNeutralTile,
   factionsAreAdjacent,
   factionByNumber,
 };

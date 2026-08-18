@@ -2,7 +2,7 @@
 
 const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
 const { sumRandomPower, applyCasualties } = require('./shared');
-const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
+const { transferTile, findWeakestBorderTile, factionByNumber, checkFactionElimination } = require('./territory');
 
 // Defensa pasiva minima por casilla controlada, para que nadie quede en 0 absoluto.
 // Valor de ejemplo, pendiente de afinar.
@@ -33,7 +33,7 @@ function resolveCombat(match, context) {
       const winningAttacker = attackers.sort((a, b) => b.userIds.length - a.userIds.length)[0];
       applyCasualties(match, context, defenderNumber, Math.round(attackPower - defensePower), winningAttacker.factionNumber);
 
-      const tile = pickBorderTileToConquer(match, defenderNumber, winningAttacker.factionNumber);
+      const tile = findWeakestBorderTile(match, defenderNumber, winningAttacker.factionNumber);
       if (tile) {
         transferTile(match, tile.id, winningAttacker.factionNumber);
         context.roundEvents.conquests.push({

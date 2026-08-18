@@ -28,8 +28,8 @@ function resolveIndustry(match, context) {
 
     const votes = context.votesByFactionAndType.get(faction.number)[ACTION_INDUSTRY].length;
     const passive = faction.territoryIds.length * PASSIVE_INDUSTRY_PER_TERRITORY;
-    const gained = faction.industryPenaltyActive ? 0 : votes + passive;
-    faction.industryPenaltyActive = false;
+    const gained = faction.industryPenaltyNextRound ? 0 : votes + passive;
+    faction.industryPenaltyNextRound = false;
 
     faction.industry += gained;
     faction.industryGainedLastRound = gained;

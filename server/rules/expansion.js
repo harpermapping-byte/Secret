@@ -1,13 +1,12 @@
 'use strict';
 
 const { ACTION_EXPAND } = require('../commands');
-const { transferTile, pickExpandableNeutralTile } = require('./territory');
+const { transferTile, findExpandableNeutralTile } = require('./territory');
 
 /**
  * Resuelve !expansion: si el % de votantes activos de una faccion supera el
- * umbral configurado, conquista automaticamente una casilla neutral
- * fronteriza al azar. Sin efecto si el mapa es de reparto total (no hay
- * neutral).
+ * umbral configurado, conquista automaticamente la casilla neutral fronteriza
+ * mas debil. Sin efecto si el mapa es de reparto total (no hay neutral).
  */
 function resolveExpansion(match, context) {
   if (match.config.map.mode === 'total') return;
@@ -21,7 +20,7 @@ function resolveExpansion(match, context) {
     const percent = activeCount > 0 ? (votes.length / activeCount) * 100 : 0;
     if (percent < thresholdPercent) continue;
 
-    const tile = pickExpandableNeutralTile(match, faction.number);
+    const tile = findExpandableNeutralTile(match, faction.number);
     if (tile) {
       transferTile(match, tile.id, faction.number);
       context.roundEvents.conquests.push({

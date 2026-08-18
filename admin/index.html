@@ -96,7 +96,9 @@
 
   <div id="liveControls" class="hidden">
     <div id="mapViewport">
+      <img id="mapTerrainBg" alt="" />
       <canvas id="mapCanvas"></canvas>
+      <canvas id="mapObjects"></canvas>
       <canvas id="mapMarkers"></canvas>
     </div>
 
@@ -153,10 +155,9 @@
     const container = document.getElementById('factionRows');
     const row = document.createElement('div');
     row.className = 'faction-row';
-    const { escapeHtml } = window.CondejorgeFactionCards;
     row.innerHTML = `
-      <input type="text" placeholder="Nombre de la facción" value="${escapeHtml(name)}" class="factionName" />
-      <input type="color" value="${escapeHtml(color)}" class="factionColor" />
+      <input type="text" placeholder="Nombre de la facción" value="${name}" class="factionName" />
+      <input type="color" value="${color}" class="factionColor" />
       <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:12px;">
         <input type="checkbox" class="factionSpecial" style="width:auto" /> especial
       </label>
@@ -239,6 +240,8 @@
     viewportEl: document.getElementById('mapViewport'),
     canvasEl: document.getElementById('mapCanvas'),
     markersEl: document.getElementById('mapMarkers'),
+    terrainBgEl: document.getElementById('mapTerrainBg'),
+    objectsEl: document.getElementById('mapObjects'),
   });
 
   function togglePanel() {
@@ -346,12 +349,11 @@
       box.innerHTML = '<div class="chatLogEmpty">Todavía no se ha visto ningún comando de chat reconocido.</div>';
       return;
     }
-    const { escapeHtml } = window.CondejorgeFactionCards;
     box.innerHTML = chatLog.map((entry) => {
       const time = new Date(entry.time).toLocaleTimeString();
       return `<div class="chatLogRow ${entry.ok ? 'ok' : 'rejected'}">
-        <span class="clUser">${escapeHtml(entry.username)}</span> — "${escapeHtml(entry.text)}" — ${time}
-        <div class="clReason">${entry.ok ? '✓' : '✕'} ${escapeHtml(entry.reason)}</div>
+        <span class="clUser">${entry.username}</span> — "${entry.text}" — ${time}
+        <div class="clReason">${entry.ok ? '✓' : '✕'} ${entry.reason}</div>
       </div>`;
     }).join('');
   }

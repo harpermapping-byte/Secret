@@ -7,18 +7,37 @@
  * docs/ACCIONES.md sección 6 para la forma de `mapLayout`, `tiles` y `players`.
  *
  * Uso:
- *   const map = CondejorgeMap.createMapController({ viewportEl, canvasEl, markersEl });
+ *   const map = CondejorgeMap.createMapController({ viewportEl, canvasEl, markersEl, terrainBgEl, objectsEl });
  *   map.setLayout(mapLayoutRecibidoPorWs); // una vez, cuando llega `map:layout`
  *   map.setTiles(state.tiles, state.factions, state.players); // cada vez que llega state:public/admin
  *   map.zoom(1.25); map.reset(); // botones +/-/centrar
  *   map.focusOnPlayer('nombre'); // buscador del panel de jugadores
  *
- * Dos canvases superpuestos (mismo tamaño, mismo transform aplicado a los dos
- * a la vez, ver applyTransform()):
- *   - `canvasEl` (`#mapCanvas`): el raster de tierra/océano/fronteras. Caro de
- *     repintar (recorre cada celda del raster), así que solo se repinta de
- *     verdad cuando cambia qué facción es dueña de cada casilla — ver
- *     `paint()` y el "fingerprint" de propiedad.
+ * Cuatro capas superpuestas dentro de `#mapViewport`, de fondo a primer plano:
+ *   - `terrainBgEl` (`#mapTerrainBg`, <img>): el terreno horneado
+ *     (`public/terrain/world.png` — ver `tools/bakeWorldTerrain.js`), a
+ *     tamaño natural (mismo tamaño en píxeles que el raster). Recibe el
+ *     MISMO transform que `canvasEl` (ver applyTransform()) para que quede
+ *     pixel a pixel alineado con él al hacer pan/zoom — es estático, nunca
+ *     se repinta.
+ *   - `canvasEl` (`#mapCanvas`): el raster de territorios (tierra/océano/
+ *     fronteras, coloreado por dueño). Caro de repintar (recorre cada celda
+ *     del raster), así que solo se repinta de verdad cuando cambia qué
+ *     facción es dueña de cada casilla — ver `paint()` y el "fingerprint" de
+ *     propiedad. Se pinta con transparencia (ver ALPHA_BY_KIND) para que el
+ *     terreno de `terrainBgEl` se siga viendo por debajo, como un tinte de
+ *     propiedad sobre un mapa real en vez de taparlo del todo.
+ *   - `objectsEl` (`#mapObjects`, opcional): árboles/rocas/arbustos/conchas/
+ *     palmeras — objetos DISCRETOS con posición propia
+ *     (`public/terrain/objects.bin`, ver `tools/generateWorldObjects.js`).
+ *     A diferencia de las otras capas, ESTA NO recibe el transform CSS: es
+ *     un canvas del tamaño del VIEWPORT (no del mundo entero) que se
+ *     REDIBUJA en cada pan/zoom, dibujando solo los objetos que caen dentro
+ *     de lo visible (+ un margen, para que no aparezcan de golpe al entrar
+ *     en pantalla) — el coste es proporcional a cuántos objetos hay en
+ *     pantalla, no a cuántos hay en el mundo. Con zoom muy alejado se ocultan
+ *     los objetos pequeños (LOD con histéresis, ver drawObjectLayer()) para
+ *     no intentar dibujar decenas de miles de objetos de menos de 1px.
  *   - `markersEl` (`#mapMarkers`, opcional pero usado por las dos páginas):
  *     etiquetas de casilla + marcadores de jugador. Barato de repintar
  *     (proporcional a nº de casillas/jugadores, no a celdas de raster), así
@@ -63,7 +82,15 @@
   const MARKER_RING_STEP = 24;
   const MARKER_SIZE = 7; // "radio" del triangulo del marcador
 
-  function createMapController({ viewportEl, canvasEl, markersEl, showLabels = true }) {
+  // Transparencia (0-255) de cada tipo de celda al pintar el raster de
+  // territorios sobre el terreno horneado (`terrainBgEl`) — ver comentario
+  // de cabecera. El océano se deja del todo transparente (el terreno ya
+  // dibuja agua+oleaje bonitos), las fronteras casi opacas (tienen que
+  // seguir leyéndose nítidas encima de cualquier textura), tierra/costa a
+  // medio camino para que se note el tinte de facción sin tapar el terreno.
+  const ALPHA_BY_KIND = { [KIND_OCEAN]: 0, [KIND_COAST]: 90, [KIND_BORDER]: 235, [KIND_LAND]: 130 };
+
+  function createMapController({ viewportEl, canvasEl, markersEl, terrainBgEl, objectsEl, showLabels = true }) {
     let layout = null; // { cols, rows, cellTileIds, centroids }
     let offscreen = null; // canvas pequeño (1px por celda de raster) para pintar rapido con ImageData
     let cellRenderKind = null; // Uint8Array, una entrada por celda de raster — ver computeCellRenderKind()
@@ -76,6 +103,9 @@
     let lastPlayers = null; // mensajes WS no esta garantizado en todos los casos — ver docs/ACCIONES.md seccion 5).
     let lastRasterFingerprint = null; // ver paint(): evita repintar el raster si la propiedad de las casillas no cambio
     let lastMarkerPositions = new Map(); // userId -> {x,y,color,username}, cacheado para focusOnPlayer()
+
+    // --- capa de objetos (arboles/rocas/etc.), ver createObjectLayer() mas abajo ---
+    const objectLayer = objectsEl ? createObjectLayer(objectsEl, viewportEl) : null;
 
     function setLayout(newLayout) {
       // El servidor manda `cellTileIds` empaquetado (`cellTileIdsPacked`) en
@@ -100,8 +130,16 @@
         markersEl.height = canvasEl.height;
       }
 
+      // El terreno horneado es estatico (mismo planeta real en toda partida,
+      // ver tools/bakeWorldTerrain.js) — se carga una vez, a tamaño natural
+      // (mismo nº de pixeles que el raster, asi que el MISMO transform de
+      // canvasEl lo deja alineado sin reescalar, ver applyTransform()).
+      if (terrainBgEl && !terrainBgEl.src) terrainBgEl.src = '/terrain/world.png';
+
       cellRenderKind = computeCellRenderKind(layout);
       lastRasterFingerprint = null; // fuerza el repintado del raster la primera vez con este layout
+
+      if (objectLayer) objectLayer.onLayout(layout);
 
       hasFitOnce = false;
       if (lastTiles) paint(lastTiles, lastFactions, lastPlayers);
@@ -246,7 +284,12 @@
         image.data[p] = rgb[0];
         image.data[p + 1] = rgb[1];
         image.data[p + 2] = rgb[2];
-        image.data[p + 3] = 255;
+        // Transparente en distinto grado segun el tipo de celda para dejar
+        // ver el terreno horneado por debajo (terrainBgEl) — ver ALPHA_BY_KIND.
+        // Sin terrainBgEl cargado (src vacio) esto igualmente pinta bien: el
+        // fondo de #mapViewport es solido oscuro, solo se veria un pelin mas
+        // apagado que antes hasta que la imagen cargue.
+        image.data[p + 3] = ALPHA_BY_KIND[kind] != null ? ALPHA_BY_KIND[kind] : 255;
       }
       ctx.putImageData(image, 0, 0);
 
@@ -431,6 +474,11 @@
       const transform = `translate(${mapView.x}px, ${mapView.y}px) scale(${mapView.scale})`;
       canvasEl.style.transform = transform;
       if (markersEl) markersEl.style.transform = transform;
+      if (terrainBgEl) terrainBgEl.style.transform = transform;
+      // objectsEl NO recibe este transform a proposito — es un canvas del
+      // tamaño del viewport que se redibuja el mismo con la vista actual, ver
+      // createObjectLayer()/drawObjectLayer() mas abajo.
+      if (objectLayer) objectLayer.onViewChanged(mapView);
     }
 
     /**
@@ -503,6 +551,7 @@
       // cambia con ella — recalcula limites para que el mapa siga sin dejar
       // hueco vacio ni quedar descentrado tras el resize.
       window.addEventListener('resize', () => {
+        if (objectLayer) objectLayer.onResize();
         if (!canvasEl.width) return;
         setView(mapView.scale, mapView.x, mapView.y);
       });
@@ -510,6 +559,323 @@
 
     setupInteraction();
     return { setLayout, setTiles, zoom, reset, focusOnPlayer };
+  }
+
+  // ===========================================================================
+  // Capa de objetos discretos (arboles, rocas, arbustos, ramas/madera de
+  // deriva, conchas, palmeras) — ver comentario de cabecera del archivo y
+  // `tools/generateWorldObjects.js` (MISMO formato binario y MISMOS numeros
+  // de tipo aqui, cualquier cambio hay que reflejarlo en los dos sitios).
+  //
+  // A diferencia del raster de territorios (pre-renderizado una vez a tamaño
+  // completo del mundo y paneado/zoomeado gratis via CSS transform), esta
+  // capa hace lo que investigamos que hace streamer-wars.com: los datos de
+  // TODOS los objetos del mundo se cargan una unica vez (fetch, no por
+  // tile/zoom — el fichero entero pesa unos pocos cientos de KB, ver
+  // tools/generateWorldObjects.js), pero el DIBUJADO solo procesa los
+  // objetos que caen dentro del viewport actual (+ un margen) cada vez que
+  // cambia el pan/zoom. Asi el coste de pintar es proporcional a "cuantos
+  // objetos hay en pantalla ahora", no a "cuantos objetos hay en el mundo
+  // entero" — es lo que permite hacer mucho zoom sin que el mapa pese mas ni
+  // vaya mas lento, y es la misma pieza que mas adelante puede llevar
+  // aldeanos/edificios/unidades (mismo mecanismo, solo cambia que se dibuja).
+  // ===========================================================================
+
+  const OBJECT_TYPES = {
+    TREE_ROUND: 0, TREE_PINE_HILL: 1, TREE_PINE_TUNDRA: 2, TREE_PINE_SNOW: 3,
+    ROCK: 4, BUSH: 5, BRANCH_FOREST: 6, BRANCH_DESERT: 7, DRIFTWOOD: 8, SHELL: 9, PALM: 10,
+  };
+
+  // Radio (en pixeles de MUNDO) por debajo del cual un tipo de objeto se
+  // considera "pequeño" a efectos de LOD — a poco zoom se ocultan los
+  // pequeños primero (rocas, conchas, arbustos, ramas) y se dejan los
+  // arboles grandes como unica pista de "aqui hay bosque", igual que un mapa
+  // de verdad no dibuja piedras sueltas a vista de pais.
+  const SMALL_OBJECT_TYPES = new Set([
+    OBJECT_TYPES.ROCK, OBJECT_TYPES.BUSH, OBJECT_TYPES.BRANCH_FOREST,
+    OBJECT_TYPES.BRANCH_DESERT, OBJECT_TYPES.DRIFTWOOD, OBJECT_TYPES.SHELL,
+  ]);
+
+  // Tamaño (en pixeles de MUNDO) de cada "cubo" de la rejilla espacial usada
+  // para no recorrer los ~53K objetos del mundo entero en cada frame — solo
+  // se miran los cubos que tocan el rectangulo visible actual.
+  const OBJ_GRID_CELL = 512;
+
+  // Margen de colchon (pixeles de MUNDO, se divide entre el zoom actual mas
+  // abajo) alrededor del viewport visible: los objetos un poco fuera de
+  // pantalla ya estan dibujados antes de entrar en ella al arrastrar el
+  // mapa, para que no aparezcan "de golpe" (popping) justo en el borde.
+  const OBJ_VIEWPORT_MARGIN_PX = 140; // en pixeles de PANTALLA, constante en cualquier zoom
+
+  // Umbrales de escala del mapa para el LOD, CON histeresis: subir de nivel
+  // de detalle exige pasar el umbral "up" (mas alto), bajar exige pasar el
+  // umbral "down" (mas bajo) — el hueco entre ambos evita parpadeo si el
+  // usuario se queda haciendo zoom justo en el borde de un umbral.
+  const LOD_NONE_UP = 0.55, LOD_NONE_DOWN = 0.45; // por debajo: no se dibuja ningun objeto
+  const LOD_SMALL_UP = 1.15, LOD_SMALL_DOWN = 0.95; // por debajo: solo objetos grandes (arboles/palmeras)
+
+  /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */
+  function hash01(x, y, salt) {
+    let h = (x * 374761393 + y * 668265263 + salt * 2654435761) | 0;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = h ^ (h >>> 16);
+    return ((h >>> 0) % 100000) / 100000;
+  }
+
+  function createObjectLayer(objectsEl, viewportEl) {
+    let objs = null; // { count, type: Uint8Array, x: Uint16Array, y: Uint16Array, r: Uint8Array }
+    let grid = null; // Map<bucketKey, number[]> (indices en objs)
+    let gridCols = 0, gridRows = 0;
+    let currentView = { x: 0, y: 0, scale: 1 };
+    let lodTier = 'full'; // 'none' | 'small' | 'full' — con histeresis, ver umbrales arriba
+    let rafPending = false;
+    let ready = false;
+
+    const ctx = objectsEl.getContext('2d');
+
+    fetch('/terrain/objects.bin')
+      .then((r) => r.arrayBuffer())
+      .then((buf) => {
+        objs = parseObjectBuffer(buf);
+        buildGrid();
+        ready = true;
+        scheduleRedraw();
+      })
+      .catch((err) => {
+        // El terreno/objetos son decoracion — si el fetch falla (asset no
+        // desplegado todavia, red rara en un panel de admin local, etc.) el
+        // resto del mapa (territorios, marcadores) tiene que seguir
+        // funcionando igual, solo sin arboles/rocas encima.
+        console.warn('[mapRenderer] no se pudo cargar objects.bin, se sigue sin capa de objetos:', err);
+      });
+
+    function parseObjectBuffer(buf) {
+      const dv = new DataView(buf);
+      const count = dv.getUint32(1, true); // little-endian, ver tools/generateWorldObjects.js
+      const type = new Uint8Array(count);
+      const x = new Uint16Array(count);
+      const y = new Uint16Array(count);
+      const r = new Uint8Array(count);
+      let off = 5;
+      for (let i = 0; i < count; i++) {
+        type[i] = dv.getUint8(off);
+        x[i] = dv.getUint16(off + 1, false); // big-endian, ver tools/generateWorldObjects.js
+        y[i] = dv.getUint16(off + 3, false);
+        r[i] = dv.getUint8(off + 5);
+        off += 6;
+      }
+      return { count, type, x, y, r };
+    }
+
+    function bucketKey(bx, by) { return by * gridCols + bx; }
+
+    function buildGrid() {
+      // gridCols/Rows se calculan a partir del propio rango de coordenadas de
+      // los objetos (no depende de recibir `layout` primero) para que la
+      // capa funcione aunque se cargue objects.bin antes que map:layout.
+      let maxX = 1, maxY = 1;
+      for (let i = 0; i < objs.count; i++) {
+        if (objs.x[i] > maxX) maxX = objs.x[i];
+        if (objs.y[i] > maxY) maxY = objs.y[i];
+      }
+      gridCols = Math.max(1, Math.ceil((maxX + 1) / OBJ_GRID_CELL));
+      gridRows = Math.max(1, Math.ceil((maxY + 1) / OBJ_GRID_CELL));
+      grid = new Map();
+      for (let i = 0; i < objs.count; i++) {
+        const bx = (objs.x[i] / OBJ_GRID_CELL) | 0;
+        const by = (objs.y[i] / OBJ_GRID_CELL) | 0;
+        const key = bucketKey(bx, by);
+        let bucket = grid.get(key);
+        if (!bucket) { bucket = []; grid.set(key, bucket); }
+        bucket.push(i);
+      }
+    }
+
+    function onLayout() {
+      resizeCanvas();
+      scheduleRedraw();
+    }
+
+    function onViewChanged(mapView) {
+      currentView = mapView;
+      scheduleRedraw();
+    }
+
+    function onResize() {
+      resizeCanvas();
+      scheduleRedraw();
+    }
+
+    function resizeCanvas() {
+      const w = viewportEl.clientWidth, h = viewportEl.clientHeight;
+      if (!w || !h) return;
+      // devicePixelRatio para que arboles/lineas finas no se vean borrosos en
+      // pantallas retina — esta capa (a diferencia de canvasEl) SI se
+      // redibuja cada vez, asi que el coste extra de mas pixeles de verdad
+      // solo importa aqui, no en el raster de territorios.
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      objectsEl.width = Math.round(w * dpr);
+      objectsEl.height = Math.round(h * dpr);
+      objectsEl.style.width = w + 'px';
+      objectsEl.style.height = h + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function scheduleRedraw() {
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(() => {
+        rafPending = false;
+        drawObjectLayer();
+      });
+    }
+
+    function updateLodTier(scale) {
+      if (lodTier === 'none') {
+        if (scale >= LOD_NONE_UP) lodTier = scale >= LOD_SMALL_UP ? 'full' : 'small';
+      } else if (lodTier === 'small') {
+        if (scale < LOD_NONE_DOWN) lodTier = 'none';
+        else if (scale >= LOD_SMALL_UP) lodTier = 'full';
+      } else {
+        if (scale < LOD_SMALL_DOWN) lodTier = scale < LOD_NONE_DOWN ? 'none' : 'small';
+      }
+    }
+
+    function drawObjectLayer() {
+      const w = viewportEl.clientWidth, h = viewportEl.clientHeight;
+      if (!w || !h) return;
+      if (!objectsEl.width || !objectsEl.height) resizeCanvas();
+      ctx.clearRect(0, 0, w, h);
+      if (!ready || !objs || !objs.count) return;
+
+      const { x: vx, y: vy, scale } = currentView;
+      updateLodTier(scale);
+      if (lodTier === 'none') return;
+
+      // Rectangulo visible en coordenadas de MUNDO (inverso de screenX =
+      // worldX*scale + vx), con colchon extra para que nada aparezca de
+      // golpe justo al entrar en pantalla (ver OBJ_VIEWPORT_MARGIN_PX).
+      const margin = OBJ_VIEWPORT_MARGIN_PX / scale;
+      const wx0 = (0 - vx) / scale - margin;
+      const wy0 = (0 - vy) / scale - margin;
+      const wx1 = (w - vx) / scale + margin;
+      const wy1 = (h - vy) / scale + margin;
+
+      const bx0 = Math.max(0, Math.floor(wx0 / OBJ_GRID_CELL));
+      const by0 = Math.max(0, Math.floor(wy0 / OBJ_GRID_CELL));
+      const bx1 = Math.min(gridCols - 1, Math.floor(wx1 / OBJ_GRID_CELL));
+      const by1 = Math.min(gridRows - 1, Math.floor(wy1 / OBJ_GRID_CELL));
+      if (bx1 < bx0 || by1 < by0) return;
+
+      for (let by = by0; by <= by1; by++) {
+        for (let bx = bx0; bx <= bx1; bx++) {
+          const bucket = grid.get(bucketKey(bx, by));
+          if (!bucket) continue;
+          for (const i of bucket) {
+            const ox = objs.x[i], oy = objs.y[i], r = objs.r[i], type = objs.type[i];
+            if (ox < wx0 || ox > wx1 || oy < wy0 || oy > wy1) continue;
+            if (lodTier === 'small' && SMALL_OBJECT_TYPES.has(type)) continue;
+            drawObject(type, ox * scale + vx, oy * scale + vy, r * scale, ox, oy);
+          }
+        }
+      }
+    }
+
+    function drawObject(type, sx, sy, sr, worldX, worldY) {
+      // sx/sy/sr: posicion y radio ya en pixeles de PANTALLA (post pan/zoom).
+      switch (type) {
+        case OBJECT_TYPES.TREE_ROUND: return drawTreeRound(sx, sy, sr, '#3a5430', '#567032');
+        case OBJECT_TYPES.TREE_PINE_HILL: return drawTreePine(sx, sy, sr, '#364a38', false);
+        case OBJECT_TYPES.TREE_PINE_TUNDRA: return drawTreePine(sx, sy, sr, '#46584e', false);
+        case OBJECT_TYPES.TREE_PINE_SNOW: return drawTreePine(sx, sy, sr, '#3a4e4a', true);
+        case OBJECT_TYPES.ROCK: return drawRock(sx, sy, sr, worldX, worldY);
+        case OBJECT_TYPES.BUSH: return drawBush(sx, sy, sr);
+        case OBJECT_TYPES.BRANCH_FOREST: return drawBranch(sx, sy, sr, worldX, worldY, '#5a4430');
+        case OBJECT_TYPES.BRANCH_DESERT: return drawBranch(sx, sy, sr, worldX, worldY, '#92744e');
+        case OBJECT_TYPES.DRIFTWOOD: return drawDriftwood(sx, sy, sr, worldX, worldY);
+        case OBJECT_TYPES.SHELL: return drawShell(sx, sy, sr);
+        case OBJECT_TYPES.PALM: return drawPalm(sx, sy, sr, worldX, worldY);
+        default: return;
+      }
+    }
+
+    function ellipse(cx, cy, rx, ry, color) {
+      if (rx <= 0 || ry <= 0) return;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawTreeRound(sx, sy, r, colDark, colLight) {
+      if (r < 0.6) { ellipse(sx, sy, Math.max(0.6, r), Math.max(0.6, r), colDark); return; }
+      ctx.strokeStyle = '#4a3828'; ctx.lineWidth = Math.max(1, r / 4);
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx, sy + r * 0.6); ctx.stroke();
+      ellipse(sx, sy - r * 0.9, r, r * 0.7, colDark);
+      ellipse(sx - r * 0.05, sy - r * 1.0, r * 0.55, r * 0.5, colLight);
+    }
+
+    function drawTreePine(sx, sy, r, snow) {
+      const col = snow ? '#3a4e4a' : '#354a37';
+      if (r < 0.6) { ellipse(sx, sy, Math.max(0.6, r), Math.max(0.6, r), col); return; }
+      ctx.strokeStyle = '#42322a'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx, sy + r * 0.4); ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - r * 2); ctx.lineTo(sx - r * 0.8, sy); ctx.lineTo(sx + r * 0.8, sy); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - r * 2.5); ctx.lineTo(sx - r * 0.55, sy - r * 0.9); ctx.lineTo(sx + r * 0.55, sy - r * 0.9); ctx.closePath(); ctx.fill();
+      if (snow) {
+        ctx.strokeStyle = '#e8eef0'; ctx.lineWidth = Math.max(1, r * 0.12);
+        ctx.beginPath(); ctx.moveTo(sx - r * 0.35, sy - r * 2.15); ctx.lineTo(sx + r * 0.35, sy - r * 2.15); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx - r * 0.5, sy - r * 0.95); ctx.lineTo(sx + r * 0.5, sy - r * 0.95); ctx.stroke();
+      }
+    }
+
+    function drawRock(sx, sy, r, worldX, worldY) {
+      const tone = Math.round((hash01(worldX, worldY, 1) - 0.5) * 28);
+      const c = Math.max(0, Math.min(255, 168 + tone));
+      ellipse(sx, sy, r, r * 0.7, `rgb(${c},${Math.max(0, Math.min(255, 158 + tone))},${Math.max(0, Math.min(255, 148 + tone))})`);
+    }
+
+    function drawBush(sx, sy, r) {
+      ellipse(sx - r * 0.2, sy - r * 0.1, r * 0.8, r * 0.6, '#4e6238');
+      ellipse(sx + r * 0.1, sy - r * 0.35, r * 0.7, r * 0.4, '#6e824c');
+    }
+
+    function drawBranch(sx, sy, r, worldX, worldY, color) {
+      const ang = hash01(worldX, worldY, 2) * Math.PI;
+      const dx = Math.cos(ang) * r, dy = Math.sin(ang) * r;
+      ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, r * 0.12);
+      ctx.beginPath(); ctx.moveTo(sx - dx, sy - dy); ctx.lineTo(sx + dx, sy + dy); ctx.stroke();
+    }
+
+    function drawDriftwood(sx, sy, r, worldX, worldY) {
+      const ang = hash01(worldX, worldY, 3) * Math.PI;
+      const dx = Math.cos(ang) * r, dy = Math.sin(ang) * r * 0.4;
+      ctx.strokeStyle = '#785842'; ctx.lineWidth = Math.max(1, r * 0.35);
+      ctx.beginPath(); ctx.moveTo(sx - dx, sy - dy); ctx.lineTo(sx + dx, sy + dy); ctx.stroke();
+    }
+
+    function drawShell(sx, sy, r) {
+      ctx.strokeStyle = '#b08c80'; ctx.lineWidth = Math.max(1, r * 0.3);
+      ctx.beginPath(); ctx.arc(sx, sy, r, (20 * Math.PI) / 180, (160 * Math.PI) / 180); ctx.stroke();
+    }
+
+    function drawPalm(sx, sy, r, worldX, worldY) {
+      const lean = (hash01(worldX, worldY, 4) - 0.5) * 0.6;
+      const topX = sx + r * lean * 2, topY = sy - r * 2.2;
+      ctx.strokeStyle = '#785a3a'; ctx.lineWidth = Math.max(1, r / 3);
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(topX, topY); ctx.stroke();
+      ctx.strokeStyle = '#68924c';
+      for (const ang of [-60, -25, 10, 45, 80]) {
+        const rad = (ang * Math.PI) / 180;
+        const tipX = topX + Math.cos(rad) * r * 1.6, tipY = topY + Math.sin(rad) * r * 0.9 - r * 0.3;
+        ctx.beginPath(); ctx.moveTo(topX, topY); ctx.lineTo(tipX, tipY); ctx.stroke();
+      }
+    }
+
+    return { onLayout, onViewChanged, onResize };
   }
 
   window.CondejorgeMap = { createMapController };
