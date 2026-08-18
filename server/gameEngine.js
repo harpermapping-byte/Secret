@@ -399,7 +399,26 @@ function endMatch() {
 // ---------------------------------------------------------------------------
 
 function getPublicState() {
-  if (!match) return null;
+  // Nunca `null`: un espectador puede conectarse a la web pública ANTES de
+  // que el admin cree la primera partida (server/index.js manda este estado
+  // nada más conectar) — `render()` en public/index.html hace `state.phase`
+  // sin comprobar `state` primero, así que un `null` aquí lo hacía crashear
+  // en cuanto se abría la web pública sin partida creada todavía. Mismo
+  // criterio que `getAdminState()`, que ya devolvía un objeto por defecto en
+  // vez de `null` para este mismo caso.
+  if (!match) {
+    return {
+      phase: null,
+      round: 0,
+      factions: [],
+      tiles: [],
+      players: [],
+      summaryBlocks: [],
+      winnerFactionNumber: null,
+      timerEndsAt: null,
+      timerPaused: false,
+    };
+  }
   return {
     phase: match.phase,
     round: match.round,
@@ -435,8 +454,10 @@ function getPublicState() {
 }
 
 function getAdminState() {
-  if (!match) return { phase: null, chatLog: recentChatLog };
-  return { ...getPublicState(), config: match.config, chatLog: recentChatLog };
+  // `getPublicState()` ya devuelve la forma completa por defecto sin partida
+  // creada (ver comentario ahí) — aquí solo hace falta añadir lo propio del
+  // admin encima, sin repetir ese objeto por defecto una segunda vez.
+  return { ...getPublicState(), config: match ? match.config : null, chatLog: recentChatLog };
 }
 
 /**

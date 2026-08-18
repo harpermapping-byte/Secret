@@ -148,6 +148,7 @@ function contentTypeFor(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
   if (filePath.endsWith('.js')) return 'text/javascript; charset=utf-8';
   if (filePath.endsWith('.css')) return 'text/css; charset=utf-8';
+  if (filePath.endsWith('.mp3')) return 'audio/mpeg'; // musica de fondo, ver public/audio/
   return 'application/octet-stream';
 }
 

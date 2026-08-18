@@ -11,6 +11,10 @@
   #phase { color:#8fd9f5; font-size:13px; }
   #timer { font-variant-numeric: tabular-nums; font-size: 18px; }
 
+  /* Control de música de fondo (botón + barra), arriba a la izquierda —
+     ver #bgMusic y toggleMusic()/setMusicVolume() más abajo. */
+  .volumeSlider { width:70px; accent-color:#8fd9f5; cursor:pointer; vertical-align:middle; }
+
   #rosterColumns { display:flex; flex-direction:column; gap:10px; }
   .roster-column { background:#0f1a22; border-radius:10px; padding:10px 12px; border-top: 4px solid #223140; }
   .roster-column h3 { margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; }
@@ -63,6 +67,10 @@
     <canvas id="mapMarkers"></canvas>
   </div>
 
+  <!-- Música de fondo: ver docs/ACCIONES.md sección 6 "Música de fondo" para
+       cómo sustituir public/audio/bgm-placeholder.mp3 por la pista final. -->
+  <audio id="bgMusic" src="/audio/bgm-placeholder.mp3" loop preload="auto"></audio>
+
   <div class="mapToolbar">
     <button onclick="mapCtrl.zoom(1.25)" title="Acercar">+</button>
     <button onclick="mapCtrl.zoom(0.8)" title="Alejar">−</button>
@@ -72,6 +80,9 @@
   <div class="overlayTopBar">
     <div class="topLeft">
       <h1>Condejorge Wars <span style="opacity:.5">(placeholders v1)</span></h1>
+      <button class="headerBtn" id="musicToggle" onclick="toggleMusic()" title="Música de fondo">🎵</button>
+      <input type="range" id="musicVolume" class="volumeSlider" min="0" max="100" value="50"
+             oninput="setMusicVolume(this.value)" title="Volumen de la música" />
       <button class="headerBtn" id="factionsToggle" onclick="toggleFactionsPanel()">🏳️ Facciones</button>
     </div>
     <div class="topRight">
@@ -505,6 +516,78 @@
   setInterval(() => {
     document.getElementById('timer').textContent = matchTimer.formatRemaining(lastState);
   }, 250);
+
+  // Música de fondo (bucle, botón 🎵/🔇 + barra de volumen arriba a la
+  // izquierda) — ver docs/ACCIONES.md sección 6 "Música de fondo" para el
+  // porqué del arranque en mute y cómo sustituir el placeholder.
+  const bgMusic = document.getElementById('bgMusic');
+  const musicToggleBtn = document.getElementById('musicToggle');
+  const musicVolumeSlider = document.getElementById('musicVolume');
+  let lastMusicVolume = 0.5;
+  bgMusic.volume = lastMusicVolume;
+
+  function updateMusicButtonIcon() {
+    musicToggleBtn.textContent = (bgMusic.muted || bgMusic.volume === 0) ? '🔇' : '🎵';
+  }
+
+  function toggleMusic() {
+    if (bgMusic.muted || bgMusic.volume === 0) {
+      bgMusic.muted = false;
+      bgMusic.volume = lastMusicVolume > 0 ? lastMusicVolume : 0.5;
+      musicVolumeSlider.value = Math.round(bgMusic.volume * 100);
+      bgMusic.play().catch(() => {}); // gesto real de click: el navegador ya lo permite
+    } else {
+      lastMusicVolume = bgMusic.volume;
+      bgMusic.muted = true;
+    }
+    updateMusicButtonIcon();
+  }
+
+  function setMusicVolume(value) {
+    const v = Number(value) / 100;
+    bgMusic.volume = v;
+    bgMusic.muted = v === 0;
+    if (v > 0) {
+      lastMusicVolume = v;
+      bgMusic.play().catch(() => {}); // mover la barra también cuenta como gesto del usuario
+    }
+    updateMusicButtonIcon();
+  }
+
+  // Autoplay al entrar en la web: los navegadores bloquean CUALQUIER
+  // reproducción (incluso en mute, según el navegador) hasta que el usuario
+  // interactúa con la página al menos una vez — es política estándar del
+  // navegador, no un bug de esta web. Estrategia con dos redes:
+  // 1. Se intenta reproducir con sonido nada más cargar; si el navegador ya
+  //    lo permite (algunos lo hacen, según su "media engagement"), suena
+  //    directo sin que el espectador tenga que tocar nada.
+  // 2. Si lo rechaza, se reintenta en mute (por si el navegador sí permite
+  //    autoplay silencioso aunque no con sonido) y, si TAMBIÉN lo rechaza, se
+  //    engancha un listener de "primera interacción" (click/tecla/toque en
+  //    cualquier parte de la página, no hace falta que sea el botón 🎵) que
+  //    reintenta reproducir una sola vez y luego se desengancha — así suena
+  //    en cuanto el espectador haga lo que sea en la página (mover el mapa,
+  //    abrir un panel...), sin depender de que encuentre el botón de música.
+  function tryStartMusic() {
+    return bgMusic.play();
+  }
+
+  function armFirstInteractionFallback() {
+    const resume = () => {
+      tryStartMusic().then(() => updateMusicButtonIcon()).catch(() => {});
+      ['click', 'keydown', 'touchstart'].forEach((ev) => document.removeEventListener(ev, resume));
+    };
+    ['click', 'keydown', 'touchstart'].forEach((ev) => document.addEventListener(ev, resume, { once: true }));
+  }
+
+  tryStartMusic().catch(() => {
+    bgMusic.muted = true;
+    tryStartMusic()
+      .then(() => updateMusicButtonIcon())
+      .catch(() => armFirstInteractionFallback());
+    updateMusicButtonIcon();
+  });
+  updateMusicButtonIcon();
 </script>
 </body>
 </html>
