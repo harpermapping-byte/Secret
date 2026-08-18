@@ -6,7 +6,8 @@
   "main": "server/index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node server/test/engineSmokeTest.js"
   },
   "engines": {
     "node": ">=22"

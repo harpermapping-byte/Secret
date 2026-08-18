@@ -37,6 +37,8 @@ html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, san
 .headerBtn:hover { background:#1c2b38; }
 .headerBtn.secondary { background:#223140ee; color:#eaf7ff; }
 .headerBtn.danger { background:#ffb4a2ee; color:#3a0a0a; }
+.headerBtn:disabled { opacity:.35; cursor:default; }
+.headerBtn:disabled:hover { background:#223140ee; }
 
 .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
 

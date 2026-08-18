@@ -101,20 +101,21 @@
     </div>
 
     <div class="mapToolbar">
-      <button onclick="mapZoom(1.25)" title="Acercar">+</button>
-      <button onclick="mapZoom(0.8)" title="Alejar">−</button>
-      <button onclick="mapReset()" title="Centrar">⤾</button>
+      <button onclick="mapCtrl.zoom(1.25)" title="Acercar">+</button>
+      <button onclick="mapCtrl.zoom(0.8)" title="Alejar">−</button>
+      <button onclick="mapCtrl.reset()" title="Centrar">⤾</button>
     </div>
 
     <div class="overlayTopBar">
       <div>
         <h1>Condejorge Wars <span style="opacity:.5">— Admin</span></h1>
         <span class="phaseTag" id="livephaseTag" style="font-size:12px;color:#8fd9f5">—</span>
+        <span id="adminTimer" style="font-size:12px;color:#8fd9f5;font-variant-numeric:tabular-nums;margin-left:8px">--:--</span>
       </div>
       <div class="topRight">
         <div id="liveActionButtons" class="row" style="gap:10px">
-          <button class="headerBtn secondary" onclick="send('admin:pause')">Pausar</button>
-          <button class="headerBtn secondary" onclick="send('admin:resume')">Reanudar</button>
+          <button class="headerBtn secondary" id="pauseBtn" onclick="send('admin:pause')">Pausar</button>
+          <button class="headerBtn secondary" id="resumeBtn" onclick="send('admin:resume')">Reanudar</button>
           <button class="headerBtn secondary" onclick="send('admin:advancePhase')">Pasar ronda</button>
           <button class="headerBtn danger" onclick="send('admin:endMatch')">Terminar partida</button>
         </div>
@@ -140,6 +141,7 @@
 
 <script src="/mapRenderer.js"></script>
 <script src="/factionCards.js"></script>
+<script src="/matchTimer.js"></script>
 <script>
   let socket = null;
   const defaultFactions = [
@@ -178,10 +180,21 @@
     });
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
-      if (message.type === 'state:admin') renderState(message.payload);
+      if (message.type === 'state:admin') { lastState = message.payload; renderState(message.payload); }
       else if (message.type === 'map:layout') mapCtrl.setLayout(message.payload);
     });
   }
+
+  let lastState = null;
+  // Misma cuenta atrás que la web pública (public/matchTimer.js) — se
+  // actualiza cada 250ms en vez de solo cuando llega un `state:admin` nuevo,
+  // porque durante la Fase de Acción puede no llegar ningún mensaje nuevo
+  // durante todo el tiempo de espera (nada cambia salvo el reloj). Congela el
+  // número mientras `timerPaused` esté activo — ver docs/ACCIONES.md.
+  const matchTimer = CondejorgeMatchTimer.createMatchTimerTracker();
+  setInterval(() => {
+    document.getElementById('adminTimer').textContent = matchTimer.formatRemaining(lastState);
+  }, 250);
 
   function send(type, payload) {
     socket.send(JSON.stringify({ type, payload }));
@@ -227,14 +240,6 @@
     markersEl: document.getElementById('mapMarkers'),
   });
 
-  function mapZoom(factor) {
-    mapCtrl.zoom(factor);
-  }
-
-  function mapReset() {
-    mapCtrl.reset();
-  }
-
   function togglePanel() {
     document.getElementById('adminPanel').classList.toggle('open');
   }
@@ -267,6 +272,13 @@
     const isEnded = state.phase === 'end';
     document.getElementById('liveActionButtons').classList.toggle('hidden', isEnded);
     document.getElementById('newMatchBtn').classList.toggle('hidden', !isEnded);
+
+    // "Pausar"/"Reanudar" se deshabilitan segun corresponda — antes, pulsar
+    // "Pausar" no daba NINGUNA señal visible de que había funcionado (el
+    // timer ya se pausaba bien en el servidor, ver docs/ACCIONES.md sección
+    // 6 "Timer de fase (pausa)"), lo que parecía "el botón no hace nada".
+    document.getElementById('pauseBtn').disabled = !!state.timerPaused;
+    document.getElementById('resumeBtn').disabled = !state.timerPaused;
 
     mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || []);
     CondejorgeFactionCards.renderFactionCards(document.getElementById('factionCards'), state);

@@ -64,9 +64,9 @@
   </div>
 
   <div class="mapToolbar">
-    <button onclick="mapZoom(1.25)" title="Acercar">+</button>
-    <button onclick="mapZoom(0.8)" title="Alejar">−</button>
-    <button onclick="mapReset()" title="Centrar">⤾</button>
+    <button onclick="mapCtrl.zoom(1.25)" title="Acercar">+</button>
+    <button onclick="mapCtrl.zoom(0.8)" title="Alejar">−</button>
+    <button onclick="mapCtrl.reset()" title="Centrar">⤾</button>
   </div>
 
   <div class="overlayTopBar">
@@ -138,6 +138,7 @@
 
 <script src="/mapRenderer.js"></script>
 <script src="/factionCards.js"></script>
+<script src="/matchTimer.js"></script>
 <script>
   const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
   const socket = new WebSocket(`${wsProtocol}://${location.host}/ws?role=public`);
@@ -263,14 +264,6 @@
     canvasEl: document.getElementById('mapCanvas'),
     markersEl: document.getElementById('mapMarkers'),
   });
-
-  function mapZoom(factor) {
-    mapCtrl.zoom(factor);
-  }
-
-  function mapReset() {
-    mapCtrl.reset();
-  }
 
   function toggleRoster() {
     document.getElementById('roster').classList.toggle('open');
@@ -504,11 +497,13 @@
     return { config: 'Configuración', recruitment: 'Reclutamiento', action: 'Acción', resolution: 'Combate', summary: 'Resumen', end: 'Fin' }[phase] || phase;
   }
 
+  // Cuenta atrás compartida con el panel de admin — congela el número
+  // mientras `timerPaused` esté activo en vez de dejar que caiga a 00:00
+  // solo porque `timerEndsAt` se quedó parado en el instante de pausar. Ver
+  // public/matchTimer.js y docs/ACCIONES.md sección 6.
+  const matchTimer = CondejorgeMatchTimer.createMatchTimerTracker();
   setInterval(() => {
-    if (!lastState || !lastState.timerEndsAt) { document.getElementById('timer').textContent = '--:--'; return; }
-    const remainingMs = Math.max(0, lastState.timerEndsAt - Date.now());
-    const seconds = Math.ceil(remainingMs / 1000);
-    document.getElementById('timer').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+    document.getElementById('timer').textContent = matchTimer.formatRemaining(lastState);
   }, 250);
 </script>
 </body>

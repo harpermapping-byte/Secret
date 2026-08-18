@@ -424,12 +424,19 @@ function getPublicState() {
     summaryBlocks: match.phase === PHASE_SUMMARY ? match.summaryBlocks : [],
     winnerFactionNumber: match.winnerFactionNumber,
     timerEndsAt: match.timer?.endsAt ?? null,
+    // En pausa, `timerEndsAt` se queda congelado en el instante en que se
+    // pausó (ver pauseTimer()) — sin esto ningun cliente sabe que ese valor
+    // ya no cuenta y la cuenta atras se ve caer a 00:00 sola. Va en el
+    // estado público (no solo en el de admin) porque también hace falta en
+    // la web pública para congelar su propia cuenta atrás — ver
+    // `public/matchTimer.js` y docs/ACCIONES.md.
+    timerPaused: !!match.timer?.paused,
   };
 }
 
 function getAdminState() {
   if (!match) return { phase: null, chatLog: recentChatLog };
-  return { ...getPublicState(), config: match.config, timerPaused: !!match.timer?.paused, chatLog: recentChatLog };
+  return { ...getPublicState(), config: match.config, chatLog: recentChatLog };
 }
 
 /**
