@@ -26,7 +26,7 @@
      hasta que el admin cree una partida nueva — solo se avisa con esta franja
      flotante, sin tapar la pantalla. Abajo y centrado a propósito, lejos de la
      cabecera y de la fila de facciones (que puede ocupar varias líneas). */
-  #winner { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:25; display:none;
+  #winner { position:fixed; bottom:calc(var(--map-margin-y) + 24px); left:50%; transform:translateX(-50%); z-index:25; display:none;
             max-width:min(92vw, 640px); padding:12px 22px; border-radius:12px; font-size:16px; text-align:center;
             background:#101c26ee; border:1px solid #223140; box-shadow:0 8px 24px rgba(0,0,0,.4); }
   #winner.visible { display:block; }

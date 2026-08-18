@@ -6,10 +6,15 @@
  * Cada página añade encima, en su propio <style>, solo lo que le es propio
  * (formularios de admin, popups de la web pública, etc).
  */
-:root { color-scheme: dark; }
+/* Margen arriba/abajo del mapa (deja ver el fondo de la pagina por encima y
+   por debajo, como en streamer-wars.com) para que el mapa no llegue nunca
+   pegado al borde superior/inferior de la pantalla — el mapa ya no ocupa el
+   100% de la altura, "cover" se calcula sobre este viewport mas pequeño. */
+:root { color-scheme: dark; --map-margin-y: 6vh; }
 html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, sans-serif; background:#070d13; color:#eaf7ff; }
 
-#mapViewport { position:fixed; inset:0; overflow:hidden; background:#070d13; cursor:grab; touch-action:none; }
+#mapViewport { position:fixed; top:var(--map-margin-y); bottom:var(--map-margin-y); left:0; right:0;
+               overflow:hidden; background:#070d13; cursor:grab; touch-action:none; }
 #mapViewport.dragging { cursor:grabbing; }
 #mapCanvas { position:absolute; top:0; left:0; transform-origin:0 0; }
 
@@ -28,7 +33,7 @@ html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, san
 
 .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
 
-.mapToolbar { position:fixed; bottom:18px; left:18px; z-index:20; display:flex; gap:6px; }
+.mapToolbar { position:fixed; bottom:calc(var(--map-margin-y) + 18px); left:18px; z-index:20; display:flex; gap:6px; }
 .mapToolbar button { background:#152029ee; color:#8fd9f5; border:1px solid #223140; border-radius:8px;
                       padding:8px 12px; font-size:15px; cursor:pointer; }
 .mapToolbar button:hover { background:#1c2b38; }

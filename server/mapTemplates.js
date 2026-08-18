@@ -82,13 +82,20 @@ function generateMap({ tileCount, factionCount, mode }) {
  * semillas, se relaja un poco y se reintenta.
  */
 function placeSeedsOnLand(tileCount) {
+  // Barajar `landCells` (cientos de miles de celdas a esta resolucion) es lo
+  // caro de esta funcion, asi que se hace UNA sola vez y se reutiliza el
+  // mismo orden en todas las rondas de relajacion de abajo — cada ronda
+  // vuelve a examinar la misma lista (algunos candidatos rechazados por
+  // estar muy cerca de una semilla pueden pasar en la siguiente ronda, al
+  // relajarse `minDist`), pero sin pagar otro barajado completo cada vez.
+  const candidates = shuffle(landCells);
   let minDist = Math.sqrt(landCells.length / tileCount) * 0.7;
   const seeds = [];
 
   for (let round = 0; round < 25 && seeds.length < tileCount; round++) {
-    for (const candidate of shuffle(landCells)) {
+    const minDistSq = minDist * minDist;
+    for (const candidate of candidates) {
       if (seeds.length >= tileCount) break;
-      const minDistSq = minDist * minDist;
       const farEnough = seeds.every((s) => (s.x - candidate.x) ** 2 + (s.y - candidate.y) ** 2 >= minDistSq);
       if (farEnough) seeds.push(candidate);
     }
@@ -100,7 +107,7 @@ function placeSeedsOnLand(tileCount) {
   // distancia minima — el orden de `seeds` define el id de cada tile.
   if (seeds.length < tileCount) {
     const used = new Set(seeds.map((s) => `${s.x},${s.y}`));
-    for (const candidate of shuffle(landCells)) {
+    for (const candidate of candidates) {
       if (seeds.length >= tileCount) break;
       const key = `${candidate.x},${candidate.y}`;
       if (!used.has(key)) {
