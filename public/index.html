@@ -71,6 +71,7 @@
       <div id="timer">--:--</div>
       <button class="headerBtn" onclick="openLeaderboard()">🏆 Clasificación</button>
       <button class="headerBtn" id="rosterToggle" onclick="toggleRoster()">👥 Jugadores</button>
+      <button class="headerBtn" onclick="openCommands()">❓ Comandos</button>
     </div>
   </div>
 
@@ -98,6 +99,15 @@
       <h2>Clasificación de facciones</h2>
       <div class="modalSubtitle">Estado actual de la partida</div>
       <div id="leaderboardBody"></div>
+    </div>
+  </div>
+
+  <div id="commandsModal" class="modalOverlay hidden">
+    <div class="modalBox">
+      <button class="modalClose" onclick="closeCommands()">✕</button>
+      <h2>Comandos del chat</h2>
+      <div class="modalSubtitle">Escribe esto en el chat de Twitch para jugar — cada uno solo funciona en su fase</div>
+      <div id="commandsBody"></div>
     </div>
   </div>
 
@@ -314,6 +324,37 @@
             .join('')}
         </tbody>
       </table>`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Popup de comandos: lista estatica (no depende del estado del servidor)
+  // con la sintaxis de cada comando de chat, que hace, y en que fase vale
+  // — pensada tambien como ayuda para diagnosticar "escribi !faccion1 y no
+  // paso nada" (la razon mas comun es que la fase todavia no es la que toca).
+  // Ver docs/ACCIONES.md seccion 2 para la tabla fuente de esta lista.
+  // ---------------------------------------------------------------------
+  const CHAT_COMMANDS = [
+    { cmd: '!faccion1, !faccion2, ...', phase: 'Reclutamiento', desc: 'Te unes a esa facción (el número es el que muestra el admin). Solo se puede una vez por partida, y solo mientras dura la fase de Reclutamiento.' },
+    { cmd: '!industria', phase: 'Acción', desc: 'Votas para que tu facción produzca industria esta ronda (con la que se desbloquean mejoras).' },
+    { cmd: '!ataque <N>', phase: 'Acción', desc: 'Votas para atacar el territorio número N (tiene que ser vecino de un territorio tuyo).' },
+    { cmd: '!defender', phase: 'Acción', desc: 'Votas para reforzar la defensa de tu facción esta ronda.' },
+    { cmd: '!expansion', phase: 'Acción', desc: 'Votas para expandirte a territorio neutral vecino (no hace nada si la partida es de "reparto total", sin neutrales).' },
+    { cmd: '!especial', phase: 'Acción', desc: 'Votas para activar la habilidad especial de tu facción cuando llegue al % necesario.' },
+    { cmd: '!alianza <N>', phase: 'Acción', desc: 'Votas para proponer una alianza con la facción número N (solo si el admin activó alianzas al crear la partida).' },
+  ];
+
+  function openCommands() {
+    const body = document.getElementById('commandsBody');
+    body.innerHTML = CHAT_COMMANDS.map((c) => `
+      <div class="summaryLine">
+        <strong>${c.cmd}</strong> — <span style="opacity:.7">fase ${c.phase}</span><br>
+        ${c.desc}
+      </div>`).join('') + `<div class="summaryEmpty" style="margin-top:10px">Si escribes un comando y no pasa nada, lo más normal es que la partida no esté en la fase que ese comando necesita — mira el texto de "Fase:" arriba a la izquierda.</div>`;
+    document.getElementById('commandsModal').classList.remove('hidden');
+  }
+
+  function closeCommands() {
+    document.getElementById('commandsModal').classList.add('hidden');
   }
 
   function renderRoster(state) {

@@ -14,12 +14,15 @@
  */
 (function () {
   // Tamaño en pantalla (a escala 1) de cada celda del raster. El raster en sí
-  // (server/worldLandMask.js) es 2200x1151 celdas — bajamos este valor de 6 a
-  // 2 respecto a la version anterior (raster mas pequeño) para que el canvas
-  // final no se dispare de tamaño (2200*2=4400 x 1151*2=2302px, ~10M pixeles,
-  // manejable) mientras el raster en sí sigue teniendo 5x mas detalle que
-  // antes, dejando sitio para futuras ciudades/detalle sin perder fluidez.
-  const BLOCK_PX = 2;
+  // (server/worldLandMask.js) es ahora 4400x2302 celdas (el doble de detalle
+  // que la version anterior, 2200x1151) — bajamos este valor de 2 a 1 para
+  // que el canvas final en pantalla NO cambie de tamaño (4400*1=4400 x
+  // 2302*1=2302px, los mismos ~10M pixeles de antes, manejable) mientras el
+  // raster en sí trae el doble de detalle nativo: antes cada celda se veia
+  // como un bloque de color liso al hacer zoom (se notaba "pixelado"); ahora
+  // cada celda representa la mitad de area de planeta, asi que los bordes se
+  // ven mucho mas finos sin tener que agrandar el canvas ni perder fluidez.
+  const BLOCK_PX = 1;
   const NEUTRAL_COLOR = '#3a3f45';
   const BORDER_COLOR = '#050a10'; // borde entre dos territorios de tierra
   const COAST_COLOR = '#5fb8d9'; // borde entre tierra y oceano (linea de costa)

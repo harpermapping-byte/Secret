@@ -38,6 +38,20 @@
   #liveState { margin-top:16px; }
   #liveState summary { cursor:pointer; font-size:12px; color:#8fd9f5; }
   #liveState pre { margin-top:8px; font-size:11px; white-space:pre-wrap; background:#0f1a22; padding:10px; border-radius:8px; max-height:260px; overflow:auto; }
+
+  #botStatusBox { font-size:12px; background:#152029; border-radius:10px; padding:8px 10px; display:flex; flex-direction:column; gap:4px; }
+  #botStatusBox .botStateLine { display:flex; align-items:center; gap:6px; font-weight:600; }
+  #botStatusBox .botDot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+  #botStatusBox .botDetail { color:#8fd9f5; }
+  #botStatusBox .botError { color:#ffb4a2; }
+
+  #chatLogBox { margin-top:8px; display:flex; flex-direction:column; gap:4px; max-height:220px; overflow:auto; }
+  #chatLogBox .chatLogEmpty { font-size:12px; opacity:.5; }
+  .chatLogRow { font-size:11px; background:#0f1a22; border-left:3px solid #223140; border-radius:5px; padding:4px 6px; }
+  .chatLogRow.ok { border-left-color:#7fe0a8; }
+  .chatLogRow.rejected { border-left-color:#ffb4a2; }
+  .chatLogRow .clUser { font-weight:600; }
+  .chatLogRow .clReason { opacity:.7; }
 </style>
 </head>
 <body>
@@ -118,6 +132,11 @@
     <div id="adminPanel" class="sidePanel">
       <h2>Facciones</h2>
       <div class="factionCards" id="factionCards"></div>
+
+      <h2 style="margin-top:16px">Bot de Twitch</h2>
+      <div id="botStatusBox"></div>
+      <div id="chatLogBox"></div>
+
       <details id="liveState">
         <summary>Ver estado en crudo (JSON, para depurar)</summary>
         <pre id="liveStateJson"></pre>
@@ -255,7 +274,76 @@
 
     mapCtrl.setTiles(state.tiles || [], state.factions || []);
     renderFactionCards(state);
+    renderBotStatus(state.botStatus);
+    renderChatLog(state.chatLog);
     document.getElementById('liveStateJson').textContent = JSON.stringify(state, null, 2);
+  }
+
+  const BOT_STATE_LABELS = {
+    disconnected: 'Desconectado',
+    connecting: 'Conectando…',
+    connected: 'Conectado a Twitch (uniéndose a canales…)',
+    reconnecting: 'Conexión perdida, reintentando…',
+    error: 'Error de conexión',
+  };
+  const BOT_STATE_COLORS = {
+    disconnected: '#556270',
+    connecting: '#f4c95d',
+    connected: '#f4c95d',
+    reconnecting: '#ffb4a2',
+    error: '#ff5a5a',
+  };
+
+  /**
+   * Muestra de un vistazo si el bot esta realmente conectado y unido al chat
+   * de Twitch — sin esto, un fallo de conexion (canal mal escrito, Node
+   * viejo sin WebSocket, red bloqueada) es invisible: el admin solo veria
+   * que "!faccion1" no hace nada, sin saber por que. Ver docs/ACCIONES.md.
+   */
+  function renderBotStatus(botStatus) {
+    const box = document.getElementById('botStatusBox');
+    if (!botStatus) {
+      box.innerHTML = '<span class="botDetail">El bot todavía no se ha conectado (pulsa "Iniciar partida").</span>';
+      return;
+    }
+    const joined = botStatus.joinedChannels || [];
+    const configured = botStatus.channels || [];
+    const dotColor = BOT_STATE_COLORS[botStatus.state] || '#556270';
+    const label = BOT_STATE_LABELS[botStatus.state] || botStatus.state;
+    const isFullyJoined = botStatus.state === 'connected' && configured.length > 0 && joined.length === configured.length;
+
+    let html = `<div class="botStateLine"><span class="botDot" style="background:${dotColor}"></span>${isFullyJoined ? 'Unido al chat, escuchando comandos' : label}</div>`;
+    html += `<div class="botDetail">Canales configurados: ${configured.length ? configured.join(', ') : '—'}</div>`;
+    html += `<div class="botDetail">Unido a: ${joined.length ? joined.join(', ') : 'ninguno todavía'}</div>`;
+    if (botStatus.lastMessageAt) {
+      html += `<div class="botDetail">Último mensaje de chat visto: ${new Date(botStatus.lastMessageAt).toLocaleTimeString()}</div>`;
+    } else {
+      html += `<div class="botDetail">Todavía no se ha visto ningún mensaje de chat — si esto no cambia, revisa que el canal esté bien escrito y que estéis escribiendo en ese canal.</div>`;
+    }
+    if (botStatus.lastError) {
+      html += `<div class="botError">⚠ ${botStatus.lastError}</div>`;
+    }
+    box.innerHTML = html;
+  }
+
+  /**
+   * Ultimos intentos de comando de chat reconocidos (aceptados o rechazados
+   * con motivo) — ver server/gameEngine.js `pushChatLog`. Solo se registran
+   * comandos con sintaxis valida (ej. "!faccion1"), no cualquier mensaje.
+   */
+  function renderChatLog(chatLog) {
+    const box = document.getElementById('chatLogBox');
+    if (!chatLog || chatLog.length === 0) {
+      box.innerHTML = '<div class="chatLogEmpty">Todavía no se ha visto ningún comando de chat reconocido.</div>';
+      return;
+    }
+    box.innerHTML = chatLog.map((entry) => {
+      const time = new Date(entry.time).toLocaleTimeString();
+      return `<div class="chatLogRow ${entry.ok ? 'ok' : 'rejected'}">
+        <span class="clUser">${entry.username}</span> — "${entry.text}" — ${time}
+        <div class="clReason">${entry.ok ? '✓' : '✕'} ${entry.reason}</div>
+      </div>`;
+    }).join('');
   }
 
   function renderFactionCards(state) {

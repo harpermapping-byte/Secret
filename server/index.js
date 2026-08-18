@@ -108,9 +108,33 @@ function connectBotOnce() {
   });
 }
 
+/**
+ * El estado de admin combina el estado de partida del motor con el estado de
+ * conexion del bot de Twitch (que vive aparte, en twitchBot.js, porque no
+ * depende de que haya una partida creada) — asi el panel de admin puede ver
+ * de un vistazo si el bot esta realmente conectado/unido al canal, sin lo
+ * cual un fallo de conexion es invisible (solo se veria que "!faccion1" no
+ * hace nada). Ver docs/ACCIONES.md.
+ */
+function buildAdminState() {
+  return { ...engine.getAdminState(), botStatus: twitchBot.getStatus() };
+}
+
+function broadcastAdminState() {
+  wsApp.broadcast(JSON.stringify({ type: 'state:admin', payload: buildAdminState() }), 'admin');
+}
+
 engine.setStateChangeListener(() => {
   wsApp.broadcast(JSON.stringify({ type: 'state:public', payload: engine.getPublicState() }), 'public');
-  wsApp.broadcast(JSON.stringify({ type: 'state:admin', payload: engine.getAdminState() }), 'admin');
+  broadcastAdminState();
+});
+
+// El estado del bot cambia de forma independiente al estado de la partida
+// (conectando, reconectando, error, union a canal confirmada...), asi que
+// necesita su propio disparador de broadcast en vez de esperar al siguiente
+// cambio de partida.
+twitchBot.onStatusChange(() => {
+  broadcastAdminState();
 });
 
 wsApp.onConnect((client) => {
@@ -120,8 +144,11 @@ wsApp.onConnect((client) => {
   const layout = engine.getMapLayout();
   if (layout) wsApp.send(client, JSON.stringify({ type: 'map:layout', payload: layout }));
 
-  const payload = client.role === 'admin' ? engine.getAdminState() : engine.getPublicState();
-  wsApp.send(client, JSON.stringify({ type: client.role === 'admin' ? 'state:admin' : 'state:public', payload }));
+  if (client.role === 'admin') {
+    wsApp.send(client, JSON.stringify({ type: 'state:admin', payload: buildAdminState() }));
+  } else {
+    wsApp.send(client, JSON.stringify({ type: 'state:public', payload: engine.getPublicState() }));
+  }
 });
 
 wsApp.server.listen(PORT, () => {

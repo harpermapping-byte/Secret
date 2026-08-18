@@ -31,6 +31,19 @@ const SUMMARY_MS_PER_BLOCK = 12000; // 10-15s por bloque, ver docs/GDD seccion 5
 let match = null; // unica partida activa a la vez (ver docs/GDD "Alcance de v1")
 let onStateChangeCallback = null;
 
+// Registro de los ultimos comandos de chat RECONOCIDOS (aceptados o
+// rechazados) que ha visto el motor, para que el panel de admin pueda ver
+// justo por que un !faccion1 no hizo nada sin tener que mirar los logs del
+// servidor — no depende de `match`, sobrevive a crear partidas nuevas. Solo
+// se registran comandos reconocidos (ver parseCommand): el chat normal no
+// entra aqui, seria ruido. Ver docs/ACCIONES.md.
+const MAX_CHAT_LOG = 15;
+let recentChatLog = [];
+
+function pushChatLog(entry) {
+  recentChatLog = [{ time: Date.now(), ...entry }, ...recentChatLog].slice(0, MAX_CHAT_LOG);
+}
+
 /** El servidor WS se suscribe aqui para retransmitir el estado cada vez que cambia algo. */
 function setStateChangeListener(fn) {
   onStateChangeCallback = fn;
@@ -135,20 +148,22 @@ function handleChatCommand(userId, username, channel, text) {
 
   const requiredPhase = VALID_PHASE_BY_ACTION[parsed.type];
   if (match.phase !== requiredPhase) {
-    console.log(
-      `[gameEngine] "${text}" de ${username} ignorado: hace falta la fase "${requiredPhase}" y la partida esta en "${match.phase}"`
-    );
+    const msg = `fase incorrecta (hace falta "${requiredPhase}", la partida esta en "${match.phase}")`;
+    console.log(`[gameEngine] "${text}" de ${username} ignorado: ${msg}`);
+    pushChatLog({ username, text, ok: false, reason: msg });
     return;
   }
 
   if (parsed.type === ACTION_JOIN_FACTION) {
     const ok = joinFaction(userId, username, parsed.targetFactionNumber);
     console.log(`[gameEngine] ${username} -> facción ${parsed.targetFactionNumber}: ${ok ? 'OK' : 'RECHAZADO (numero de facción invalido)'}`);
+    pushChatLog({ username, text, ok, reason: ok ? `unido a la facción ${parsed.targetFactionNumber}` : 'número de facción inválido' });
     return;
   }
 
   const ok = castAction(userId, parsed.type, parsed.targetFactionNumber);
   console.log(`[gameEngine] ${username} -> ${parsed.type}: ${ok ? 'OK' : 'RECHAZADO (revisa si esta unido y vivo)'}`);
+  pushChatLog({ username, text, ok, reason: ok ? 'aceptado' : 'rechazado (revisa si está unido a una facción y vivo)' });
 }
 
 function joinFaction(userId, username, factionNumber) {
@@ -412,8 +427,8 @@ function getPublicState() {
 }
 
 function getAdminState() {
-  if (!match) return { phase: null };
-  return { ...getPublicState(), config: match.config, timerPaused: !!match.timer?.paused };
+  if (!match) return { phase: null, chatLog: recentChatLog };
+  return { ...getPublicState(), config: match.config, timerPaused: !!match.timer?.paused, chatLog: recentChatLog };
 }
 
 /**
