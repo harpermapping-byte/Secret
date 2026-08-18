@@ -100,6 +100,15 @@
 
   <div id="winner"></div>
 
+  <div id="matchEndModal" class="modalOverlay hidden">
+    <div class="modalBox">
+      <button class="modalClose" onclick="closeMatchEndModal()">✕</button>
+      <h2 id="matchEndModalTitle">Partida finalizada</h2>
+      <div class="modalSubtitle">Resumen final — se mantiene así hasta que el admin empiece otra partida</div>
+      <div class="factionCards" id="matchEndFactionCards"></div>
+    </div>
+  </div>
+
   <div id="summaryModal" class="modalOverlay hidden">
     <div class="modalBox">
       <button class="modalClose" onclick="closeSummaryModal()">✕</button>
@@ -136,6 +145,7 @@
   let lastPhase = null;
   let summaryClosedByUser = false;
   let factionsPanelAutoOpened = false; // ver handleFactionsPanelAutoOpen()
+  let matchEndModalAutoOpened = false; // ver handleMatchEndModal()
 
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
@@ -159,6 +169,7 @@
     handleSummaryModal(state);
 
     renderEndBanner(state);
+    handleMatchEndModal(state);
   }
 
   /**
@@ -189,7 +200,8 @@
    * quedan tal cual estaban — nada se limpia — hasta que el admin cree una
    * partida nueva (en ese momento llega un `map:layout` + `state:public`
    * nuevos y todo se repinta solo). Este banner es solo un aviso flotante,
-   * no bloquea nada de lo que ya se ve. Ver docs/ACCIONES.md.
+   * no bloquea nada de lo que ya se ve — y sirve para volver a abrir el
+   * resumen final (`matchEndModal`) si el espectador lo cerró. Ver docs/ACCIONES.md.
    */
   function renderEndBanner(state) {
     const winnerEl = document.getElementById('winner');
@@ -197,10 +209,49 @@
       winnerEl.classList.remove('visible');
       return;
     }
-    winnerEl.innerHTML = state.winnerFactionNumber
-      ? `🏆 ¡Gana ${fchip(state, state.winnerFactionNumber)}! Partida finalizada — este mapa se queda así hasta la próxima partida.`
-      : 'Partida finalizada — este mapa se queda así hasta la próxima partida.';
+    const headline = state.winnerFactionNumber
+      ? `🏆 ¡Gana ${fchip(state, state.winnerFactionNumber)}! Partida finalizada.`
+      : 'Partida finalizada.';
+    winnerEl.innerHTML = `${headline} <span style="opacity:.6; text-decoration:underline; cursor:pointer" onclick="openMatchEndModal()">ver resumen</span>`;
     winnerEl.classList.add('visible');
+  }
+
+  /**
+   * Popup a pantalla completa con el resumen final de la partida: se abre
+   * solo la primera vez que se entra en fase "end" (una por partida, igual
+   * que `handleFactionsPanelAutoOpen`), reutilizando `factionCards.js` (las
+   * mismas tarjetas por facción de todo el proyecto, ver docs/ACCIONES.md
+   * seccion 6 "Tarjetas de facción compartidas") en vez de reimplementar
+   * el resumen desde cero — el estado en fase "end" ya está congelado
+   * (`getPublicState()` no cambia sus campos al terminar, solo `phase`), así
+   * que las tarjetas muestran los datos finales sin ningún cálculo aparte.
+   * Se puede cerrar con la X y reabrir con el aviso de abajo ("ver resumen").
+   */
+  function handleMatchEndModal(state) {
+    if (state.phase === 'config' || !state.phase) {
+      matchEndModalAutoOpened = false;
+      return;
+    }
+    if (state.phase !== 'end') return;
+
+    CondejorgeFactionCards.renderFactionCards(document.getElementById('matchEndFactionCards'), state);
+    document.getElementById('matchEndModalTitle').textContent = state.winnerFactionNumber
+      ? `🏆 Partida finalizada — gana ${factionByNumber(state, state.winnerFactionNumber)?.name || ''}`
+      : 'Partida finalizada';
+
+    if (!matchEndModalAutoOpened) {
+      matchEndModalAutoOpened = true;
+      document.getElementById('matchEndModal').classList.remove('hidden');
+    }
+  }
+
+  function openMatchEndModal() {
+    if (lastState) CondejorgeFactionCards.renderFactionCards(document.getElementById('matchEndFactionCards'), lastState);
+    document.getElementById('matchEndModal').classList.remove('hidden');
+  }
+
+  function closeMatchEndModal() {
+    document.getElementById('matchEndModal').classList.add('hidden');
   }
 
   // Dibujado del mapa: delegado por completo en public/mapRenderer.js (el
@@ -283,6 +334,7 @@
       summarySection('Industria', industryLines(state, byKind.industry || [], byKind.industryUnlocks || [])),
       summarySection('Combates', (byKind.combats || []).map((c) => combatLine(state, c))),
       summarySection('Bajas', (byKind.casualties || []).map((c) => casualtyLine(state, c))),
+      summarySection('Eliminaciones', (byKind.eliminations || []).map((e) => eliminationLine(state, e))),
     ].join('');
   }
 
@@ -328,6 +380,16 @@
 
   function casualtyLine(state, c) {
     return `${c.username} (${fchip(state, c.factionNumber)}) ha caído`;
+  }
+
+  /**
+   * Cuando una facción se queda sin miembros vivos, el resto de su territorio
+   * pasa a neutral de golpe (ver `checkFactionElimination` en
+   * `server/rules/territory.js`) — esta línea es solo el aviso de ese suceso
+   * dentro del resumen de la ronda en la que pasó.
+   */
+  function eliminationLine(state, e) {
+    return `☠️ ${fchip(state, e.factionNumber)} se ha quedado sin miembros — su territorio ha pasado a ser neutral (eliminada por ${fchip(state, e.eliminatedByFactionNumber)})`;
   }
 
   // ---------------------------------------------------------------------

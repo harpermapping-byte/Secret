@@ -2,7 +2,7 @@
 
 const { ACTION_INDUSTRY } = require('../commands');
 const { applyCasualties, shuffle } = require('./shared');
-const { factionsAreAdjacent, factionByNumber } = require('./territory');
+const { factionsAreAdjacent, factionByNumber, checkFactionElimination } = require('./territory');
 
 // Valores de ejemplo, pendientes de afinar (ver docs/GDD seccion 11).
 const PASSIVE_INDUSTRY_PER_TERRITORY = 0.2;
@@ -82,6 +82,7 @@ function applyBombardeo(match, context, faction) {
   const targetFaction = factionByNumber(match, targetNumber);
   if (!targetFaction || targetFaction.territoryIds.length === 0) return;
   applyCasualties(match, context, targetNumber, BOMBARDEO_DAMAGE, faction.number);
+  checkFactionElimination(match, context, targetNumber, faction.number);
 }
 
 function applyOperacionEspecial(match, context, faction) {
@@ -91,6 +92,7 @@ function applyOperacionEspecial(match, context, faction) {
   const target = shuffle(adjacentEnemies)[0];
   if (!target) return;
   applyCasualties(match, context, target.number, OPESPECIAL_DAMAGE, faction.number);
+  checkFactionElimination(match, context, target.number, faction.number);
 }
 
 module.exports = { resolveIndustry, INDUSTRY_TIERS };

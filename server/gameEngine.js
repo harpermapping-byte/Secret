@@ -314,7 +314,7 @@ function tallyActions() {
     forceInactive: new Set(),
     // Sucesos de la ronda que van llenando resolveExpansion/resolveCombat/resolveIndustry a medida
     // que ocurren, para poder construir despues el resumen por fases (ver docs/ACCIONES.md seccion 6).
-    roundEvents: { conquests: [], combats: [], industryUnlocks: [] },
+    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [] },
   };
 }
 
@@ -337,6 +337,7 @@ function buildRoundSummary(context) {
     { kind: 'conquests', data: context.roundEvents.conquests },
     { kind: 'combats', data: context.roundEvents.combats },
     { kind: 'industryUnlocks', data: context.roundEvents.industryUnlocks },
+    { kind: 'eliminations', data: context.roundEvents.eliminations },
     {
       kind: 'casualties',
       data: [...match.players.values()]

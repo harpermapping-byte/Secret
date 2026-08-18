@@ -2,7 +2,7 @@
 
 const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
 const { sumRandomPower, applyCasualties } = require('./shared');
-const { transferTile, findWeakestBorderTile, factionByNumber } = require('./territory');
+const { transferTile, findWeakestBorderTile, factionByNumber, checkFactionElimination } = require('./territory');
 
 // Defensa pasiva minima por casilla controlada, para que nadie quede en 0 absoluto.
 // Valor de ejemplo, pendiente de afinar.
@@ -44,6 +44,11 @@ function resolveCombat(match, context) {
         });
       }
 
+      // Si esta bajada de tropas deja a la faccion defensora sin miembros vivos, el resto de su
+      // territorio (la casilla de arriba ya no cuenta, se la quedo el atacante) pasa a neutral de
+      // golpe en vez de quedarse plantado sin dueño util — ver docs/ACCIONES.md seccion 6.
+      checkFactionElimination(match, context, defenderNumber, winningAttacker.factionNumber);
+
       match.lastAttackerOf[defenderNumber] = winningAttacker.factionNumber;
       for (const attacker of attackers) {
         context.roundEvents.combats.push({
@@ -58,6 +63,7 @@ function resolveCombat(match, context) {
       for (const attacker of attackers) {
         const share = attacker.userIds.length / totalAttackers;
         applyCasualties(match, context, attacker.factionNumber, Math.round(excess * share), defenderNumber);
+        checkFactionElimination(match, context, attacker.factionNumber, defenderNumber);
         context.roundEvents.combats.push({
           attackerFactionNumber: attacker.factionNumber,
           defenderFactionNumber: defenderNumber,
