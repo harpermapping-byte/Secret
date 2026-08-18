@@ -25,15 +25,8 @@
   #status { font-size:13px; color:#7fe0a8; margin-top:10px; }
   .hidden { display:none; }
 
-  .factionCards { display:flex; flex-direction:column; gap:10px; }
-  .factionCard { display:flex; flex-wrap:wrap; align-items:center; gap:8px; background:#152029; border-radius:10px; padding:8px 10px;
-                 border-left: 5px solid #223140; font-size:12px; }
-  .factionCard .fname { font-weight:600; flex:1 0 100%; font-size:13px; }
-  .factionCard .fstat { color:#8fd9f5; white-space:nowrap; }
-
-  .rosterMini { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
-  .rosterMini span { font-size:11px; background:#0f1a22; border:1px solid #223140; border-radius:5px; padding:2px 6px; }
-  .rosterMini span.dead { opacity:.4; text-decoration:line-through; }
+  /* .factionCards/.factionCard/.rosterMini viven en shared.css — las usan
+     tanto este panel como el de la web pública (ver public/factionCards.js). */
 
   #liveState { margin-top:16px; }
   #liveState summary { cursor:pointer; font-size:12px; color:#8fd9f5; }
@@ -104,6 +97,7 @@
   <div id="liveControls" class="hidden">
     <div id="mapViewport">
       <canvas id="mapCanvas"></canvas>
+      <canvas id="mapMarkers"></canvas>
     </div>
 
     <div class="mapToolbar">
@@ -145,6 +139,7 @@
   </div>
 
 <script src="/mapRenderer.js"></script>
+<script src="/factionCards.js"></script>
 <script>
   let socket = null;
   const defaultFactions = [
@@ -229,6 +224,7 @@
   const mapCtrl = CondejorgeMap.createMapController({
     viewportEl: document.getElementById('mapViewport'),
     canvasEl: document.getElementById('mapCanvas'),
+    markersEl: document.getElementById('mapMarkers'),
   });
 
   function mapZoom(factor) {
@@ -272,8 +268,8 @@
     document.getElementById('liveActionButtons').classList.toggle('hidden', isEnded);
     document.getElementById('newMatchBtn').classList.toggle('hidden', !isEnded);
 
-    mapCtrl.setTiles(state.tiles || [], state.factions || []);
-    renderFactionCards(state);
+    mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || []);
+    CondejorgeFactionCards.renderFactionCards(document.getElementById('factionCards'), state);
     renderBotStatus(state.botStatus);
     renderChatLog(state.chatLog);
     document.getElementById('liveStateJson').textContent = JSON.stringify(state, null, 2);
@@ -344,43 +340,6 @@
         <div class="clReason">${entry.ok ? '✓' : '✕'} ${entry.reason}</div>
       </div>`;
     }).join('');
-  }
-
-  function renderFactionCards(state) {
-    const container = document.getElementById('factionCards');
-    container.innerHTML = '';
-    (state.factions || []).forEach((f) => {
-      const playersInFaction = (state.players || []).filter((p) => p.factionNumber === f.number);
-      const aliveCount = playersInFaction.filter((p) => p.alive).length;
-
-      const card = document.createElement('div');
-      card.className = 'factionCard';
-      card.style.borderLeftColor = f.color;
-      card.innerHTML = `
-        <span class="dot" style="width:10px;height:10px;border-radius:50%;background:${f.color};display:inline-block"></span>
-        <span class="fname">#${f.number} ${f.name}</span>
-        <span class="fstat">${aliveCount}/${playersInFaction.length} vivos</span>
-        <span class="fstat">${f.territoryCount} terr.</span>
-        <span class="fstat">industria ${f.industry.toFixed(1)} (+${(f.industryGainedLastRound || 0).toFixed(1)})</span>
-        <span class="fstat">${f.killsCaused || 0} bajas causadas</span>
-      `;
-      const roster = document.createElement('div');
-      roster.className = 'rosterMini';
-      if (playersInFaction.length === 0) {
-        roster.innerHTML = '<span style="opacity:.5">nadie unido todavía</span>';
-      } else {
-        playersInFaction.forEach((p) => {
-          const tag = document.createElement('span');
-          tag.className = p.alive ? '' : 'dead';
-          tag.textContent = `${p.username}${p.unitType === 'tank' ? ' 🛡' : ''}`;
-          roster.appendChild(tag);
-        });
-      }
-      const wrap = document.createElement('div');
-      wrap.appendChild(card);
-      wrap.appendChild(roster);
-      container.appendChild(wrap);
-    });
   }
 
 </script>

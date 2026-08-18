@@ -8,9 +8,6 @@
 <style>
   /* Estilos propios de esta pagina; lo compartido con el admin (mapa a pantalla
      completa, cabecera flotante, panel lateral) vive en shared.css. */
-  #factions { position:fixed; top:52px; left:18px; z-index:20; display:flex; gap:8px; flex-wrap:wrap; max-width:70vw; }
-  .faction-chip { padding:5px 10px; border-radius:20px; font-size:12px; display:flex; gap:6px; align-items:center;
-                  background:#101c26ee; border:1px solid #223140; }
   #phase { color:#8fd9f5; font-size:13px; }
   #timer { font-variant-numeric: tabular-nums; font-size: 18px; }
 
@@ -20,6 +17,13 @@
   .roster-empty { font-size:12px; opacity:.5; font-style: italic; }
   .player { padding:5px 8px; border-radius:6px; background:#152029; font-size:13px; border:1px solid #223140; margin-bottom:6px; }
   .player.dead { opacity:0.35; text-decoration: line-through; }
+
+  /* Buscador de jugador (arriba del panel "👥 Jugadores"): escribir un nombre
+     y confirmar mueve el zoom del mapa hasta su marcador — ver
+     mapCtrl.focusOnPlayer() en public/mapRenderer.js. */
+  .playerSearchRow { display:flex; gap:6px; margin-bottom:14px; }
+  #playerSearchInput { flex:1; padding:7px 8px; border-radius:6px; border:1px solid #223140; background:#152029; color:#eaf7ff; font-size:13px; box-sizing:border-box; }
+  #playerSearchFeedback { font-size:11px; color:#ffb4a2; margin:-8px 0 12px; min-height:14px; }
 
   /* Banner NO bloqueante: tras terminar la partida el mapa y las estadisticas
      siguen totalmente visibles e interactivos (zoom, clasificacion, roster)
@@ -56,6 +60,7 @@
 <body>
   <div id="mapViewport">
     <canvas id="mapCanvas"></canvas>
+    <canvas id="mapMarkers"></canvas>
   </div>
 
   <div class="mapToolbar">
@@ -65,7 +70,10 @@
   </div>
 
   <div class="overlayTopBar">
-    <h1>Condejorge Wars <span style="opacity:.5">(placeholders v1)</span></h1>
+    <div class="topLeft">
+      <h1>Condejorge Wars <span style="opacity:.5">(placeholders v1)</span></h1>
+      <button class="headerBtn" id="factionsToggle" onclick="toggleFactionsPanel()">🏳️ Facciones</button>
+    </div>
     <div class="topRight">
       <div id="phase">conectando...</div>
       <div id="timer">--:--</div>
@@ -75,10 +83,18 @@
     </div>
   </div>
 
-  <div id="factions"></div>
+  <div id="factionsPanel" class="sidePanel left">
+    <h2>Facciones</h2>
+    <div class="factionCards" id="factionsPanelCards"></div>
+  </div>
 
   <div id="roster" class="sidePanel">
     <h2>Quién se ha unido (por facción)</h2>
+    <div class="playerSearchRow">
+      <input type="text" id="playerSearchInput" placeholder="Buscar jugador…" onkeydown="if(event.key==='Enter') searchPlayer()" />
+      <button class="headerBtn" onclick="searchPlayer()" title="Ir al mapa">🔍</button>
+    </div>
+    <div id="playerSearchFeedback"></div>
     <div id="rosterColumns"></div>
   </div>
 
@@ -112,12 +128,14 @@
   </div>
 
 <script src="/mapRenderer.js"></script>
+<script src="/factionCards.js"></script>
 <script>
   const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
   const socket = new WebSocket(`${wsProtocol}://${location.host}/ws?role=public`);
   let lastState = null;
   let lastPhase = null;
   let summaryClosedByUser = false;
+  let factionsPanelAutoOpened = false; // ver handleFactionsPanelAutoOpen()
 
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
@@ -134,21 +152,36 @@
     lastState = state;
     document.getElementById('phase').textContent = state.phase ? `Fase: ${phaseLabel(state.phase)} (ronda ${state.round})` : 'Esperando a que el admin configure la partida...';
 
-    const factionsEl = document.getElementById('factions');
-    factionsEl.innerHTML = '';
-    (state.factions || []).forEach((f) => {
-      const chip = document.createElement('div');
-      chip.className = 'faction-chip';
-      chip.style.background = '#152029';
-      chip.innerHTML = `<span class="dot" style="background:${f.color}"></span> #${f.number} ${f.name} — ${f.territoryCount} terr. — industria ${f.industry.toFixed(1)}`;
-      factionsEl.appendChild(chip);
-    });
-
-    mapCtrl.setTiles(state.tiles || [], state.factions || []);
+    mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || []);
+    CondejorgeFactionCards.renderFactionCards(document.getElementById('factionsPanelCards'), state);
+    handleFactionsPanelAutoOpen(state);
     renderRoster(state);
     handleSummaryModal(state);
 
     renderEndBanner(state);
+  }
+
+  /**
+   * El botón "🏳️ Facciones" funciona igual que "👥 Jugadores" (togglea
+   * `.open`), pero además el panel sale ya desplegado la primera vez que la
+   * partida deja la fase de Configuración — así se ve de entrada quién juega
+   * cada facción en cuanto empieza, sin tener que buscarlo. Se reinicia el
+   * "ya se auto-abrió" al volver a fase config (partida nueva) para que
+   * vuelva a auto-abrirse la próxima vez que se inicie.
+   */
+  function handleFactionsPanelAutoOpen(state) {
+    if (state.phase === 'config' || !state.phase) {
+      factionsPanelAutoOpened = false;
+      return;
+    }
+    if (!factionsPanelAutoOpened) {
+      factionsPanelAutoOpened = true;
+      document.getElementById('factionsPanel').classList.add('open');
+    }
+  }
+
+  function toggleFactionsPanel() {
+    document.getElementById('factionsPanel').classList.toggle('open');
   }
 
   /**
@@ -177,6 +210,7 @@
   const mapCtrl = CondejorgeMap.createMapController({
     viewportEl: document.getElementById('mapViewport'),
     canvasEl: document.getElementById('mapCanvas'),
+    markersEl: document.getElementById('mapMarkers'),
   });
 
   function mapZoom(factor) {
@@ -189,6 +223,30 @@
 
   function toggleRoster() {
     document.getElementById('roster').classList.toggle('open');
+  }
+
+  /**
+   * Busca (por nombre exacto o parcial, sin mayúsculas) entre los jugadores
+   * vivos con marcador en el mapa y centra el zoom ahí — ver
+   * `mapCtrl.focusOnPlayer()` en public/mapRenderer.js, única función que
+   * calcula "dónde está" un jugador. Si lo encuentra, cierra el panel de
+   * Jugadores para dejar ver el mapa; si no, avisa sin cerrar nada.
+   */
+  function searchPlayer() {
+    const input = document.getElementById('playerSearchInput');
+    const feedback = document.getElementById('playerSearchFeedback');
+    const name = input.value.trim();
+    if (!name) {
+      feedback.textContent = '';
+      return;
+    }
+    const found = mapCtrl.focusOnPlayer(name);
+    if (found) {
+      feedback.textContent = '';
+      document.getElementById('roster').classList.remove('open');
+    } else {
+      feedback.textContent = `No se encontró a "${name}" (¿está vivo y unido a una facción?)`;
+    }
   }
 
   // ---------------------------------------------------------------------

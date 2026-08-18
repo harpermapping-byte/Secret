@@ -17,13 +17,20 @@ html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, san
                overflow:hidden; background:#070d13; cursor:grab; touch-action:none; }
 #mapViewport.dragging { cursor:grabbing; }
 #mapCanvas { position:absolute; top:0; left:0; transform-origin:0 0; }
+/* Capa transparente superpuesta a #mapCanvas: etiquetas de casilla y marcadores
+   de jugador. Va aparte del raster (tierra/oceano) para poder repintarla sola
+   cuando se unen/mueren jugadores sin tener que repintar las ~10M celdas del
+   raster — ver mapRenderer.js, funcion paintOverlay(). pointer-events:none
+   para que no interfiera con el arrastre/zoom del mapa (los gestiona
+   #mapViewport, no las capas de canvas). */
+#mapMarkers { position:absolute; top:0; left:0; transform-origin:0 0; pointer-events:none; }
 
 .overlayTopBar { position:fixed; top:0; left:0; right:0; z-index:20; display:flex; justify-content:space-between;
                  align-items:center; gap:12px; padding:12px 18px; background:linear-gradient(#0c1720ee, #0c172000);
                  pointer-events:none; flex-wrap:wrap; }
 .overlayTopBar > * { pointer-events:auto; }
 .overlayTopBar h1 { font-size: 16px; margin:0; }
-.topRight { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.topRight, .topLeft { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 
 .headerBtn { background:#152029ee; color:#8fd9f5; border:1px solid #223140; border-radius:8px; padding:8px 14px;
              font-size:13px; cursor:pointer; }
@@ -38,9 +45,27 @@ html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, san
                       padding:8px 12px; font-size:15px; cursor:pointer; }
 .mapToolbar button:hover { background:#1c2b38; }
 
-/* Panel lateral desplegable (roster en la web pública, facciones+debug en el admin). */
+/* Panel lateral desplegable (roster/facciones en la web pública, facciones+debug
+   en el admin) — por defecto se desliza desde la derecha. Añadir `.left` lo
+   hace deslizarse desde la izquierda en su lugar (ver panel de facciones de la
+   web pública, `public/index.html`), misma mecánica de abrir/cerrar. */
 .sidePanel { position:fixed; top:0; right:0; bottom:0; width:280px; z-index:19; background:#0c1720f0;
              border-left:1px solid #223140; padding:60px 16px 16px; overflow-y:auto; transform:translateX(100%);
              transition:transform .2s ease; }
 .sidePanel.open { transform:translateX(0); }
+.sidePanel.left { right:auto; left:0; border-left:none; border-right:1px solid #223140; transform:translateX(-100%); }
+.sidePanel.left.open { transform:translateX(0); }
 .sidePanel h2 { font-size:13px; margin: 0 0 12px; color:#8fd9f5; }
+
+/* Tarjetas de facción: las pinta `public/factionCards.js` (único sitio del
+   proyecto que las dibuja), las usan tanto el panel de admin como el nuevo
+   panel "🏳️ Facciones" de la web pública. */
+.factionCards { display:flex; flex-direction:column; gap:10px; }
+.factionCard { display:flex; flex-wrap:wrap; align-items:center; gap:8px; background:#152029; border-radius:10px; padding:8px 10px;
+               border-left: 5px solid #223140; font-size:12px; }
+.factionCard .fname { font-weight:600; flex:1 0 100%; font-size:13px; }
+.factionCard .fstat { color:#8fd9f5; white-space:nowrap; }
+
+.rosterMini { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+.rosterMini span { font-size:11px; background:#0f1a22; border:1px solid #223140; border-radius:5px; padding:2px 6px; }
+.rosterMini span.dead { opacity:.4; text-decoration:line-through; }
