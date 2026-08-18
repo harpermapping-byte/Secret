@@ -2,7 +2,7 @@
 
 const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
 const { sumRandomPower, applyCasualties } = require('./shared');
-const { transferTile, findWeakestBorderTile } = require('./territory');
+const { transferTile, findWeakestBorderTile, factionByNumber } = require('./territory');
 
 // Defensa pasiva minima por casilla controlada, para que nadie quede en 0 absoluto.
 // Valor de ejemplo, pendiente de afinar.
@@ -17,7 +17,7 @@ function resolveCombat(match, context) {
   const incomingByDefender = groupIncomingAttacks(match, context);
 
   for (const [defenderNumber, attackers] of incomingByDefender) {
-    const defenderFaction = match.factions.find((f) => f.number === defenderNumber);
+    const defenderFaction = factionByNumber(match, defenderNumber);
     if (!defenderFaction || defenderFaction.territoryIds.length === 0) continue;
 
     const totalAttackers = attackers.reduce((sum, a) => sum + a.userIds.length, 0);
@@ -31,18 +31,38 @@ function resolveCombat(match, context) {
     if (attackPower > defensePower) {
       // Gana el ataque: baja la faccion defensora y conquista territorio.
       const winningAttacker = attackers.sort((a, b) => b.userIds.length - a.userIds.length)[0];
-      applyCasualties(match, context, defenderNumber, Math.round(attackPower - defensePower));
+      applyCasualties(match, context, defenderNumber, Math.round(attackPower - defensePower), winningAttacker.factionNumber);
 
       const tile = findWeakestBorderTile(match, defenderNumber, winningAttacker.factionNumber);
-      if (tile) transferTile(match, tile.id, winningAttacker.factionNumber);
+      if (tile) {
+        transferTile(match, tile.id, winningAttacker.factionNumber);
+        context.roundEvents.conquests.push({
+          tileId: tile.id,
+          fromFactionNumber: defenderNumber,
+          toFactionNumber: winningAttacker.factionNumber,
+          kind: 'attack',
+        });
+      }
 
       match.lastAttackerOf[defenderNumber] = winningAttacker.factionNumber;
+      for (const attacker of attackers) {
+        context.roundEvents.combats.push({
+          attackerFactionNumber: attacker.factionNumber,
+          defenderFactionNumber: defenderNumber,
+          outcome: attacker.factionNumber === winningAttacker.factionNumber ? 'attacker_won' : 'attacker_lost',
+        });
+      }
     } else {
       // Empate o gana la defensa: las facciones atacantes sufren bajas proporcionales a su aporte.
       const excess = Math.round(defensePower - attackPower);
       for (const attacker of attackers) {
         const share = attacker.userIds.length / totalAttackers;
-        applyCasualties(match, context, attacker.factionNumber, Math.round(excess * share));
+        applyCasualties(match, context, attacker.factionNumber, Math.round(excess * share), defenderNumber);
+        context.roundEvents.combats.push({
+          attackerFactionNumber: attacker.factionNumber,
+          defenderFactionNumber: defenderNumber,
+          outcome: 'defender_held',
+        });
       }
     }
   }

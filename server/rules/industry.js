@@ -2,7 +2,7 @@
 
 const { ACTION_INDUSTRY } = require('../commands');
 const { applyCasualties, shuffle } = require('./shared');
-const { factionsAreAdjacent } = require('./territory');
+const { factionsAreAdjacent, factionByNumber } = require('./territory');
 
 // Valores de ejemplo, pendientes de afinar (ver docs/GDD seccion 11).
 const PASSIVE_INDUSTRY_PER_TERRITORY = 0.2;
@@ -32,6 +32,7 @@ function resolveIndustry(match, context) {
     faction.industryPenaltyNextRound = false;
 
     faction.industry += gained;
+    faction.industryGainedLastRound = gained;
 
     while (
       faction.industryTierIndex < INDUSTRY_TIERS.length &&
@@ -44,6 +45,7 @@ function resolveIndustry(match, context) {
 }
 
 function applyIndustryTier(match, context, faction, tierKey) {
+  context.roundEvents.industryUnlocks.push({ factionNumber: faction.number, tierKey });
   switch (tierKey) {
     case 'tanque':
       return upgradeRandomSoldiers(match, faction, 1, { prioritizeParticipation: false });
@@ -77,9 +79,9 @@ function applyBombardeo(match, context, faction) {
   // en vez de la actividad de la ronda anterior. Pendiente de afinar si hace falta mas precision.
   const targetNumber = match.lastAttackerOf[faction.number];
   if (!targetNumber) return;
-  const targetFaction = match.factions.find((f) => f.number === targetNumber);
+  const targetFaction = factionByNumber(match, targetNumber);
   if (!targetFaction || targetFaction.territoryIds.length === 0) return;
-  applyCasualties(match, context, targetNumber, BOMBARDEO_DAMAGE);
+  applyCasualties(match, context, targetNumber, BOMBARDEO_DAMAGE, faction.number);
 }
 
 function applyOperacionEspecial(match, context, faction) {
@@ -88,7 +90,7 @@ function applyOperacionEspecial(match, context, faction) {
   );
   const target = shuffle(adjacentEnemies)[0];
   if (!target) return;
-  applyCasualties(match, context, target.number, OPESPECIAL_DAMAGE);
+  applyCasualties(match, context, target.number, OPESPECIAL_DAMAGE, faction.number);
 }
 
 module.exports = { resolveIndustry, INDUSTRY_TIERS };

@@ -52,6 +52,12 @@ Esto no requiere `npm install` ni tarjeta de crédito, pero sí requiere subir e
 
 Cuando cambiemos código más adelante, solo hace falta volver a subir los archivos actualizados al mismo repositorio de GitHub — Render vuelve a desplegar solo.
 
+## Novedades de interfaz (panel de admin y web pública)
+
+- **Panel de admin**: la partida en curso ya no se ve como JSON en crudo. Ahora hay tarjetas por facción (industria, territorios, bajas causadas, jugadores) y un mapa navegable en "modo espectador" — arrastra para moverte, rueda del ratón o botones **+ / −** para hacer zoom. El JSON en crudo sigue disponible, plegado en "Ver estado en crudo" por si hace falta para depurar.
+- **Web pública**: al entrar en la Fase de Resumen se abre automáticamente un popup con lo que pasó esa ronda, separado en Conquistas / Industria / Combates / Bajas. También hay un botón **🏆 Clasificación** arriba que abre un popup con la tabla de facciones (soldados, tanques, territorios, maravillas — reservado para más adelante —, industria de la última ronda, bajas causadas).
+- El mapa (tanto en admin como en la web pública) sigue siendo el tablero placeholder (casillas de colores, sin arte). La interacción de zoom/arrastre del panel de admin ya está lista para cuando se ponga la imagen real del mapa — solo habrá que cambiar el fondo, no la lógica.
+
 ## Notas técnicas
 
 - El bot de Twitch y el servidor WebSocket están implementados a mano sobre los módulos nativos de Node (sin `tmi.js` ni `ws`) porque el entorno donde se construyó esta demo tenía bloqueado el registro de npm. Si en tu máquina npm funciona con normalidad, se puede migrar a las librerías estándar sin tocar `server/gameEngine.js` ni `server/rules/*.js` (el motor de reglas no depende de nada de esto).

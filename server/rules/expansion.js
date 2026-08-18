@@ -21,7 +21,15 @@ function resolveExpansion(match, context) {
     if (percent < thresholdPercent) continue;
 
     const tile = findExpandableNeutralTile(match, faction.number);
-    if (tile) transferTile(match, tile.id, faction.number);
+    if (tile) {
+      transferTile(match, tile.id, faction.number);
+      context.roundEvents.conquests.push({
+        tileId: tile.id,
+        fromFactionNumber: null,
+        toFactionNumber: faction.number,
+        kind: 'expansion',
+      });
+    }
   }
 }
 

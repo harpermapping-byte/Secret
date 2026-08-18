@@ -28,11 +28,37 @@
   .player.dead { opacity:0.35; text-decoration: line-through; }
   #summary { padding: 10px 20px; font-size: 13px; color:#ffd166; min-height: 20px; }
   #winner { text-align:center; font-size: 28px; padding: 40px; }
+
+  .headerBtn { background:#152029; color:#8fd9f5; border:1px solid #223140; border-radius:8px; padding:8px 14px;
+               font-size:13px; cursor:pointer; }
+  .headerBtn:hover { background:#1c2b38; }
+
+  .modalOverlay { position:fixed; inset:0; background:rgba(4,10,15,.72); display:flex; align-items:center;
+                  justify-content:center; z-index:100; padding:20px; }
+  .modalOverlay.hidden { display:none; }
+  .modalBox { background:#101c26; border:1px solid #223140; border-radius:14px; max-width:560px; width:100%;
+              max-height:85vh; overflow-y:auto; padding:20px 22px; }
+  .modalBox h2 { margin:0 0 4px; font-size:18px; }
+  .modalBox .modalSubtitle { font-size:12px; color:#8fd9f5; margin-bottom:14px; }
+  .modalClose { float:right; background:none; border:none; color:#8fd9f5; font-size:20px; cursor:pointer; line-height:1; }
+  .summarySection { margin-top:16px; }
+  .summarySection h3 { font-size:13px; color:#8fd9f5; margin:0 0 8px; text-transform:uppercase; letter-spacing:.03em; }
+  .summaryLine { font-size:13px; padding:6px 10px; background:#152029; border-radius:6px; margin-bottom:6px;
+                 border-left:3px solid #223140; }
+  .summaryEmpty { font-size:12px; opacity:.5; font-style:italic; }
+  .fchip { display:inline-flex; align-items:center; gap:5px; font-weight:600; }
+  .fchip .dot { width:9px; height:9px; }
+
+  table.leaderboard { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+  table.leaderboard th, table.leaderboard td { padding:7px 8px; text-align:center; border-bottom:1px solid #1c2b38; }
+  table.leaderboard th { color:#8fd9f5; font-weight:600; font-size:11px; text-transform:uppercase; }
+  table.leaderboard td:first-child, table.leaderboard th:first-child { text-align:left; }
 </style>
 </head>
 <body>
   <header>
     <h1>Condejorge Wars <span style="opacity:.5">(placeholders v1)</span></h1>
+    <button class="headerBtn" onclick="openLeaderboard()">🏆 Clasificación</button>
     <div id="phase">conectando...</div>
     <div id="timer">--:--</div>
   </header>
@@ -43,18 +69,42 @@
     <div id="rosterColumns"></div>
   </div>
   <div id="board"></div>
-  <div id="summary"></div>
   <div id="winner"></div>
+
+  <div id="summaryModal" class="modalOverlay hidden">
+    <div class="modalBox">
+      <button class="modalClose" onclick="closeSummaryModal()">✕</button>
+      <h2 id="summaryModalTitle">Resumen de ronda</h2>
+      <div class="modalSubtitle">Qué ha pasado en esta ronda, fase por fase</div>
+      <div id="summaryModalBody"></div>
+    </div>
+  </div>
+
+  <div id="leaderboardModal" class="modalOverlay hidden">
+    <div class="modalBox">
+      <button class="modalClose" onclick="closeLeaderboard()">✕</button>
+      <h2>Clasificación de facciones</h2>
+      <div class="modalSubtitle">Estado actual de la partida</div>
+      <div id="leaderboardBody"></div>
+    </div>
+  </div>
 
 <script>
   const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
   const socket = new WebSocket(`${wsProtocol}://${location.host}/ws?role=public`);
   let lastState = null;
+  let lastPhase = null;
+  let summaryClosedByUser = false;
 
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'state:public') render(message.payload);
   });
+
+  /** Unica funcion del proyecto para buscar una facción por número dentro del estado recibido por WS. */
+  function factionByNumber(state, number) {
+    return (state.factions || []).find((f) => f.number === number);
+  }
 
   function render(state) {
     lastState = state;
@@ -76,7 +126,7 @@
       const div = document.createElement('div');
       div.className = 'tile' + (t.neutral ? ' neutral' : '');
       if (!t.neutral) {
-        const faction = state.factions.find((f) => f.number === t.ownerFactionNumber);
+        const faction = factionByNumber(state, t.ownerFactionNumber);
         if (faction) div.style.background = faction.color;
       }
       div.textContent = t.id;
@@ -84,12 +134,146 @@
     });
 
     renderRoster(state);
-
-    document.getElementById('summary').textContent = (state.summaryBlocks || []).map(blockToText).join('   ·   ');
+    handleSummaryModal(state);
 
     document.getElementById('winner').textContent = state.winnerFactionNumber
       ? `¡Gana la facción #${state.winnerFactionNumber}!`
       : '';
+  }
+
+  // ---------------------------------------------------------------------
+  // Popup de resumen de ronda: se abre solo al entrar en Fase de Resumen,
+  // se cierra solo al salir de ella (o si el espectador le da a la X antes).
+  // ---------------------------------------------------------------------
+  function handleSummaryModal(state) {
+    const enteringSummary = state.phase === 'summary' && lastPhase !== 'summary';
+    const leavingSummary = state.phase !== 'summary' && lastPhase === 'summary';
+    lastPhase = state.phase;
+
+    if (enteringSummary) {
+      summaryClosedByUser = false;
+      renderSummaryModal(state);
+      document.getElementById('summaryModal').classList.remove('hidden');
+    } else if (state.phase === 'summary' && !summaryClosedByUser) {
+      renderSummaryModal(state); // por si llega un segundo state:public mientras el popup ya esta abierto
+    }
+    if (leavingSummary) closeSummaryModal();
+  }
+
+  function closeSummaryModal() {
+    summaryClosedByUser = true;
+    document.getElementById('summaryModal').classList.add('hidden');
+  }
+
+  function renderSummaryModal(state) {
+    document.getElementById('summaryModalTitle').textContent = `Resumen de la ronda ${state.round}`;
+    const blocks = state.summaryBlocks || [];
+    const byKind = Object.fromEntries(blocks.map((b) => [b.kind, b.data]));
+    const body = document.getElementById('summaryModalBody');
+    body.innerHTML = [
+      summarySection('Conquistas', (byKind.conquests || []).map((c) => conquestLine(state, c))),
+      summarySection('Industria', industryLines(state, byKind.industry || [], byKind.industryUnlocks || [])),
+      summarySection('Combates', (byKind.combats || []).map((c) => combatLine(state, c))),
+      summarySection('Bajas', (byKind.casualties || []).map((c) => casualtyLine(state, c))),
+    ].join('');
+  }
+
+  function summarySection(title, lines) {
+    const body = lines.length
+      ? lines.map((line) => `<div class="summaryLine">${line}</div>`).join('')
+      : '<div class="summaryEmpty">Sin novedades</div>';
+    return `<div class="summarySection"><h3>${title}</h3>${body}</div>`;
+  }
+
+  function fchip(state, factionNumber) {
+    const f = factionByNumber(state, factionNumber);
+    if (!f) return 'territorio neutral';
+    return `<span class="fchip"><span class="dot" style="background:${f.color}"></span>${f.name}</span>`;
+  }
+
+  function conquestLine(state, c) {
+    const origin = c.fromFactionNumber != null ? fchip(state, c.fromFactionNumber) : 'territorio neutral';
+    return c.kind === 'expansion'
+      ? `${fchip(state, c.toFactionNumber)} se expandió sobre ${origin} (casilla ${c.tileId})`
+      : `${fchip(state, c.toFactionNumber)} conquistó la casilla ${c.tileId} a ${origin}`;
+  }
+
+  const TIER_LABELS = { tanque: 'Tanque', bombardeo: 'Bombardeo', tanque_x2: 'Tanque x2', operacion_especial: 'Operación especial' };
+
+  function industryLines(state, industryData, unlocksData) {
+    const lines = industryData
+      .filter((d) => d.gained > 0)
+      .map((d) => `${fchip(state, d.faction)} produjo +${d.gained.toFixed(1)} de industria (total ${d.industry.toFixed(1)})`);
+    unlocksData.forEach((u) => {
+      lines.push(`${fchip(state, u.factionNumber)} desbloqueó la mejora <strong>${TIER_LABELS[u.tierKey] || u.tierKey}</strong>`);
+    });
+    return lines;
+  }
+
+  function combatLine(state, c) {
+    const attacker = fchip(state, c.attackerFactionNumber);
+    const defender = fchip(state, c.defenderFactionNumber);
+    if (c.outcome === 'attacker_won') return `${attacker} atacó a ${defender} y ganó el combate`;
+    if (c.outcome === 'defender_held') return `${attacker} atacó a ${defender}, pero la defensa aguantó`;
+    return `${attacker} atacó a ${defender} junto a otra facción, pero no fue quien conquistó`;
+  }
+
+  function casualtyLine(state, c) {
+    return `${c.username} (${fchip(state, c.factionNumber)}) ha caído`;
+  }
+
+  // ---------------------------------------------------------------------
+  // Popup de clasificación: bajo demanda, con los datos ya presentes en
+  // el ultimo estado recibido (no hace falta pedir nada nuevo al servidor).
+  // ---------------------------------------------------------------------
+  function openLeaderboard() {
+    if (!lastState) return;
+    renderLeaderboard(lastState);
+    document.getElementById('leaderboardModal').classList.remove('hidden');
+  }
+
+  function closeLeaderboard() {
+    document.getElementById('leaderboardModal').classList.add('hidden');
+  }
+
+  function renderLeaderboard(state) {
+    const rows = (state.factions || [])
+      .map((f) => {
+        const players = (state.players || []).filter((p) => p.factionNumber === f.number && p.alive);
+        return {
+          faction: f,
+          soldiers: players.filter((p) => p.unitType === 'soldier').length,
+          tanks: players.filter((p) => p.unitType === 'tank').length,
+          territories: f.territoryCount,
+          wonders: f.wondersCount,
+          industryPerRound: f.industryGainedLastRound,
+          killsCaused: f.killsCaused,
+        };
+      })
+      .sort((a, b) => b.territories - a.territories || b.faction.industry - a.faction.industry);
+
+    const body = document.getElementById('leaderboardBody');
+    body.innerHTML = `
+      <table class="leaderboard">
+        <thead>
+          <tr><th>Facción</th><th>Soldados</th><th>Tanques</th><th>Terr.</th><th>Maravillas</th><th>Ind./ronda</th><th>Bajas causadas</th></tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (r) => `<tr>
+                <td>${fchip(state, r.faction.number)}</td>
+                <td>${r.soldiers}</td>
+                <td>${r.tanks}</td>
+                <td>${r.territories}</td>
+                <td>${r.wonders}</td>
+                <td>${r.industryPerRound.toFixed(1)}</td>
+                <td>${r.killsCaused}</td>
+              </tr>`
+            )
+            .join('')}
+        </tbody>
+      </table>`;
   }
 
   function renderRoster(state) {
@@ -113,13 +297,6 @@
       }
       columnsEl.appendChild(column);
     });
-  }
-
-  function blockToText(block) {
-    if (block.kind === 'industry') return 'Industria: ' + block.data.map((d) => `F${d.faction}=${d.industry.toFixed(1)}`).join(' ');
-    if (block.kind === 'territory') return 'Territorio: ' + block.data.map((d) => `F${d.faction}=${d.territories}`).join(' ');
-    if (block.kind === 'casualties') return block.data.length ? 'Bajas: ' + block.data.join(', ') : 'Sin bajas';
-    return '';
   }
 
   function phaseLabel(phase) {

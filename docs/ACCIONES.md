@@ -94,13 +94,32 @@ Un único `switch` en `wsServer.js` traduce cada tipo de mensaje a su función d
 ## 6. Formas de datos del estado (referencia de nombres de campos)
 
 ```
-Player   { userId, username, factionId, alive, unitType, actedThisRound, lastAction, lastTarget }
-Faction  { id, number, name, color, territoryIds: [], industry, specialEnabled, specialUsed }
-Tile     { id, ownerFactionId | null, neutral, garrison }
-Match    { phase, config, players: Map<userId, Player>, factions: [Faction], tiles: [Tile], round, timers }
+Player   { userId, username, factionNumber, alive, unitType, participation, diedOnRound }
+Faction  { id, number, name, color, territoryIds: [], industry, industryGainedLastRound, industryTierIndex,
+           industryPenaltyNextRound, specialEnabled, specialAbility, specialUsed, killsCaused }
+Tile     { id, neighborIds: [], ownerFactionNumber | null, neutral, garrison }
+Match    { phase, config, players: Map<userId, Player>, factions: [Faction], tiles: [Tile], round, timers,
+           lastAttackerOf, activeAlliancePairsThisRound, combatModifiers, summaryBlocks, winnerFactionNumber }
 ```
 
-Estos nombres de campo son fijos en todo el proyecto. No se usan sinónimos (por ejemplo, siempre `factionId`, nunca `faction_id` ni `teamId`).
+Estos nombres de campo son fijos en todo el proyecto. No se usan sinónimos (por ejemplo, siempre `factionNumber`, nunca `faction_id` ni `teamId`).
+
+`getPublicState().factions[i]` añade además dos campos derivados solo para mostrar en la web (no viven en `Faction`, se calculan al serializar): `territoryCount` (= `territoryIds.length`) y `wondersCount` (siempre `0` en v1, reservado para cuando se implementen las maravillas — ver GDD "Alcance de v1 vs futuro").
+
+**Búsqueda de facción por número:** una única función en todo el proyecto, `factionByNumber(match, number)`, exportada desde `server/rules/territory.js`. Todo módulo que necesite buscar una facción por su número la importa de ahí — no se reimplementa `.find()` inline ni se duplica con otro nombre. La única excepción es `findInFactionList(factions, number)` dentro de `gameEngine.js`, usada solo en `createMatch()` en el instante en que el array de facciones existe pero `match` todavía no.
+
+**Bloques del resumen de ronda (`match.summaryBlocks`, uno por `kind`):**
+
+| `kind` | Forma de `data` | Contenido |
+|---|---|---|
+| `industry` | `[{ faction, industry, gained }]` | `industry` = total acumulado tras la ronda; `gained` = lo que sumó *esta* ronda (votos `!industria` + pasivo por territorio, o `0` si tenía penalización de Sabotaje). |
+| `territory` | `[{ faction, territories }]` | Recuento de casillas al cierre de la ronda. |
+| `conquests` | `[{ tileId, fromFactionNumber, toFactionNumber, kind }]` | Casillas que cambiaron de dueño esta ronda. `kind` es `'attack'` (combate) o `'expansion'` (`!expansion` sobre neutral, `fromFactionNumber: null`). |
+| `combats` | `[{ attackerFactionNumber, defenderFactionNumber, outcome }]` | Una entrada por cada facción atacante que participó en cada combate. `outcome` es `'attacker_won'`, `'attacker_lost'` (perdió el combate pero otra facción atacante sí ganó) o `'defender_held'` (la defensa aguantó). |
+| `industryUnlocks` | `[{ factionNumber, tierKey }]` | Mejoras de industria desbloqueadas esta ronda (`tierKey` = una de `INDUSTRY_TIERS`: `tanque`, `bombardeo`, `tanque_x2`, `operacion_especial`). |
+| `casualties` | `[{ username, factionNumber }]` | Jugadores que murieron esta ronda. |
+
+`killsCaused` (bajas causadas, acumulado de toda la partida, campo de `Faction`) se incrementa desde `applyCasualties(match, context, factionNumber, count, causedByFactionNumber)` en `rules/shared.js` — el único punto donde se matan jugadores, así que es el único punto donde se contabilizan bajas causadas. Los llamantes (`resolveCombat`, `applyBombardeo`, `applyOperacionEspecial`) pasan qué facción es la responsable; si no aplica (nadie causó las bajas), se omite el último argumento.
 
 ## 7. Constantes de ejemplo ya implementadas (server/rules/*.js)
 

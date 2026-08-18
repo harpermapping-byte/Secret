@@ -16,6 +16,7 @@ const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
 const { resolveIndustry } = require('./rules/industry');
 const { resolveExpansion } = require('./rules/expansion');
+const { factionByNumber } = require('./rules/territory');
 
 const {
   ACTION_JOIN_FACTION,
@@ -51,12 +52,14 @@ function createMatch(config) {
     name: f.name,
     color: f.color,
     industry: 0,
+    industryGainedLastRound: 0,
     industryTierIndex: 0,
     industryPenaltyNextRound: false,
     specialEnabled: !!f.specialEnabled,
     specialAbility: f.specialAbility || null,
     specialUsed: false,
     territoryIds: [],
+    killsCaused: 0,
   }));
 
   const { tiles } = generateMap({
@@ -67,7 +70,7 @@ function createMatch(config) {
 
   for (const tile of tiles) {
     if (tile.ownerFactionNumber != null) {
-      factionByNumber(factions, tile.ownerFactionNumber).territoryIds.push(tile.id);
+      findInFactionList(factions, tile.ownerFactionNumber).territoryIds.push(tile.id);
     }
   }
 
@@ -149,7 +152,7 @@ function handleChatCommand(userId, username, channel, text) {
 
 function joinFaction(userId, username, factionNumber) {
   assertPhase(PHASE_RECRUITMENT);
-  const faction = factionByNumber(match.factions, factionNumber);
+  const faction = factionByNumber(match, factionNumber);
   if (!faction) return false;
 
   const existing = match.players.get(userId);
@@ -176,7 +179,7 @@ function castAction(userId, actionType, targetFactionNumber) {
 
   if (actionType === ACTION_ATTACK || actionType === ACTION_ALLIANCE) {
     if (!targetFactionNumber || targetFactionNumber === player.factionNumber) return false;
-    const target = factionByNumber(match.factions, targetFactionNumber);
+    const target = factionByNumber(match, targetFactionNumber);
     if (!target || target.territoryIds.length === 0) return false;
   }
 
@@ -288,21 +291,43 @@ function tallyActions() {
     if (action.type === ACTION_ATTACK || action.type === ACTION_DEFEND) player.participation += 1;
   }
 
-  return { votesByFactionAndType, activePlayerCountByFaction, inactiveUserIds, forceInactive: new Set() };
+  return {
+    votesByFactionAndType,
+    activePlayerCountByFaction,
+    inactiveUserIds,
+    forceInactive: new Set(),
+    // Sucesos de la ronda que van llenando resolveExpansion/resolveCombat/resolveIndustry a medida
+    // que ocurren, para poder construir despues el resumen por fases (ver docs/ACCIONES.md seccion 6).
+    roundEvents: { conquests: [], combats: [], industryUnlocks: [] },
+  };
 }
 
+/**
+ * Construye los bloques del popup de resumen de ronda, uno por tipo de suceso.
+ * Cada bloque es { kind, data }; ver docs/ACCIONES.md seccion 6 para la forma exacta de `data`
+ * de cada kind. No contiene logica de reglas, solo lee lo que las funciones de resolveRound()
+ * ya dejaron en `context.roundEvents` y en los campos de cada faccion/jugador.
+ */
 function buildRoundSummary(context) {
-  const blocks = [];
-  blocks.push({ kind: 'industry', data: match.factions.map((f) => ({ faction: f.number, industry: f.industry })) });
-  blocks.push({
-    kind: 'territory',
-    data: match.factions.map((f) => ({ faction: f.number, territories: f.territoryIds.length })),
-  });
-  blocks.push({
-    kind: 'casualties',
-    data: [...match.players.values()].filter((p) => p.diedOnRound === match.round).map((p) => p.username),
-  });
-  return blocks;
+  return [
+    {
+      kind: 'industry',
+      data: match.factions.map((f) => ({ faction: f.number, industry: f.industry, gained: f.industryGainedLastRound })),
+    },
+    {
+      kind: 'territory',
+      data: match.factions.map((f) => ({ faction: f.number, territories: f.territoryIds.length })),
+    },
+    { kind: 'conquests', data: context.roundEvents.conquests },
+    { kind: 'combats', data: context.roundEvents.combats },
+    { kind: 'industryUnlocks', data: context.roundEvents.industryUnlocks },
+    {
+      kind: 'casualties',
+      data: [...match.players.values()]
+        .filter((p) => p.diedOnRound === match.round)
+        .map((p) => ({ username: p.username, factionNumber: p.factionNumber })),
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +391,10 @@ function getPublicState() {
       name: f.name,
       color: f.color,
       industry: f.industry,
+      industryGainedLastRound: f.industryGainedLastRound,
       territoryCount: f.territoryIds.length,
+      killsCaused: f.killsCaused,
+      wondersCount: 0, // reservado para v2 (maravillas), ver docs/GDD "Alcance de v1 vs futuro"
     })),
     tiles: match.tiles.map((t) => ({ id: t.id, ownerFactionNumber: t.ownerFactionNumber, neutral: t.neutral })),
     players: [...match.players.values()].map((p) => ({
@@ -391,7 +419,12 @@ function getAdminState() {
 // Helpers internos
 // ---------------------------------------------------------------------------
 
-function factionByNumber(factions, number) {
+/**
+ * Busca una faccion por numero dentro de un array de facciones suelto (usado solo en createMatch,
+ * antes de que exista `match`). Para cualquier otro caso, usar `factionByNumber(match, number)`
+ * importado de `rules/territory.js` — es la unica fuente de verdad para esa busqueda.
+ */
+function findInFactionList(factions, number) {
   return factions.find((f) => f.number === number);
 }
 

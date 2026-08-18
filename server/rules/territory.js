@@ -47,8 +47,15 @@ function factionsAreAdjacent(match, factionNumberA, factionNumberB) {
   );
 }
 
+/** Unica funcion del proyecto para buscar una faccion por su numero dentro de una partida ya creada. */
 function factionByNumber(match, number) {
   return match.factions.find((f) => f.number === number);
 }
 
-module.exports = { transferTile, findWeakestBorderTile, findExpandableNeutralTile, factionsAreAdjacent };
+module.exports = {
+  transferTile,
+  findWeakestBorderTile,
+  findExpandableNeutralTile,
+  factionsAreAdjacent,
+  factionByNumber,
+};

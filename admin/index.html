@@ -6,8 +6,12 @@
 <title>Condejorge Wars — Admin</title>
 <style>
   :root { color-scheme: dark; }
-  body { margin:0; font-family: system-ui, sans-serif; background:#0c1720; color:#eaf7ff; padding: 20px; max-width: 720px; margin: 0 auto; }
-  h1 { font-size: 20px; }
+  body { margin:0; font-family: system-ui, sans-serif; background:#0c1720; color:#eaf7ff; padding: 20px; }
+  #configWrap, #login { max-width: 720px; margin: 0 auto; }
+  #liveControls { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 20px; max-width: 1100px; margin: 0 auto 16px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 13px; margin: 0; }
   label { display:block; margin-top: 12px; font-size: 13px; color:#8fd9f5; }
   input, select { width:100%; padding:8px; margin-top:4px; border-radius:6px; border:1px solid #223140; background:#152029; color:#eaf7ff; box-sizing:border-box; }
   .faction-row { display:flex; gap:8px; margin-top:8px; align-items:center; }
@@ -18,9 +22,41 @@
   button.danger { background:#ffb4a2; color:#3a0a0a; }
   .row { display:flex; gap:10px; flex-wrap:wrap; }
   #status { font-size:13px; color:#7fe0a8; margin-top:10px; }
-  #liveControls, #configForm, #login { margin-top: 20px; }
+  #configForm, #login { margin-top: 20px; }
+  #configForm, #login { background:#101c26; border:1px solid #223140; border-radius:14px; padding:20px 24px; }
   .hidden { display:none; }
-  #liveState { margin-top: 16px; font-size: 13px; white-space: pre-wrap; background:#0f1a22; padding:10px; border-radius:8px; }
+
+  #liveControls { margin-top: 20px; }
+  .liveTopBar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+  .liveTopBar .phaseTag { font-size:13px; color:#8fd9f5; background:#101c26; border:1px solid #223140; padding:6px 12px; border-radius:20px; }
+  .liveGrid { display:grid; grid-template-columns: 1.1fr 1fr; gap:16px; align-items:start; }
+  @media (max-width: 860px) { .liveGrid { grid-template-columns: 1fr; } }
+  .panelCard { background:#101c26; border:1px solid #223140; border-radius:14px; padding:16px 18px; }
+
+  .factionCards { display:flex; flex-direction:column; gap:8px; }
+  .factionCard { display:flex; align-items:center; gap:10px; background:#152029; border-radius:10px; padding:8px 12px;
+                 border-left: 5px solid #223140; font-size:13px; }
+  .factionCard .fname { font-weight:600; flex:1; }
+  .factionCard .fstat { color:#8fd9f5; white-space:nowrap; }
+
+  .rosterMini { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+  .rosterMini span { font-size:11px; background:#0f1a22; border:1px solid #223140; border-radius:5px; padding:2px 6px; }
+  .rosterMini span.dead { opacity:.4; text-decoration:line-through; }
+
+  .mapToolbar { display:flex; gap:6px; margin-bottom:10px; }
+  .mapToolbar button { margin-top:0; padding:6px 10px; font-size:13px; }
+  .mapViewport { position:relative; height:360px; overflow:hidden; background:#0a141c; border-radius:10px;
+                 border:1px solid #223140; cursor:grab; }
+  .mapViewport.dragging { cursor:grabbing; }
+  .mapCanvas { position:absolute; top:0; left:0; display:flex; flex-wrap:wrap; gap:6px; width:360px;
+               transform-origin: 0 0; }
+  .mapTile { width:52px; height:52px; border-radius:6px; display:flex; align-items:center; justify-content:center;
+             font-size:11px; background:#20303c; border:2px solid #14202a; user-select:none; }
+  .mapTile.neutral { background:#3a3a3a; }
+  .mapHint { font-size:11px; opacity:.55; margin-top:6px; }
+
+  #liveState summary { cursor:pointer; font-size:12px; color:#8fd9f5; }
+  #liveState pre { margin-top:8px; font-size:12px; white-space:pre-wrap; background:#0f1a22; padding:10px; border-radius:8px; max-height:260px; overflow:auto; }
 </style>
 </head>
 <body>
@@ -71,14 +107,45 @@
   </div>
 
   <div id="liveControls" class="hidden">
-    <h2>Partida en curso</h2>
-    <div>
-      <button class="secondary" onclick="send('admin:pause')">Pausar</button>
-      <button class="secondary" onclick="send('admin:resume')">Reanudar</button>
-      <button class="secondary" onclick="send('admin:advancePhase')">Pasar ronda</button>
-      <button class="danger" onclick="send('admin:endMatch')">Terminar partida</button>
+    <div class="liveTopBar">
+      <div>
+        <h2 style="margin-bottom:2px">Partida en curso</h2>
+        <span class="phaseTag" id="livephaseTag">—</span>
+      </div>
+      <div>
+        <button class="secondary" onclick="send('admin:pause')">Pausar</button>
+        <button class="secondary" onclick="send('admin:resume')">Reanudar</button>
+        <button class="secondary" onclick="send('admin:advancePhase')">Pasar ronda</button>
+        <button class="danger" onclick="send('admin:endMatch')">Terminar partida</button>
+      </div>
     </div>
-    <div id="liveState"></div>
+
+    <div class="liveGrid">
+      <div class="panelCard">
+        <h3 style="margin-bottom:10px">Facciones</h3>
+        <div class="factionCards" id="factionCards"></div>
+      </div>
+
+      <div class="panelCard">
+        <h3 style="margin-bottom:10px">Mapa — modo espectador</h3>
+        <div class="mapToolbar">
+          <button class="secondary" onclick="mapZoom(1.25)">+</button>
+          <button class="secondary" onclick="mapZoom(0.8)">−</button>
+          <button class="secondary" onclick="mapReset()">Centrar</button>
+        </div>
+        <div class="mapViewport" id="mapViewport">
+          <div class="mapCanvas" id="mapCanvas"></div>
+        </div>
+        <div class="mapHint">Arrastra para moverte por el mapa, rueda del ratón o botones +/− para hacer zoom. (Placeholders de momento — cuando haya arte real del mapa se pondrá aquí mismo, sin tocar esta interacción.)</div>
+      </div>
+    </div>
+
+    <div class="panelCard" style="margin-top:16px">
+      <details id="liveState">
+        <summary>Ver estado en crudo (JSON, para depurar)</summary>
+        <pre id="liveStateJson"></pre>
+      </details>
+    </div>
   </div>
 
 <script>
@@ -157,13 +224,134 @@
     send('admin:startMatch');
   }
 
+  const PHASE_LABELS = { config: 'Configuración', recruitment: 'Reclutamiento', action: 'Acción', resolution: 'Combate', summary: 'Resumen', end: 'Fin' };
+  let mapInitialized = false;
+
   function renderState(state) {
     if (state.phase && state.phase !== 'config') {
       document.getElementById('configForm').classList.add('hidden');
       document.getElementById('liveControls').classList.remove('hidden');
     }
-    document.getElementById('liveState').textContent = JSON.stringify(state, null, 2);
+
+    if (state.phase) {
+      document.getElementById('livephaseTag').textContent = `Fase: ${PHASE_LABELS[state.phase] || state.phase} — ronda ${state.round}`;
+    }
+
+    renderFactionCards(state);
+    renderMapTiles(state);
+    document.getElementById('liveStateJson').textContent = JSON.stringify(state, null, 2);
   }
+
+  function renderFactionCards(state) {
+    const container = document.getElementById('factionCards');
+    container.innerHTML = '';
+    (state.factions || []).forEach((f) => {
+      const playersInFaction = (state.players || []).filter((p) => p.factionNumber === f.number);
+      const aliveCount = playersInFaction.filter((p) => p.alive).length;
+
+      const card = document.createElement('div');
+      card.className = 'factionCard';
+      card.style.borderLeftColor = f.color;
+      card.innerHTML = `
+        <span class="dot" style="width:10px;height:10px;border-radius:50%;background:${f.color};display:inline-block"></span>
+        <span class="fname">#${f.number} ${f.name}</span>
+        <span class="fstat">${aliveCount}/${playersInFaction.length} vivos</span>
+        <span class="fstat">${f.territoryCount} terr.</span>
+        <span class="fstat">industria ${f.industry.toFixed(1)} (+${(f.industryGainedLastRound || 0).toFixed(1)})</span>
+        <span class="fstat">${f.killsCaused || 0} bajas causadas</span>
+      `;
+      const roster = document.createElement('div');
+      roster.className = 'rosterMini';
+      if (playersInFaction.length === 0) {
+        roster.innerHTML = '<span style="opacity:.5">nadie unido todavía</span>';
+      } else {
+        playersInFaction.forEach((p) => {
+          const tag = document.createElement('span');
+          tag.className = p.alive ? '' : 'dead';
+          tag.textContent = `${p.username}${p.unitType === 'tank' ? ' 🛡' : ''}`;
+          roster.appendChild(tag);
+        });
+      }
+      const wrap = document.createElement('div');
+      wrap.appendChild(card);
+      wrap.appendChild(roster);
+      container.appendChild(wrap);
+    });
+  }
+
+  function renderMapTiles(state) {
+    const canvas = document.getElementById('mapCanvas');
+    if (!state.tiles) return;
+    canvas.innerHTML = '';
+    state.tiles.forEach((t) => {
+      const div = document.createElement('div');
+      div.className = 'mapTile' + (t.neutral ? ' neutral' : '');
+      if (!t.neutral) {
+        const faction = (state.factions || []).find((f) => f.number === t.ownerFactionNumber);
+        if (faction) div.style.background = faction.color;
+      }
+      div.textContent = t.id;
+      canvas.appendChild(div);
+    });
+    if (!mapInitialized) {
+      mapInitialized = true;
+      mapReset();
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Mapa: pan (arrastrar) + zoom (rueda / botones). Un unico origen de
+  // verdad para la vista (mapView), la unica funcion que toca el transform
+  // es applyMapTransform(). Nada de esto depende de que las casillas sean
+  // placeholders: cuando el mapa tenga arte real, esta interaccion no cambia.
+  // ---------------------------------------------------------------------
+  const mapView = { x: 0, y: 0, scale: 1 };
+  let dragging = false;
+  let dragStart = { x: 0, y: 0, viewX: 0, viewY: 0 };
+
+  function applyMapTransform() {
+    const canvas = document.getElementById('mapCanvas');
+    canvas.style.transform = `translate(${mapView.x}px, ${mapView.y}px) scale(${mapView.scale})`;
+  }
+
+  function mapReset() {
+    const viewport = document.getElementById('mapViewport');
+    const canvas = document.getElementById('mapCanvas');
+    mapView.scale = 1;
+    mapView.x = (viewport.clientWidth - canvas.scrollWidth) / 2;
+    mapView.y = (viewport.clientHeight - canvas.scrollHeight) / 2;
+    applyMapTransform();
+  }
+
+  function mapZoom(factor) {
+    mapView.scale = Math.min(3, Math.max(0.5, mapView.scale * factor));
+    applyMapTransform();
+  }
+
+  function setupMapInteraction() {
+    const viewport = document.getElementById('mapViewport');
+
+    viewport.addEventListener('mousedown', (e) => {
+      dragging = true;
+      viewport.classList.add('dragging');
+      dragStart = { x: e.clientX, y: e.clientY, viewX: mapView.x, viewY: mapView.y };
+    });
+    window.addEventListener('mouseup', () => {
+      dragging = false;
+      viewport.classList.remove('dragging');
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      mapView.x = dragStart.viewX + (e.clientX - dragStart.x);
+      mapView.y = dragStart.viewY + (e.clientY - dragStart.y);
+      applyMapTransform();
+    });
+    viewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      mapZoom(e.deltaY < 0 ? 1.1 : 0.9);
+    }, { passive: false });
+  }
+  setupMapInteraction();
 </script>
 </body>
 </html>

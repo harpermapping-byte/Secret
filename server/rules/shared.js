@@ -1,6 +1,7 @@
 'use strict';
 
 const { ACTION_INDUSTRY, ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
+const { factionByNumber } = require('./territory');
 
 // Rango de azar por unidad al calcular fuerza de combate. Valor de ejemplo,
 // pendiente de afinar (ver docs/GDD seccion 11 "Pendiente").
@@ -20,8 +21,10 @@ function sumRandomPower(count) {
  * Reparte `count` bajas dentro de una faccion siguiendo la prioridad fija:
  * inactivos -> industria -> atacantes propios -> defensores.
  * `inactiveUserIds` es la union de "no puso comando" + "forceInactive" (alianza/especial fallidos).
+ * `causedByFactionNumber` (opcional) es la faccion responsable de estas bajas: si se indica, se le
+ * suma a su contador `killsCaused` (ver docs/ACCIONES.md seccion 6), usado en la clasificacion.
  */
-function applyCasualties(match, context, factionNumber, count) {
+function applyCasualties(match, context, factionNumber, count, causedByFactionNumber = null) {
   if (count <= 0) return 0;
 
   const bucket = context.votesByFactionAndType.get(factionNumber);
@@ -45,6 +48,12 @@ function applyCasualties(match, context, factionNumber, count) {
       remaining--;
     }
   }
+
+  if (killed > 0 && causedByFactionNumber != null) {
+    const causer = factionByNumber(match, causedByFactionNumber);
+    if (causer) causer.killsCaused += killed;
+  }
+
   return killed;
 }
 
