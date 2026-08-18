@@ -78,7 +78,15 @@
     let lastMarkerPositions = new Map(); // userId -> {x,y,color,username}, cacheado para focusOnPlayer()
 
     function setLayout(newLayout) {
-      layout = newLayout;
+      // El servidor manda `cellTileIds` empaquetado (`cellTileIdsPacked`) en
+      // vez de un array JSON plano — a esta resolución del mapa (~10M celdas)
+      // el array plano pesaría ~27,5MB por mensaje. Se desempaqueta aquí, una
+      // única vez por partida (setLayout solo se llama al llegar `map:layout`,
+      // que es estático durante toda la partida) — ver decodeCellTileIds() y
+      // server/mapLayoutCodec.js (MISMO formato en los dos sitios) y
+      // docs/ACCIONES.md sección 6.
+      const cellTileIds = decodeCellTileIds(newLayout.cellTileIdsPacked, newLayout.cols * newLayout.rows);
+      layout = { cols: newLayout.cols, rows: newLayout.rows, centroids: newLayout.centroids, cellTileIds };
       offscreen = document.createElement('canvas');
       offscreen.width = layout.cols;
       offscreen.height = layout.rows;
@@ -97,6 +105,30 @@
 
       hasFitOnce = false;
       if (lastTiles) paint(lastTiles, lastFactions, lastPlayers);
+    }
+
+    /**
+     * Desempaqueta `cellTileIdsPacked` (ver server/mapLayoutCodec.js — MISMO
+     * formato aquí, cualquier cambio en uno hay que reflejarlo en el otro) de
+     * vuelta a un array indexado por celda con el id de tile, o -1 (`OCEAN`)
+     * si es océano. El resto de este módulo trabaja con esa forma tal cual,
+     * sin enterarse de que por la red viajó empaquetado.
+     */
+    function decodeCellTileIds({ bytesPerCell, base64 }, cellCount) {
+      const binary = atob(base64); // "binary string": 1 char = 1 byte (0-255)
+      const cellTileIds = new Int32Array(cellCount);
+      if (bytesPerCell === 1) {
+        for (let i = 0; i < cellCount; i++) {
+          cellTileIds[i] = binary.charCodeAt(i) - 1; // 0 -> OCEAN(-1), N -> tile N-1
+        }
+      } else {
+        for (let i = 0; i < cellCount; i++) {
+          const hi = binary.charCodeAt(i * 2);
+          const lo = binary.charCodeAt(i * 2 + 1);
+          cellTileIds[i] = ((hi << 8) | lo) - 1;
+        }
+      }
+      return cellTileIds;
     }
 
     /**
