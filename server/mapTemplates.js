@@ -25,26 +25,66 @@
  * Forma de una Tile: { id, neighborIds: [id...], ownerFactionNumber: number|null, neutral: bool, garrison: number }
  * Forma de mapLayout (estático, no cambia durante la partida, se manda al cliente
  * una única vez para poder dibujar el mapa): { cols, rows, cellTileIds: [tileId por celda del raster, o OCEAN], centroids: [{x,y} por tile] }
+ *
+ * Resolucion del reparto de territorios vs. resolucion del terreno horneado:
+ * `server/worldLandMask.js` (COLS x ROWS, actualmente 8800x4604) es la
+ * resolucion a la que se hornea offline `public/terrain/world.png` (ver
+ * `tools/bakeWorldTerrain.js`) — el detalle visual de costas/relieve sale
+ * ENTERO de ese PNG estatico, que se descarga una vez y no cuesta nada por
+ * partida. El reparto de territorios (este archivo) NO necesita esa misma
+ * resolucion: el color/borde de cada territorio se pinta como un TINTE
+ * semitransparente encima del PNG (ver ALPHA_BY_KIND en
+ * public/mapRenderer.js), asi que unas fronteras un poco menos afiladas que
+ * la costa real no se notan. Por eso este archivo trabaja sobre una rejilla
+ * mucho mas basta (RASTER_COLS x RASTER_ROWS, ver TERRAIN_DOWNSAMPLE) —
+ * genera el mapa en milisegundos en vez de segundos, con una fraccion de la
+ * RAM, y el `map:layout` que viaja por WebSocket pasa de ~50MB a menos de
+ * 1MB. `public/mapRenderer.js` reescala esa rejilla basta hasta el tamaño en
+ * pixeles del PNG horneado al dibujar (ver BLOCK_PX ahi) — mismo mecanismo
+ * que ya usaba para pasar del raster interno al canvas en pantalla.
  */
 
 const { shuffle } = require('./rules/shared');
-const { decodeLandMask, COLS: RASTER_COLS, ROWS: RASTER_ROWS } = require('./worldLandMask');
+const { decodeLandMaskPacked, isLand, COLS: FULL_COLS, ROWS: FULL_ROWS } = require('./worldLandMask');
 
 const NEUTRAL_GARRISON = 3;
 const OCEAN = -1; // sentinel en cellTileIds: la celda es oceano, no pertenece a ningun tile
 
-// La mascara y la lista de celdas de tierra se decodifican una unica vez al
+// Cuantas celdas del raster horneado (FULL_COLS x FULL_ROWS) equivalen a UNA
+// celda de la rejilla de territorios. 8 da 1100x576 (~633K celdas) — de sobra
+// para fronteras suaves al zoom maximo del juego (MAX_SCALE=2.5 en
+// public/mapRenderer.js; ver el comentario de mas arriba). Subir este numero
+// = mapas mas rapidos/ligeros pero fronteras mas bastas; bajarlo = al reves.
+const TERRAIN_DOWNSAMPLE = 8;
+const RASTER_COLS = Math.round(FULL_COLS / TERRAIN_DOWNSAMPLE);
+const RASTER_ROWS = Math.round(FULL_ROWS / TERRAIN_DOWNSAMPLE);
+
+// La mascara y la lista de celdas de tierra se construyen una unica vez al
 // cargar el modulo (no por partida) — server/worldLandMask.js seccion "Como
 // se genera" tiene el detalle de donde sale esta silueta.
 //
+// Se lee directamente del Buffer empaquetado (`decodeLandMaskPacked()`, ~5MB)
+// en vez de desempaquetar antes la mascara completa a resolucion de horneado
+// (`decodeLandMask()`, ~40,5MB y ~1s de CPU) — como esta rejilla solo
+// necesita 1 de cada TERRAIN_DOWNSAMPLE^2 celdas, desempaquetar TODO antes
+// de tirar el 98% seria trabajo desperdiciado.
+//
 // `landCellsX`/`landCellsY` van en arrays tipados PAREJOS (no un array de
-// objetos {x,y}) — a la resolucion real (8800x4604) hay ~11.8M celdas de
-// tierra, y construir 11.8M objetos JS pequeños tardaba ~3s solo en cargar
-// el modulo (una vez al arrancar el servidor, pero igualmente innecesario).
-// Con arrays tipados el mismo recuento tarda un puñado de decenas de ms.
-const landMask = decodeLandMask();
+// objetos {x,y}) por la misma razon de siempre: son mas baratos de barajar
+// (ver `shuffleParallel` mas abajo) que un array de objetos JS.
+const packedLandMask = decodeLandMaskPacked();
+const landMask = new Uint8Array(RASTER_COLS * RASTER_ROWS);
 let landCellCount = 0;
-for (let i = 0; i < landMask.length; i++) if (landMask[i]) landCellCount++;
+for (let ry = 0; ry < RASTER_ROWS; ry++) {
+  const fy = Math.min(FULL_ROWS - 1, ry * TERRAIN_DOWNSAMPLE);
+  for (let rx = 0; rx < RASTER_COLS; rx++) {
+    const fx = Math.min(FULL_COLS - 1, rx * TERRAIN_DOWNSAMPLE);
+    if (isLand(packedLandMask, fx, fy)) {
+      landMask[ry * RASTER_COLS + rx] = 1;
+      landCellCount++;
+    }
+  }
+}
 const landCellsX = new Int32Array(landCellCount);
 const landCellsY = new Int32Array(landCellCount);
 {

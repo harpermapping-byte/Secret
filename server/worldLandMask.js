@@ -397,4 +397,30 @@ function decodeLandMask() {
   return mask;
 }
 
-module.exports = { decodeLandMask, COLS, ROWS };
+/**
+ * Version "ligera" de la mascara: el Buffer tal cual sale del base64 (~5MB,
+ * 1 bit/celda empaquetado), SIN desempaquetar a 1 byte/celda (eso son
+ * COLS*ROWS = ~40,5M bytes, ~1s de CPU solo en el bucle de desempaquetado).
+ * Pensada para `server/mapTemplates.js`, que ya no necesita la resolucion
+ * completa en tiempo de ejecucion (el reparto de territorios se genera a una
+ * resolucion mucho mas basta, ver TERRAIN_DOWNSAMPLE ahi) y por tanto solo
+ * consulta un punto suelto de cada bloque en vez de recorrer la mascara
+ * entera — usar `isLand()` sobre este buffer evita pagar el desempaquetado
+ * completo por celdas que ni siquiera se van a mirar. `decodeLandMask()` (de
+ * arriba) sigue existiendo tal cual para quien SI necesite la resolucion
+ * completa desempaquetada (`tools/worldTerrainCore.js`, que hornea
+ * `public/terrain/world.png` offline, fuera del servidor en produccion).
+ */
+function decodeLandMaskPacked() {
+  return Buffer.from(LAND_MASK_BASE64, 'base64');
+}
+
+/** true si la celda (x,y) es tierra, leyendo el bit directamente del Buffer empaquetado de decodeLandMaskPacked(). */
+function isLand(packed, x, y) {
+  const i = y * COLS + x;
+  const byteIndex = i >> 3;
+  const bitIndex = 7 - (i & 7);
+  return ((packed[byteIndex] >> bitIndex) & 1) === 1;
+}
+
+module.exports = { decodeLandMask, decodeLandMaskPacked, isLand, COLS, ROWS };

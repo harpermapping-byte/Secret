@@ -44,14 +44,19 @@
  *     que se repinta siempre que llega un `state:*` nuevo, sin tocar el raster.
  */
 (function () {
-  // Tamaño en pantalla (a escala 1) de cada celda del raster. El raster en sí
-  // (server/worldLandMask.js) es 4400x2302 celdas (el doble de detalle que la
-  // version anterior, 2200x1151) — este valor esta en 1 para que el canvas
-  // final en pantalla no cambie de tamaño (4400*1=4400 x 2302*1=2302px, ~10M
-  // pixeles, el mismo presupuesto de siempre) mientras el raster en si trae
-  // el doble de detalle nativo (bordes/costas mas finos sin tener que
-  // reescalar con nearest-neighbor).
-  const BLOCK_PX = 1;
+  // Tamaño en pixeles del terreno horneado (public/terrain/world.png, ver
+  // tools/bakeWorldTerrain.js) — MISMA resolucion que COLS x ROWS de
+  // server/worldLandMask.js. `layout.cols/rows` (lo que manda `map:layout`
+  // por partida) es una rejilla mucho mas basta a proposito (ver
+  // TERRAIN_DOWNSAMPLE en server/mapTemplates.js: genera el mapa mas rapido y
+  // con un payload de red mucho menor) — BLOCK_PX es el factor que reescala
+  // esa rejilla basta hasta este tamaño de pantalla al pintar, para que
+  // `canvasEl` y `terrainBgEl` (el PNG, a este mismo tamaño) queden
+  // perfectamente alineados bajo el mismo transform de pan/zoom. Se
+  // recalcula en cada `setLayout()`, no es un valor fijo.
+  const TERRAIN_IMAGE_COLS = 8800;
+  const TERRAIN_IMAGE_ROWS = 4604;
+  let BLOCK_PX = 1;
   const NEUTRAL_COLOR = '#3a3f45';
   const BORDER_COLOR = '#050a10'; // borde entre dos territorios de tierra
   const COAST_COLOR = '#5fb8d9'; // borde entre tierra y oceano (linea de costa)
@@ -75,12 +80,16 @@
 
   // Layout de los marcadores de jugador alrededor del centroide de su
   // facción: hasta PLAYERS_PER_RING por anillo, cada anillo un poco mas lejos
-  // del centro — ver computePlayerMarkers(). Valores en celdas de raster
-  // (equivalen a px a escala 1, ya que BLOCK_PX=1).
+  // del centro — ver computePlayerMarkers(). Valores en PIXELES DE PANTALLA
+  // (a escala 1, como MARKER_SIZE) — computePlayerMarkers() los divide entre
+  // BLOCK_PX antes de sumarlos al centroide (que esta en espacio de rejilla,
+  // no de pantalla) para que el radio visual del anillo se mantenga
+  // constante sin importar de que resolucion venga `layout.cols/rows` esa
+  // partida (ver TERRAIN_DOWNSAMPLE en server/mapTemplates.js).
   const PLAYERS_PER_RING = 8;
-  const MARKER_RING_BASE_RADIUS = 26;
-  const MARKER_RING_STEP = 24;
-  const MARKER_SIZE = 7; // "radio" del triangulo del marcador
+  const MARKER_RING_BASE_RADIUS_PX = 26;
+  const MARKER_RING_STEP_PX = 24;
+  const MARKER_SIZE = 7; // "radio" del triangulo del marcador, ya en px de pantalla
 
   // Transparencia (0-255) de cada tipo de celda al pintar el raster de
   // territorios sobre el terreno horneado (`terrainBgEl`) — ver comentario
@@ -121,9 +130,17 @@
       offscreen.width = layout.cols;
       offscreen.height = layout.rows;
 
-      canvasEl.width = layout.cols * BLOCK_PX;
-      canvasEl.height = layout.rows * BLOCK_PX;
-      canvasEl.getContext('2d').imageSmoothingEnabled = false;
+      // `layout.cols/rows` es la rejilla BASTA de reparto de territorios (ver
+      // TERRAIN_DOWNSAMPLE en server/mapTemplates.js) — BLOCK_PX es el factor
+      // que la reescala hasta el tamaño del terreno horneado (TERRAIN_IMAGE_
+      // COLS/ROWS) para que canvasEl y terrainBgEl queden pixel a pixel
+      // alineados bajo el mismo transform, sin importar cuan basta sea esa
+      // rejilla esa partida.
+      BLOCK_PX = TERRAIN_IMAGE_COLS / layout.cols;
+
+      canvasEl.width = Math.round(layout.cols * BLOCK_PX);
+      canvasEl.height = Math.round(layout.rows * BLOCK_PX);
+      canvasEl.getContext('2d').imageSmoothingEnabled = true; // ver comentario en paintRaster()
 
       if (markersEl) {
         markersEl.width = canvasEl.width;
@@ -131,10 +148,18 @@
       }
 
       // El terreno horneado es estatico (mismo planeta real en toda partida,
-      // ver tools/bakeWorldTerrain.js) — se carga una vez, a tamaño natural
-      // (mismo nº de pixeles que el raster, asi que el MISMO transform de
-      // canvasEl lo deja alineado sin reescalar, ver applyTransform()).
-      if (terrainBgEl && !terrainBgEl.src) terrainBgEl.src = '/terrain/world.png';
+      // ver tools/bakeWorldTerrain.js) — se carga una vez. Se fuerza su
+      // tamaño en pixeles a que coincida EXACTO con canvasEl (en vez de fiarse
+      // de su tamaño natural) porque `layout.cols/rows` ya no coincide
+      // siempre con TERRAIN_IMAGE_COLS/ROWS al pixel (redondeos de
+      // TERRAIN_DOWNSAMPLE) — la diferencia es minima (<0.1%) pero forzarla
+      // evita cualquier desalineacion acumulada al hacer zoom, ya que ambas
+      // capas reciben el MISMO transform de pan/zoom (ver applyTransform()).
+      if (terrainBgEl) {
+        if (!terrainBgEl.src) terrainBgEl.src = '/terrain/world.png';
+        terrainBgEl.width = canvasEl.width;
+        terrainBgEl.height = canvasEl.height;
+      }
 
       cellRenderKind = computeCellRenderKind(layout);
       lastRasterFingerprint = null; // fuerza el repintado del raster la primera vez con este layout
@@ -294,7 +319,14 @@
       ctx.putImageData(image, 0, 0);
 
       const mainCtx = canvasEl.getContext('2d');
-      mainCtx.imageSmoothingEnabled = false;
+      // Suavizado ENCENDIDO al reescalar: `offscreen` es la rejilla basta de
+      // reparto de territorios (ver TERRAIN_DOWNSAMPLE en
+      // server/mapTemplates.js) y aqui se agranda varias veces (BLOCK_PX) para
+      // llegar al tamaño de pantalla — sin suavizado se verian bloques
+      // cuadrados grandes en vez de fronteras limpias. Antes iba apagado
+      // porque `offscreen` ya venia al tamaño final (BLOCK_PX=1, sin
+      // reescalado real de por medio).
+      mainCtx.imageSmoothingEnabled = true;
       mainCtx.clearRect(0, 0, canvasEl.width, canvasEl.height);
       mainCtx.drawImage(offscreen, 0, 0, cols, rows, 0, 0, canvasEl.width, canvasEl.height);
     }
@@ -412,7 +444,11 @@
           const posInRing = i % PLAYERS_PER_RING;
           const countInRing = Math.min(PLAYERS_PER_RING, roster.length - ring * PLAYERS_PER_RING);
           const angle = (2 * Math.PI * posInRing) / countInRing;
-          const radius = MARKER_RING_BASE_RADIUS + ring * MARKER_RING_STEP;
+          // centroid.x/y esta en espacio de rejilla (layout.cols/rows), no de
+          // pantalla — se pasa el radio (en px de pantalla) a ese mismo
+          // espacio dividiendo por BLOCK_PX antes de sumarlo, ver comentario
+          // de MARKER_RING_BASE_RADIUS_PX mas arriba.
+          const radius = (MARKER_RING_BASE_RADIUS_PX + ring * MARKER_RING_STEP_PX) / BLOCK_PX;
           markers.set(p.userId, {
             x: centroid.x + radius * Math.cos(angle),
             y: centroid.y + radius * Math.sin(angle),
