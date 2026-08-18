@@ -36,11 +36,32 @@ const OCEAN = -1; // sentinel en cellTileIds: la celda es oceano, no pertenece a
 // La mascara y la lista de celdas de tierra se decodifican una unica vez al
 // cargar el modulo (no por partida) — server/worldLandMask.js seccion "Como
 // se genera" tiene el detalle de donde sale esta silueta.
+//
+// `landCellsX`/`landCellsY` van en arrays tipados PAREJOS (no un array de
+// objetos {x,y}) — a la resolucion real (8800x4604) hay ~11.8M celdas de
+// tierra, y construir 11.8M objetos JS pequeños tardaba ~3s solo en cargar
+// el modulo (una vez al arrancar el servidor, pero igualmente innecesario).
+// Con arrays tipados el mismo recuento tarda un puñado de decenas de ms.
 const landMask = decodeLandMask();
-const landCells = [];
-for (let ry = 0; ry < RASTER_ROWS; ry++) {
-  for (let rx = 0; rx < RASTER_COLS; rx++) {
-    if (landMask[ry * RASTER_COLS + rx]) landCells.push({ x: rx, y: ry });
+let landCellCount = 0;
+for (let i = 0; i < landMask.length; i++) if (landMask[i]) landCellCount++;
+const landCellsX = new Int32Array(landCellCount);
+const landCellsY = new Int32Array(landCellCount);
+{
+  let k = 0;
+  for (let ry = 0; ry < RASTER_ROWS; ry++) {
+    for (let rx = 0; rx < RASTER_COLS; rx++) {
+      if (landMask[ry * RASTER_COLS + rx]) { landCellsX[k] = rx; landCellsY[k] = ry; k++; }
+    }
+  }
+}
+
+/** Fisher-Yates in-place, pero sobre DOS arrays tipados en paralelo (misma permutacion en ambos) — equivalente a `shuffle()` de rules/shared.js, que no sirve aqui porque necesitamos mover x[i] e y[i] juntos, no dos barajados independientes. */
+function shuffleParallel(xs, ys) {
+  for (let i = xs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    let t = xs[i]; xs[i] = xs[j]; xs[j] = t;
+    t = ys[i]; ys[i] = ys[j]; ys[j] = t;
   }
 }
 
@@ -50,7 +71,7 @@ for (let ry = 0; ry < RASTER_ROWS; ry++) {
 function generateMap({ tileCount, factionCount, mode }) {
   if (factionCount < 2) throw new Error('generateMap: se necesitan al menos 2 facciones');
   if (tileCount < factionCount * 2) throw new Error('generateMap: tileCount demasiado pequenio para factionCount');
-  if (tileCount > landCells.length) throw new Error('generateMap: tileCount demasiado grande, no caben tantos territorios en la tierra del mapa');
+  if (tileCount > landCellsX.length) throw new Error('generateMap: tileCount demasiado grande, no caben tantos territorios en la tierra del mapa');
 
   const seeds = placeSeedsOnLand(tileCount);
   const { cellTileIds, centroids } = rasterizeLand(seeds, RASTER_COLS, RASTER_ROWS);
@@ -82,22 +103,24 @@ function generateMap({ tileCount, factionCount, mode }) {
  * semillas, se relaja un poco y se reintenta.
  */
 function placeSeedsOnLand(tileCount) {
-  // Barajar `landCells` (cientos de miles de celdas a esta resolucion) es lo
-  // caro de esta funcion, asi que se hace UNA sola vez y se reutiliza el
+  // Barajar las celdas de tierra (arrays tipados paralelos, ver
+  // `shuffleParallel` mas arriba — millones de celdas a esta resolucion) es
+  // lo caro de esta funcion, asi que se hace UNA sola vez y se reutiliza el
   // mismo orden en todas las rondas de relajacion de abajo — cada ronda
   // vuelve a examinar la misma lista (algunos candidatos rechazados por
   // estar muy cerca de una semilla pueden pasar en la siguiente ronda, al
   // relajarse `minDist`), pero sin pagar otro barajado completo cada vez.
-  const candidates = shuffle(landCells);
-  let minDist = Math.sqrt(landCells.length / tileCount) * 0.7;
+  shuffleParallel(landCellsX, landCellsY);
+  let minDist = Math.sqrt(landCellsX.length / tileCount) * 0.7;
   const seeds = [];
 
   for (let round = 0; round < 25 && seeds.length < tileCount; round++) {
     const minDistSq = minDist * minDist;
-    for (const candidate of candidates) {
+    for (let ci = 0; ci < landCellsX.length; ci++) {
       if (seeds.length >= tileCount) break;
-      const farEnough = seeds.every((s) => (s.x - candidate.x) ** 2 + (s.y - candidate.y) ** 2 >= minDistSq);
-      if (farEnough) seeds.push(candidate);
+      const cx = landCellsX[ci], cy = landCellsY[ci];
+      const farEnough = seeds.every((s) => (s.x - cx) ** 2 + (s.y - cy) ** 2 >= minDistSq);
+      if (farEnough) seeds.push({ x: cx, y: cy });
     }
     minDist *= 0.8;
   }
@@ -107,11 +130,12 @@ function placeSeedsOnLand(tileCount) {
   // distancia minima — el orden de `seeds` define el id de cada tile.
   if (seeds.length < tileCount) {
     const used = new Set(seeds.map((s) => `${s.x},${s.y}`));
-    for (const candidate of candidates) {
+    for (let ci = 0; ci < landCellsX.length; ci++) {
       if (seeds.length >= tileCount) break;
-      const key = `${candidate.x},${candidate.y}`;
+      const cx = landCellsX[ci], cy = landCellsY[ci];
+      const key = `${cx},${cy}`;
       if (!used.has(key)) {
-        seeds.push(candidate);
+        seeds.push({ x: cx, y: cy });
         used.add(key);
       }
     }
@@ -120,34 +144,76 @@ function placeSeedsOnLand(tileCount) {
   return seeds;
 }
 
-/** Recorre el raster una vez: cada celda de TIERRA se queda con la semilla mas cercana; el oceano se queda en OCEAN. */
+/**
+ * Reparto tipo Voronoi por inundacion multi-fuente (BFS), NO "semilla mas
+ * cercana por fuerza bruta" celda a celda contra TODAS las semillas — esa
+ * fuerza bruta es O(celdas_de_tierra * numero_de_tiles), que a la resolucion
+ * del raster real (8800x4604, ver server/worldLandMask.js) son miles de
+ * millones de comparaciones y tardaba ~26s por partida (medido al subir la
+ * resolucion del mapa), justo el tipo de regresion de "Iniciar partida" que
+ * ya se corrigio una vez en este proyecto (ver docs/ACCIONES.md seccion 8,
+ * horneado de terreno). El BFS multi-fuente visita cada celda de tierra UNA
+ * vez — O(celdas_de_tierra), independiente de cuantos tiles haya — a costa
+ * de que la metrica de distancia pasa de euclidea exacta a "tablero de
+ * ajedrez" (8 vecinos), indistinguible a ojo para fronteras irregulares
+ * estilo Risk como estas.
+ */
 function rasterizeLand(seeds, cols, rows) {
-  const cellTileIds = new Array(cols * rows).fill(OCEAN);
+  const cellTileIds = new Int32Array(cols * rows).fill(OCEAN);
   const sums = seeds.map(() => ({ x: 0, y: 0, count: 0 }));
 
-  for (let ry = 0; ry < rows; ry++) {
-    for (let rx = 0; rx < cols; rx++) {
-      const idx = ry * cols + rx;
-      if (!landMask[idx]) continue; // oceano: no pertenece a ningun tile
+  const queueX = new Int32Array(landCellsX.length);
+  const queueY = new Int32Array(landCellsX.length);
+  let qHead = 0, qTail = 0;
 
-      const px = rx + 0.5;
-      const py = ry + 0.5;
-      let bestId = 0;
-      let bestDist = Infinity;
-      for (let i = 0; i < seeds.length; i++) {
-        const dx = seeds[i].x - px;
-        const dy = seeds[i].y - py;
-        const dist = dx * dx + dy * dy;
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestId = i;
-        }
+  for (let i = 0; i < seeds.length; i++) {
+    const sx = seeds[i].x, sy = seeds[i].y;
+    const idx = sy * cols + sx;
+    if (cellTileIds[idx] !== OCEAN) continue; // semilla duplicada, defensivo
+    cellTileIds[idx] = i;
+    queueX[qTail] = sx; queueY[qTail] = sy; qTail++;
+  }
+
+  while (qHead < qTail) {
+    const x = queueX[qHead], y = queueY[qHead];
+    const id = cellTileIds[y * cols + x];
+    qHead++;
+    sums[id].x += x; sums[id].y += y; sums[id].count++;
+
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = y + dy;
+      if (ny < 0 || ny >= rows) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx;
+        if (nx < 0 || nx >= cols) continue;
+        const ni = ny * cols + nx;
+        if (!landMask[ni] || cellTileIds[ni] !== OCEAN) continue;
+        cellTileIds[ni] = id;
+        queueX[qTail] = nx; queueY[qTail] = ny; qTail++;
       }
-      cellTileIds[idx] = bestId;
-      sums[bestId].x += rx;
-      sums[bestId].y += ry;
-      sums[bestId].count++;
     }
+  }
+
+  // El BFS solo alcanza tierra CONECTADA a una semilla — islas pequeñas sin
+  // semilla propia (hay miles a esta resolucion) se quedan sin visitar y
+  // seguirian marcadas OCEAN, "perdidas" como si no fueran territorio de
+  // nadie. Se rellenan aparte con fuerza bruta de verdad, pero SOLO sobre
+  // estas celdas sobrantes (unos cientos de miles, no los millones de tierra
+  // totales), así que sigue siendo barato.
+  for (let k = 0; k < landCellsX.length; k++) {
+    const rx = landCellsX[k], ry = landCellsY[k];
+    const idx = ry * cols + rx;
+    if (cellTileIds[idx] !== OCEAN) continue;
+    let bestId = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < seeds.length; i++) {
+      const dx = seeds[i].x - rx, dy = seeds[i].y - ry;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) { bestDist = dist; bestId = i; }
+    }
+    cellTileIds[idx] = bestId;
+    sums[bestId].x += rx; sums[bestId].y += ry; sums[bestId].count++;
   }
 
   const centroids = sums.map((s) => (s.count ? { x: s.x / s.count, y: s.y / s.count } : { x: 0, y: 0 }));

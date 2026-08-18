@@ -16,7 +16,17 @@ html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, san
 #mapViewport { position:fixed; top:var(--map-margin-y); bottom:var(--map-margin-y); left:0; right:0;
                overflow:hidden; background:#070d13; cursor:grab; touch-action:none; }
 #mapViewport.dragging { cursor:grabbing; }
+/* Terreno horneado (public/terrain/world.png) — mas al fondo de las cuatro
+   capas, ver mapRenderer.js cabecera. Mismo transform que #mapCanvas
+   (aplicado en applyTransform()) para quedar alineado con el pixel a pixel;
+   pointer-events:none porque el arrastre/zoom lo gestiona #mapViewport. */
+#mapTerrainBg { position:absolute; top:0; left:0; transform-origin:0 0; pointer-events:none; user-select:none; }
 #mapCanvas { position:absolute; top:0; left:0; transform-origin:0 0; }
+/* Arboles/rocas/arbustos/etc. — A DIFERENCIA de las otras capas, esta NO usa
+   transform-origin/CSS transform: es un canvas del tamaño del VIEWPORT (no
+   del mundo entero) que mapRenderer.js redibuja el mismo en cada pan/zoom
+   con solo los objetos visibles, ver createObjectLayer(). */
+#mapObjects { position:absolute; top:0; left:0; pointer-events:none; }
 /* Capa transparente superpuesta a #mapCanvas: etiquetas de casilla y marcadores
    de jugador. Va aparte del raster (tierra/oceano) para poder repintarla sola
    cuando se unen/mueren jugadores sin tener que repintar las ~10M celdas del

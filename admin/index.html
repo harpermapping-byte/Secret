@@ -96,7 +96,9 @@
 
   <div id="liveControls" class="hidden">
     <div id="mapViewport">
+      <img id="mapTerrainBg" alt="" />
       <canvas id="mapCanvas"></canvas>
+      <canvas id="mapObjects"></canvas>
       <canvas id="mapMarkers"></canvas>
     </div>
 
@@ -238,6 +240,8 @@
     viewportEl: document.getElementById('mapViewport'),
     canvasEl: document.getElementById('mapCanvas'),
     markersEl: document.getElementById('mapMarkers'),
+    terrainBgEl: document.getElementById('mapTerrainBg'),
+    objectsEl: document.getElementById('mapObjects'),
   });
 
   function togglePanel() {
