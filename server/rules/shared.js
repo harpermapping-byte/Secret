@@ -39,13 +39,22 @@ function applyCasualties(match, context, factionNumber, count, causedByFactionNu
     shuffle([...bucket[ACTION_DEFEND]]),
   ];
 
+  // OJO: `pools` puede incluir userIds que un `applyCasualties()` anterior
+  // dentro de la MISMA ronda ya haya matado (p.ej. una faccion que pierde dos
+  // combates distintos a la vez: ambos combates parten de los mismos votos de
+  // esa faccion). `remaining` solo debe bajar cuando de verdad se mata a
+  // alguien vivo — si no, una baja ya contabilizada por otro combate "se
+  // come" el hueco y la faccion termina con menos bajas totales de las que
+  // tocaban.
   let remaining = count;
   let killed = 0;
   for (const pool of pools) {
     while (remaining > 0 && pool.length > 0) {
       const userId = pool.pop();
-      if (killPlayer(match, userId)) killed++;
-      remaining--;
+      if (killPlayer(match, userId)) {
+        killed++;
+        remaining--;
+      }
     }
   }
 

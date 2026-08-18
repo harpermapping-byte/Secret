@@ -22,7 +22,7 @@
  * (sentinel `OCEAN`). La adyacencia real sale de recorrer el raster una vez y
  * anotar qué territorios de tierra quedan pegados pixel con pixel.
  *
- * Forma de una Tile: { id, neighborIds: [id...], ownerFactionNumber: number|null, neutral: bool, garrison: number }
+ * Forma de una Tile: { id, neighborIds: [id...], ownerFactionNumber: number|null, neutral: bool }
  * Forma de mapLayout (estático, no cambia durante la partida, se manda al cliente
  * una única vez para poder dibujar el mapa): { cols, rows, cellTileIds: [tileId por celda del raster, o OCEAN], centroids: [{x,y} por tile] }
  *
@@ -47,7 +47,6 @@
 const { shuffle } = require('./rules/shared');
 const { decodeLandMaskPacked, isLand, COLS: FULL_COLS, ROWS: FULL_ROWS } = require('./worldLandMask');
 
-const NEUTRAL_GARRISON = 3;
 const OCEAN = -1; // sentinel en cellTileIds: la celda es oceano, no pertenece a ningun tile
 
 // Cuantas celdas del raster horneado (FULL_COLS x FULL_ROWS) equivalen a UNA
@@ -126,7 +125,6 @@ function generateMap({ tileCount, factionCount, mode }) {
       neighborIds: [...neighborSets[i]],
       ownerFactionNumber: owner,
       neutral: owner === null,
-      garrison: owner === null ? NEUTRAL_GARRISON : 0,
     });
   }
 
@@ -332,4 +330,4 @@ function assignInitialOwners({ tileCount, factionCount, mode, seeds, neighborSet
   return owner;
 }
 
-module.exports = { generateMap, NEUTRAL_GARRISON, OCEAN };
+module.exports = { generateMap, OCEAN };

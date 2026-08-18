@@ -121,8 +121,15 @@ function serveStatic(req, res, staticRoutes) {
     let relativePath = urlPath.slice(route.prefix.length) || '/index.html';
     if (relativePath === '/') relativePath = '/index.html';
 
+    // `path.relative` (en vez de `filePath.startsWith(route.dir)`) evita el
+    // caso borde de un `startsWith` a pelo: un directorio hermano cuyo nombre
+    // empiece igual que `route.dir` (p.ej. "admin-secrets" junto a "admin")
+    // pasaria un startsWith aunque no sea el mismo directorio. Si la ruta
+    // relativa se sale de `route.dir` (".." al principio) o es absoluta, es
+    // que la peticion intenta escapar del directorio servido.
     const filePath = path.join(route.dir, relativePath);
-    if (!filePath.startsWith(route.dir)) {
+    const relativeToRoot = path.relative(route.dir, filePath);
+    if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
       res.writeHead(403);
       res.end('Prohibido');
       return;
