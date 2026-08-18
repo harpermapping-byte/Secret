@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Condejorge Wars</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: system-ui, sans-serif; background:#0c1720; color:#eaf7ff; }
+  header { padding: 12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #1c2b38; }
+  h1 { font-size: 18px; margin:0; }
+  #phase { color:#8fd9f5; font-size:14px; }
+  #timer { font-variant-numeric: tabular-nums; font-size: 20px; }
+  #board { display:flex; flex-wrap:wrap; gap:6px; padding:20px; max-width: 900px; margin: 0 auto; }
+  .tile { width:56px; height:56px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+          font-size:11px; background:#20303c; border: 2px solid #14202a; position:relative; }
+  .tile.neutral { background:#3a3a3a; }
+  #factions { display:flex; gap:12px; padding: 0 20px 10px; flex-wrap:wrap; }
+  .faction-chip { padding:6px 10px; border-radius:20px; font-size:13px; display:flex; gap:6px; align-items:center; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  #roster { padding: 14px 20px; }
+  #roster h2 { font-size:14px; margin: 0 0 10px; color:#8fd9f5; }
+  #rosterColumns { display:flex; gap:14px; flex-wrap:wrap; }
+  .roster-column { flex:1; min-width:200px; background:#0f1a22; border-radius:10px; padding:10px 12px; border-top: 4px solid #223140; }
+  .roster-column h3 { margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; }
+  .roster-empty { font-size:12px; opacity:.5; font-style: italic; }
+  .player { padding:5px 8px; border-radius:6px; background:#152029; font-size:13px; border:1px solid #223140; margin-bottom:6px; }
+  .player.dead { opacity:0.35; text-decoration: line-through; }
+  #summary { padding: 10px 20px; font-size: 13px; color:#ffd166; min-height: 20px; }
+  #winner { text-align:center; font-size: 28px; padding: 40px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Condejorge Wars <span style="opacity:.5">(placeholders v1)</span></h1>
+    <div id="phase">conectando...</div>
+    <div id="timer">--:--</div>
+  </header>
+
+  <div id="factions"></div>
+  <div id="roster">
+    <h2>Quién se ha unido (por facción)</h2>
+    <div id="rosterColumns"></div>
+  </div>
+  <div id="board"></div>
+  <div id="summary"></div>
+  <div id="winner"></div>
+
+<script>
+  const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const socket = new WebSocket(`${wsProtocol}://${location.host}/ws?role=public`);
+  let lastState = null;
+
+  socket.addEventListener('message', (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === 'state:public') render(message.payload);
+  });
+
+  function render(state) {
+    lastState = state;
+    document.getElementById('phase').textContent = state.phase ? `Fase: ${phaseLabel(state.phase)} (ronda ${state.round})` : 'Esperando a que el admin configure la partida...';
+
+    const factionsEl = document.getElementById('factions');
+    factionsEl.innerHTML = '';
+    (state.factions || []).forEach((f) => {
+      const chip = document.createElement('div');
+      chip.className = 'faction-chip';
+      chip.style.background = '#152029';
+      chip.innerHTML = `<span class="dot" style="background:${f.color}"></span> #${f.number} ${f.name} — ${f.territoryCount} terr. — industria ${f.industry.toFixed(1)}`;
+      factionsEl.appendChild(chip);
+    });
+
+    const boardEl = document.getElementById('board');
+    boardEl.innerHTML = '';
+    (state.tiles || []).forEach((t) => {
+      const div = document.createElement('div');
+      div.className = 'tile' + (t.neutral ? ' neutral' : '');
+      if (!t.neutral) {
+        const faction = state.factions.find((f) => f.number === t.ownerFactionNumber);
+        if (faction) div.style.background = faction.color;
+      }
+      div.textContent = t.id;
+      boardEl.appendChild(div);
+    });
+
+    renderRoster(state);
+
+    document.getElementById('summary').textContent = (state.summaryBlocks || []).map(blockToText).join('   ·   ');
+
+    document.getElementById('winner').textContent = state.winnerFactionNumber
+      ? `¡Gana la facción #${state.winnerFactionNumber}!`
+      : '';
+  }
+
+  function renderRoster(state) {
+    const columnsEl = document.getElementById('rosterColumns');
+    columnsEl.innerHTML = '';
+    (state.factions || []).forEach((f) => {
+      const playersInFaction = (state.players || []).filter((p) => p.factionNumber === f.number);
+      const column = document.createElement('div');
+      column.className = 'roster-column';
+      column.style.borderTopColor = f.color;
+      column.innerHTML = `<h3><span><span class="dot" style="background:${f.color}"></span> ${f.name}</span><span>${playersInFaction.length}</span></h3>`;
+      if (playersInFaction.length === 0) {
+        column.innerHTML += '<div class="roster-empty">nadie unido todavía</div>';
+      } else {
+        playersInFaction.forEach((p) => {
+          const div = document.createElement('div');
+          div.className = 'player' + (p.alive ? '' : ' dead');
+          div.textContent = `${p.username}${p.unitType === 'tank' ? ' 🛡' : ''}`;
+          column.appendChild(div);
+        });
+      }
+      columnsEl.appendChild(column);
+    });
+  }
+
+  function blockToText(block) {
+    if (block.kind === 'industry') return 'Industria: ' + block.data.map((d) => `F${d.faction}=${d.industry.toFixed(1)}`).join(' ');
+    if (block.kind === 'territory') return 'Territorio: ' + block.data.map((d) => `F${d.faction}=${d.territories}`).join(' ');
+    if (block.kind === 'casualties') return block.data.length ? 'Bajas: ' + block.data.join(', ') : 'Sin bajas';
+    return '';
+  }
+
+  function phaseLabel(phase) {
+    return { config: 'Configuración', recruitment: 'Reclutamiento', action: 'Acción', resolution: 'Combate', summary: 'Resumen', end: 'Fin' }[phase] || phase;
+  }
+
+  setInterval(() => {
+    if (!lastState || !lastState.timerEndsAt) { document.getElementById('timer').textContent = '--:--'; return; }
+    const remainingMs = Math.max(0, lastState.timerEndsAt - Date.now());
+    const seconds = Math.ceil(remainingMs / 1000);
+    document.getElementById('timer').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+  }, 250);
+</script>
+</body>
+</html>

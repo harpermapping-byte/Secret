@@ -1,0 +1,422 @@
+'use strict';
+
+const {
+  PHASE_CONFIG,
+  PHASE_RECRUITMENT,
+  PHASE_ACTION,
+  PHASE_RESOLUTION,
+  PHASE_SUMMARY,
+  PHASE_END,
+} = require('./phases');
+
+const commands = require('./commands');
+const { generateMap } = require('./mapTemplates');
+const { resolveAlliances } = require('./rules/alliances');
+const { resolveSpecialAbilities } = require('./rules/specialAbilities');
+const { resolveCombat } = require('./rules/combat');
+const { resolveIndustry } = require('./rules/industry');
+const { resolveExpansion } = require('./rules/expansion');
+
+const {
+  ACTION_JOIN_FACTION,
+  ACTION_ATTACK,
+  ACTION_ALLIANCE,
+  ACTION_DEFEND,
+  VALID_PHASE_BY_ACTION,
+} = commands;
+
+const SUMMARY_MS_PER_BLOCK = 12000; // 10-15s por bloque, ver docs/GDD seccion 5
+
+let match = null; // unica partida activa a la vez (ver docs/GDD "Alcance de v1")
+let onStateChangeCallback = null;
+
+/** El servidor WS se suscribe aqui para retransmitir el estado cada vez que cambia algo. */
+function setStateChangeListener(fn) {
+  onStateChangeCallback = fn;
+}
+
+function notifyStateChange() {
+  if (onStateChangeCallback) onStateChangeCallback();
+}
+
+// ---------------------------------------------------------------------------
+// Fase 0 / arranque
+// ---------------------------------------------------------------------------
+
+function createMatch(config) {
+  const normalizedConfig = normalizeConfig(config);
+  const factions = normalizedConfig.factions.map((f, index) => ({
+    id: index + 1,
+    number: index + 1,
+    name: f.name,
+    color: f.color,
+    industry: 0,
+    industryTierIndex: 0,
+    industryPenaltyNextRound: false,
+    specialEnabled: !!f.specialEnabled,
+    specialAbility: f.specialAbility || null,
+    specialUsed: false,
+    territoryIds: [],
+  }));
+
+  const { tiles } = generateMap({
+    tileCount: normalizedConfig.map.tileCount,
+    factionCount: factions.length,
+    mode: normalizedConfig.map.mode,
+  });
+
+  for (const tile of tiles) {
+    if (tile.ownerFactionNumber != null) {
+      factionByNumber(factions, tile.ownerFactionNumber).territoryIds.push(tile.id);
+    }
+  }
+
+  match = {
+    phase: PHASE_CONFIG,
+    config: normalizedConfig,
+    factions,
+    tiles,
+    players: new Map(),
+    round: 0,
+    roundActions: new Map(),
+    lastAttackerOf: {},
+    activeAlliancePairsThisRound: new Set(),
+    combatModifiers: {},
+    summaryBlocks: [],
+    winnerFactionNumber: null,
+    timer: null,
+  };
+
+  notifyStateChange();
+  return getAdminState();
+}
+
+function normalizeConfig(config) {
+  return {
+    factions: config.factions,
+    channels: config.channels || [],
+    map: { tileCount: config.map?.tileCount ?? 20, mode: config.map?.mode ?? 'neutral' },
+    alliancesEnabled: !!config.alliancesEnabled,
+    thresholds: {
+      expandPercent: config.thresholds?.expandPercent ?? 25,
+      alliancePercent: config.thresholds?.alliancePercent ?? 50,
+      specialPercent: config.thresholds?.specialPercent ?? 75,
+    },
+    timers: {
+      recruitmentMs: config.timers?.recruitmentMs ?? 3 * 60 * 1000,
+      actionMs: config.timers?.actionMs ?? 60 * 1000,
+    },
+  };
+}
+
+function startMatch() {
+  assertPhase(PHASE_CONFIG);
+  match.phase = PHASE_RECRUITMENT;
+  startTimer(match.config.timers.recruitmentMs, closeRecruitment);
+  notifyStateChange();
+}
+
+// ---------------------------------------------------------------------------
+// Entrada unica de comandos de chat
+// ---------------------------------------------------------------------------
+
+function handleChatCommand(userId, username, channel, text) {
+  if (!match) {
+    console.log(`[gameEngine] "${text}" de ${username} ignorado: no hay ninguna partida creada todavia`);
+    return;
+  }
+
+  const parsed = commands.parseCommand(text);
+  if (!parsed) return; // no es un comando del juego, se ignora sin mas (no hace falta avisar)
+
+  const requiredPhase = VALID_PHASE_BY_ACTION[parsed.type];
+  if (match.phase !== requiredPhase) {
+    console.log(
+      `[gameEngine] "${text}" de ${username} ignorado: hace falta la fase "${requiredPhase}" y la partida esta en "${match.phase}"`
+    );
+    return;
+  }
+
+  if (parsed.type === ACTION_JOIN_FACTION) {
+    const ok = joinFaction(userId, username, parsed.targetFactionNumber);
+    console.log(`[gameEngine] ${username} -> facción ${parsed.targetFactionNumber}: ${ok ? 'OK' : 'RECHAZADO (numero de facción invalido)'}`);
+    return;
+  }
+
+  const ok = castAction(userId, parsed.type, parsed.targetFactionNumber);
+  console.log(`[gameEngine] ${username} -> ${parsed.type}: ${ok ? 'OK' : 'RECHAZADO (revisa si esta unido y vivo)'}`);
+}
+
+function joinFaction(userId, username, factionNumber) {
+  assertPhase(PHASE_RECRUITMENT);
+  const faction = factionByNumber(match.factions, factionNumber);
+  if (!faction) return false;
+
+  const existing = match.players.get(userId);
+  match.players.set(userId, {
+    userId,
+    username,
+    factionNumber,
+    alive: true,
+    unitType: existing ? existing.unitType : 'soldier',
+    participation: existing ? existing.participation : 0,
+    diedOnRound: null,
+  });
+  notifyStateChange();
+  return true;
+}
+
+function castAction(userId, actionType, targetFactionNumber) {
+  if (match.phase !== PHASE_ACTION) return false;
+  const player = match.players.get(userId);
+  if (!player || !player.alive) return false;
+
+  if (actionType === commands.ACTION_EXPAND && match.config.map.mode === 'total') return false;
+  if (actionType === ACTION_ALLIANCE && !match.config.alliancesEnabled) return false;
+
+  if (actionType === ACTION_ATTACK || actionType === ACTION_ALLIANCE) {
+    if (!targetFactionNumber || targetFactionNumber === player.factionNumber) return false;
+    const target = factionByNumber(match.factions, targetFactionNumber);
+    if (!target || target.territoryIds.length === 0) return false;
+  }
+
+  match.roundActions.set(userId, { type: actionType, targetFactionNumber });
+  notifyStateChange();
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Transiciones de fase
+// ---------------------------------------------------------------------------
+
+function closeRecruitment() {
+  assertPhase(PHASE_RECRUITMENT);
+  match.phase = PHASE_ACTION;
+  match.round = 1;
+  match.roundActions.clear();
+  startTimer(match.config.timers.actionMs, closeActionPhase);
+  notifyStateChange();
+}
+
+function closeActionPhase() {
+  assertPhase(PHASE_ACTION);
+  clearTimer();
+  match.phase = PHASE_RESOLUTION;
+  resolveRound();
+}
+
+function resolveRound() {
+  const context = tallyActions();
+
+  resolveAlliances(match, context);
+  resolveSpecialAbilities(match, context);
+  context.allInactiveUserIds = new Set([...context.inactiveUserIds, ...context.forceInactive]);
+  resolveCombat(match, context);
+  resolveIndustry(match, context);
+  resolveExpansion(match, context);
+
+  match.summaryBlocks = buildRoundSummary(context);
+  match.phase = PHASE_SUMMARY;
+  startTimer(Math.max(match.summaryBlocks.length, 1) * SUMMARY_MS_PER_BLOCK, advanceRound);
+  notifyStateChange();
+}
+
+function advanceRound() {
+  assertPhase(PHASE_SUMMARY);
+  const winner = checkVictory();
+  if (winner) {
+    match.phase = PHASE_END;
+    match.winnerFactionNumber = winner.number;
+    clearTimer();
+    notifyStateChange();
+    return;
+  }
+
+  match.round += 1;
+  match.roundActions.clear();
+  match.phase = PHASE_ACTION;
+  startTimer(match.config.timers.actionMs, closeActionPhase);
+  notifyStateChange();
+}
+
+function checkVictory() {
+  const alive = match.factions.filter((f) => f.territoryIds.length > 0);
+  return alive.length === 1 ? alive[0] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Recuento de votos de la ronda (contexto compartido por las reglas)
+// ---------------------------------------------------------------------------
+
+function tallyActions() {
+  const votesByFactionAndType = new Map();
+  const activePlayerCountByFaction = new Map();
+  const inactiveUserIds = new Set();
+
+  for (const faction of match.factions) {
+    votesByFactionAndType.set(faction.number, {
+      [commands.ACTION_INDUSTRY]: [],
+      [ACTION_ATTACK]: new Map(),
+      [ACTION_DEFEND]: [],
+      [commands.ACTION_EXPAND]: [],
+      [commands.ACTION_SPECIAL]: [],
+      [ACTION_ALLIANCE]: new Map(),
+    });
+    activePlayerCountByFaction.set(faction.number, 0);
+  }
+
+  for (const player of match.players.values()) {
+    if (!player.alive) continue;
+    const bucket = votesByFactionAndType.get(player.factionNumber);
+    if (!bucket) continue;
+    activePlayerCountByFaction.set(player.factionNumber, activePlayerCountByFaction.get(player.factionNumber) + 1);
+
+    const action = match.roundActions.get(player.userId);
+    if (!action) {
+      inactiveUserIds.add(player.userId);
+      continue;
+    }
+
+    if (action.type === ACTION_ATTACK || action.type === ACTION_ALLIANCE) {
+      const map = bucket[action.type];
+      if (!map.has(action.targetFactionNumber)) map.set(action.targetFactionNumber, []);
+      map.get(action.targetFactionNumber).push(player.userId);
+    } else if (bucket[action.type]) {
+      bucket[action.type].push(player.userId);
+    }
+
+    if (action.type === ACTION_ATTACK || action.type === ACTION_DEFEND) player.participation += 1;
+  }
+
+  return { votesByFactionAndType, activePlayerCountByFaction, inactiveUserIds, forceInactive: new Set() };
+}
+
+function buildRoundSummary(context) {
+  const blocks = [];
+  blocks.push({ kind: 'industry', data: match.factions.map((f) => ({ faction: f.number, industry: f.industry })) });
+  blocks.push({
+    kind: 'territory',
+    data: match.factions.map((f) => ({ faction: f.number, territories: f.territoryIds.length })),
+  });
+  blocks.push({
+    kind: 'casualties',
+    data: [...match.players.values()].filter((p) => p.diedOnRound === match.round).map((p) => p.username),
+  });
+  return blocks;
+}
+
+// ---------------------------------------------------------------------------
+// Timer (usado tanto por las fases automaticas como por los controles admin)
+// ---------------------------------------------------------------------------
+
+function startTimer(durationMs, onExpire) {
+  clearTimer();
+  match.timer = {
+    endsAt: Date.now() + durationMs,
+    remainingMs: durationMs,
+    paused: false,
+    onExpire,
+    handle: setTimeout(onExpire, durationMs),
+  };
+}
+
+function clearTimer() {
+  if (match?.timer?.handle) clearTimeout(match.timer.handle);
+}
+
+function pauseTimer() {
+  if (!match?.timer || match.timer.paused) return;
+  clearTimeout(match.timer.handle);
+  match.timer.remainingMs = match.timer.endsAt - Date.now();
+  match.timer.paused = true;
+  notifyStateChange();
+}
+
+function resumeTimer() {
+  if (!match?.timer || !match.timer.paused) return;
+  match.timer.paused = false;
+  match.timer.endsAt = Date.now() + match.timer.remainingMs;
+  match.timer.handle = setTimeout(match.timer.onExpire, match.timer.remainingMs);
+  notifyStateChange();
+}
+
+function forceAdvancePhase() {
+  if (!match?.timer) return;
+  clearTimeout(match.timer.handle);
+  match.timer.onExpire();
+}
+
+function endMatch() {
+  clearTimer();
+  if (match) match.phase = PHASE_END;
+  notifyStateChange();
+}
+
+// ---------------------------------------------------------------------------
+// Estado publico / admin
+// ---------------------------------------------------------------------------
+
+function getPublicState() {
+  if (!match) return null;
+  return {
+    phase: match.phase,
+    round: match.round,
+    factions: match.factions.map((f) => ({
+      number: f.number,
+      name: f.name,
+      color: f.color,
+      industry: f.industry,
+      territoryCount: f.territoryIds.length,
+    })),
+    tiles: match.tiles.map((t) => ({ id: t.id, ownerFactionNumber: t.ownerFactionNumber, neutral: t.neutral })),
+    players: [...match.players.values()].map((p) => ({
+      userId: p.userId,
+      username: p.username,
+      factionNumber: p.factionNumber,
+      alive: p.alive,
+      unitType: p.unitType,
+    })),
+    summaryBlocks: match.phase === PHASE_SUMMARY ? match.summaryBlocks : [],
+    winnerFactionNumber: match.winnerFactionNumber,
+    timerEndsAt: match.timer?.endsAt ?? null,
+  };
+}
+
+function getAdminState() {
+  if (!match) return { phase: null };
+  return { ...getPublicState(), config: match.config, timerPaused: !!match.timer?.paused };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers internos
+// ---------------------------------------------------------------------------
+
+function factionByNumber(factions, number) {
+  return factions.find((f) => f.number === number);
+}
+
+function assertPhase(expectedPhase) {
+  if (!match || match.phase !== expectedPhase) {
+    throw new Error(`Operacion invalida: se esperaba fase "${expectedPhase}", fase actual "${match?.phase}"`);
+  }
+}
+
+module.exports = {
+  setStateChangeListener,
+  createMatch,
+  startMatch,
+  handleChatCommand,
+  joinFaction,
+  closeRecruitment,
+  castAction,
+  closeActionPhase,
+  resolveRound,
+  advanceRound,
+  checkVictory,
+  pauseTimer,
+  resumeTimer,
+  forceAdvancePhase,
+  endMatch,
+  getPublicState,
+  getAdminState,
+};

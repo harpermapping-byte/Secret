@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: condejorge-wars
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: node server/index.js
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false

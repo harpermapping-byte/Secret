@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Condejorge Wars — Admin</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: system-ui, sans-serif; background:#0c1720; color:#eaf7ff; padding: 20px; max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; }
+  label { display:block; margin-top: 12px; font-size: 13px; color:#8fd9f5; }
+  input, select { width:100%; padding:8px; margin-top:4px; border-radius:6px; border:1px solid #223140; background:#152029; color:#eaf7ff; box-sizing:border-box; }
+  .faction-row { display:flex; gap:8px; margin-top:8px; align-items:center; }
+  .faction-row input[type=text] { flex:2; }
+  .faction-row input[type=color] { flex:0 0 50px; padding:2px; height:36px; }
+  button { margin-top:16px; padding:10px 16px; border-radius:8px; border:none; background:#7fd4f0; color:#04141c; font-weight:600; cursor:pointer; }
+  button.secondary { background:#223140; color:#eaf7ff; }
+  button.danger { background:#ffb4a2; color:#3a0a0a; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  #status { font-size:13px; color:#7fe0a8; margin-top:10px; }
+  #liveControls, #configForm, #login { margin-top: 20px; }
+  .hidden { display:none; }
+  #liveState { margin-top: 16px; font-size: 13px; white-space: pre-wrap; background:#0f1a22; padding:10px; border-radius:8px; }
+</style>
+</head>
+<body>
+  <h1>Panel de admin — Condejorge Wars</h1>
+
+  <div id="login">
+    <label>Contraseña de admin</label>
+    <input type="password" id="passwordInput" />
+    <button onclick="connect()">Entrar</button>
+    <div id="status"></div>
+  </div>
+
+  <div id="configForm" class="hidden">
+    <h2>Fase 0 — Configurar partida</h2>
+
+    <label>Canales de Twitch a escuchar (uno por línea — vale el nombre solo, "condejorge", o el link completo, "https://twitch.tv/condejorge", como prefieras)</label>
+    <textarea id="channels" rows="2" style="width:100%;padding:8px;border-radius:6px;background:#152029;color:#eaf7ff;border:1px solid #223140;">condejorge</textarea>
+
+    <label>Tamaño del mapa (nº de casillas)</label>
+    <input type="number" id="tileCount" value="18" min="6" />
+
+    <label>Reparto inicial</label>
+    <select id="mapMode">
+      <option value="neutral">Zonas pequeñas + territorio neutral</option>
+      <option value="total">Reparto total (sin territorio neutral)</option>
+    </select>
+
+    <label><input type="checkbox" id="alliancesEnabled" style="width:auto" checked /> Alianzas activadas</label>
+
+    <div class="row">
+      <div style="flex:1"><label>% expansión</label><input type="number" id="expandPercent" value="25" /></div>
+      <div style="flex:1"><label>% alianza</label><input type="number" id="alliancePercent" value="50" /></div>
+      <div style="flex:1"><label>% especial</label><input type="number" id="specialPercent" value="75" /></div>
+    </div>
+    <div class="row">
+      <div style="flex:1"><label>Reclutamiento (segundos)</label><input type="number" id="recruitmentSec" value="180" /></div>
+      <div style="flex:1"><label>Acción (segundos)</label><input type="number" id="actionSec" value="60" /></div>
+    </div>
+
+    <h3>Facciones</h3>
+    <div id="factionRows"></div>
+    <button class="secondary" onclick="addFactionRow()">+ Añadir facción</button>
+
+    <div>
+      <button onclick="createMatch()">Crear partida</button>
+      <button id="startBtn" class="hidden" onclick="startMatch()">Iniciar partida</button>
+    </div>
+  </div>
+
+  <div id="liveControls" class="hidden">
+    <h2>Partida en curso</h2>
+    <div>
+      <button class="secondary" onclick="send('admin:pause')">Pausar</button>
+      <button class="secondary" onclick="send('admin:resume')">Reanudar</button>
+      <button class="secondary" onclick="send('admin:advancePhase')">Pasar ronda</button>
+      <button class="danger" onclick="send('admin:endMatch')">Terminar partida</button>
+    </div>
+    <div id="liveState"></div>
+  </div>
+
+<script>
+  let socket = null;
+  const defaultFactions = [
+    { name: 'Halcones', color: '#e63946' },
+    { name: 'Lobos', color: '#457b9d' },
+  ];
+
+  function addFactionRow(name = '', color = '#2a9d8f') {
+    const container = document.getElementById('factionRows');
+    const row = document.createElement('div');
+    row.className = 'faction-row';
+    row.innerHTML = `
+      <input type="text" placeholder="Nombre de la facción" value="${name}" class="factionName" />
+      <input type="color" value="${color}" class="factionColor" />
+      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:12px;">
+        <input type="checkbox" class="factionSpecial" style="width:auto" /> especial
+      </label>
+      <button class="secondary" onclick="this.parentElement.remove()">✕</button>
+    `;
+    container.appendChild(row);
+  }
+  defaultFactions.forEach((f) => addFactionRow(f.name, f.color));
+
+  function connect() {
+    const token = document.getElementById('passwordInput').value;
+    const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    socket = new WebSocket(`${wsProtocol}://${location.host}/ws?role=admin&token=${encodeURIComponent(token)}`);
+
+    socket.addEventListener('open', () => {
+      document.getElementById('status').textContent = 'Conectado.';
+      document.getElementById('login').classList.add('hidden');
+      document.getElementById('configForm').classList.remove('hidden');
+    });
+    socket.addEventListener('close', () => {
+      document.getElementById('status').textContent = 'Contraseña incorrecta o conexión cerrada.';
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'state:admin') renderState(message.payload);
+    });
+  }
+
+  function send(type, payload) {
+    socket.send(JSON.stringify({ type, payload }));
+  }
+
+  function createMatch() {
+    const factions = [...document.querySelectorAll('.faction-row')].map((row) => ({
+      name: row.querySelector('.factionName').value || 'Sin nombre',
+      color: row.querySelector('.factionColor').value,
+      specialEnabled: row.querySelector('.factionSpecial').checked,
+      specialAbility: 'escudo', // catálogo simple por ahora, elegible más adelante desde el panel
+    }));
+
+    send('admin:createMatch', {
+      factions,
+      channels: document.getElementById('channels').value.split('\n').map((s) => s.trim()).filter(Boolean),
+      map: { tileCount: Number(document.getElementById('tileCount').value), mode: document.getElementById('mapMode').value },
+      alliancesEnabled: document.getElementById('alliancesEnabled').checked,
+      thresholds: {
+        expandPercent: Number(document.getElementById('expandPercent').value),
+        alliancePercent: Number(document.getElementById('alliancePercent').value),
+        specialPercent: Number(document.getElementById('specialPercent').value),
+      },
+      timers: {
+        recruitmentMs: Number(document.getElementById('recruitmentSec').value) * 1000,
+        actionMs: Number(document.getElementById('actionSec').value) * 1000,
+      },
+    });
+    document.getElementById('startBtn').classList.remove('hidden');
+  }
+
+  function startMatch() {
+    send('admin:startMatch');
+  }
+
+  function renderState(state) {
+    if (state.phase && state.phase !== 'config') {
+      document.getElementById('configForm').classList.add('hidden');
+      document.getElementById('liveControls').classList.remove('hidden');
+    }
+    document.getElementById('liveState').textContent = JSON.stringify(state, null, 2);
+  }
+</script>
+</body>
+</html>
