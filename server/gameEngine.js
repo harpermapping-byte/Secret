@@ -6,6 +6,7 @@ const {
   PHASE_ACTION,
   PHASE_RESOLUTION,
   PHASE_SUMMARY,
+  PHASE_TRANSITION,
   PHASE_END,
 } = require('./phases');
 
@@ -16,7 +17,7 @@ const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
 const { resolveIndustry, industryThresholdsFor } = require('./rules/industry');
 const { resolveExpansion } = require('./rules/expansion');
-const { factionByNumber } = require('./rules/territory');
+const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
 const {
   ACTION_JOIN_FACTION,
@@ -27,6 +28,7 @@ const {
 } = commands;
 
 const SUMMARY_MS_PER_BLOCK = 12000; // 10-15s por bloque, ver docs/GDD seccion 5
+const TRANSITION_MS = 12000; // duracion del paron del esqueleto entre fases, 10-15s pedidos por el usuario
 
 let match = null; // unica partida activa a la vez (ver docs/GDD "Alcance de v1")
 let onStateChangeCallback = null;
@@ -116,6 +118,9 @@ function createMatch(config) {
     summaryBlocks: [],
     winnerFactionNumber: null,
     timer: null,
+    // Paron decorativo entre fases (esqueleto con cartel) — null cuando no
+    // hay ninguno en curso. Ver enterTransition().
+    transition: null,
   };
 
   notifyStateChange();
@@ -215,6 +220,14 @@ function castAction(userId, actionType, targetFactionNumber) {
     if (!target || target.territoryIds.length === 0) return false;
   }
 
+  // Sin frontera compartida (casilla con casilla) no se puede atacar: hace
+  // falta conquistar terreno neutral con !expansion hasta tocar al enemigo.
+  // Se rechaza igual que un comando invalido cualquiera (como si no se
+  // hubiera escrito nada), no es un caso especial en el chat ni en el mapa.
+  if (actionType === ACTION_ATTACK && !factionsAreAdjacent(match, player.factionNumber, targetFactionNumber)) {
+    return false;
+  }
+
   match.roundActions.set(userId, { type: actionType, targetFactionNumber });
   notifyStateChange();
   return true;
@@ -223,6 +236,25 @@ function castAction(userId, actionType, targetFactionNumber) {
 // ---------------------------------------------------------------------------
 // Transiciones de fase
 // ---------------------------------------------------------------------------
+
+/**
+ * Entra en el paron decorativo entre fases (PHASE_TRANSITION): mientras dura
+ * ningun comando de chat es valido (VALID_PHASE_BY_ACTION no tiene esta fase
+ * como requerida de ninguna accion, se rechazan solas) y la ronda de verdad
+ * NO avanza todavia — `onDone` es quien hace el cambio de fase real, y solo
+ * se ejecuta cuando expira el timer (o el admin fuerza el avance). `kind` y
+ * `round` son solo para que el cliente sepa que cartel dibujarle al
+ * esqueleto (ver public/index.html): 'first-action' | 'summary' | 'next-round'.
+ */
+function enterTransition(kind, round, onDone) {
+  match.transition = { kind, round };
+  match.phase = PHASE_TRANSITION;
+  startTimer(TRANSITION_MS, () => {
+    match.transition = null;
+    onDone();
+  });
+  notifyStateChange();
+}
 
 function closeRecruitment() {
   assertPhase(PHASE_RECRUITMENT);
@@ -237,11 +269,13 @@ function closeRecruitment() {
     faction.rosterSize = [...match.players.values()].filter((p) => p.factionNumber === faction.number).length;
   }
 
-  match.phase = PHASE_ACTION;
   match.round = 1;
   match.roundActions.clear();
-  startTimer(match.config.timers.actionMs, closeActionPhase);
-  notifyStateChange();
+  enterTransition('first-action', match.round, () => {
+    match.phase = PHASE_ACTION;
+    startTimer(match.config.timers.actionMs, closeActionPhase);
+    notifyStateChange();
+  });
 }
 
 function closeActionPhase() {
@@ -274,9 +308,11 @@ function resolveRound() {
   resolveExpansion(match, context);
 
   match.summaryBlocks = buildRoundSummary(context);
-  match.phase = PHASE_SUMMARY;
-  startTimer(Math.max(match.summaryBlocks.length, 1) * SUMMARY_MS_PER_BLOCK, advanceRound);
-  notifyStateChange();
+  enterTransition('summary', match.round, () => {
+    match.phase = PHASE_SUMMARY;
+    startTimer(Math.max(match.summaryBlocks.length, 1) * SUMMARY_MS_PER_BLOCK, advanceRound);
+    notifyStateChange();
+  });
 }
 
 function advanceRound() {
@@ -292,9 +328,11 @@ function advanceRound() {
 
   match.round += 1;
   match.roundActions.clear();
-  match.phase = PHASE_ACTION;
-  startTimer(match.config.timers.actionMs, closeActionPhase);
-  notifyStateChange();
+  enterTransition('next-round', match.round, () => {
+    match.phase = PHASE_ACTION;
+    startTimer(match.config.timers.actionMs, closeActionPhase);
+    notifyStateChange();
+  });
 }
 
 function checkVictory() {
@@ -457,6 +495,7 @@ function getPublicState() {
       winnerFactionNumber: null,
       timerEndsAt: null,
       timerPaused: false,
+      transition: null,
     };
   }
   const liveCounts = countLiveActions();
@@ -511,6 +550,9 @@ function getPublicState() {
     }),
     summaryBlocks: match.phase === PHASE_SUMMARY ? match.summaryBlocks : [],
     winnerFactionNumber: match.winnerFactionNumber,
+    // Paron decorativo del esqueleto entre fases (ver enterTransition) —
+    // { kind, round } mientras dura, null el resto del tiempo.
+    transition: match.transition,
     timerEndsAt: match.timer?.endsAt ?? null,
     // En pausa, `timerEndsAt` se queda congelado en el instante en que se
     // pausó (ver pauseTimer()) — sin esto ningun cliente sabe que ese valor

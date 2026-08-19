@@ -644,8 +644,20 @@
       return true;
     }
 
-    function zoom(factor) {
-      setView(mapView.scale * factor, mapView.x, mapView.y);
+    /**
+     * Cambia la escala manteniendo fijo un punto de la pantalla (por defecto
+     * el centro del viewport; la rueda del raton pasa la posicion del
+     * cursor). Sin esto, setView() conserva mapView.x/y tal cual y todo el
+     * mapa crece/encoge desde su esquina superior izquierda, que es lo que
+     * se veia como "el mapa se va hacia arriba-izquierda" al hacer zoom.
+     */
+    function zoom(factor, anchor) {
+      const ax = anchor ? anchor.x : viewportEl.clientWidth / 2;
+      const ay = anchor ? anchor.y : viewportEl.clientHeight / 2;
+      const worldX = (ax - mapView.x) / mapView.scale;
+      const worldY = (ay - mapView.y) / mapView.scale;
+      const nextScale = mapView.scale * factor;
+      setView(nextScale, ax - worldX * nextScale, ay - worldY * nextScale);
     }
 
     function setupInteraction() {
@@ -666,7 +678,8 @@
         'wheel',
         (e) => {
           e.preventDefault();
-          zoom(e.deltaY < 0 ? 1.1 : 0.9);
+          const rect = viewportEl.getBoundingClientRect();
+          zoom(e.deltaY < 0 ? 1.1 : 0.9, { x: e.clientX - rect.left, y: e.clientY - rect.top });
         },
         { passive: false }
       );
