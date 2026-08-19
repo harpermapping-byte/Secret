@@ -44,12 +44,10 @@
    * los umbrales de mejora. Va en SVG inline — se dibuja nitida a cualquier
    * tamaño y no hace falta ningun asset extra.
    *
-   * `thresholds` son los 4 umbrales que manda el servidor para ESA faccion
-   * (`faction.industryThresholds`, calculados en server/rules/industry.js —
-   * unica fuente de verdad). Van por faccion y no globales porque dependen de
-   * cuanta gente tiene cada una: asi la probeta mide "como de bien coopera mi
-   * faccion" y es comparable entre facciones de tamaños distintos. El ULTIMO
-   * umbral es el que llena la probeta del todo, asi que si se reajustan los
+   * `thresholds` son los 4 umbrales que manda el servidor
+   * (`state.industryThresholds`, sacados de INDUSTRY_TIERS en
+   * server/rules/industry.js — unica fuente de verdad). El ULTIMO umbral es el
+   * que llena la probeta del todo, asi que si algun dia se reajustan los
    * numeros, las marcas se recolocan solas sin tocar esto.
    */
   function industryFlask(industry, thresholds, color) {
@@ -102,6 +100,7 @@
 
   function renderFactionCards(container, state) {
     container.innerHTML = '';
+    const thresholds = state.industryThresholds || [];
     (state.factions || []).forEach((f) => {
       const playersInFaction = (state.players || []).filter((p) => p.factionNumber === f.number);
       const aliveCount = playersInFaction.filter((p) => p.alive).length;
@@ -120,7 +119,7 @@
           <span class="fstat">industria ${f.industry.toFixed(1)} (+${(f.industryGainedLastRound || 0).toFixed(1)})</span>
           <span class="fstat">${f.killsCaused || 0} bajas causadas</span>
         </div>
-        ${industryFlask(f.industry, f.industryThresholds || [], f.color)}
+        ${industryFlask(f.industry, thresholds, f.color)}
       `;
 
       const roster = document.createElement('div');
