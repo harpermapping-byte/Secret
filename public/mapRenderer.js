@@ -91,11 +91,11 @@
   // Sprite del edificio de industria (ver paintIndustryMarkers): PNG
   // sustituible en public/sprites/industry.png (antes era un cuadrado
   // amarillo dibujado a mano). El ancho va en pixeles de MUNDO, igual que
-  // `DECOR_SPRITES` mas abajo — a proposito mas pequeño que `village`
-  // (90 ahi) para que no parezca mas grande que una aldea de verdad.
+  // `DECOR_SPRITES` mas abajo — a proposito algo mas pequeño que `village`
+  // (90 ahi): 67.5 = 75% de 90, tal y como se pidio.
   // INDUSTRY_STEP_WORLD tambien en pixeles de mundo: es la separacion entre
   // industrias de la misma casilla cuando hay varias.
-  const INDUSTRY_SPRITE_WORLD_WIDTH = 46;
+  const INDUSTRY_SPRITE_WORLD_WIDTH = 67.5;
   const INDUSTRY_STEP_WORLD = 30;
   const INDUSTRY_PER_ROW = 4;
   const industrySpriteImg = new Image();
@@ -657,13 +657,20 @@
      * cursor). Sin esto, setView() conserva mapView.x/y tal cual y todo el
      * mapa crece/encoge desde su esquina superior izquierda, que es lo que
      * se veia como "el mapa se va hacia arriba-izquierda" al hacer zoom.
+     *
+     * El clamp de escala (MAX_SCALE/coverScale) se aplica AQUI, antes de
+     * calcular el paneo — no dentro de setView() como antes. Si no, al pedir
+     * mas zoom del que se puede dar (tope de MAX_SCALE) el paneo se seguia
+     * calculando para la escala "de mentira" que se pidio, no para la que de
+     * verdad se aplicaba, y el mapa se iba desplazando solo cada vez que se
+     * insistia en hacer zoom estando ya al maximo.
      */
     function zoom(factor, anchor) {
       const ax = anchor ? anchor.x : viewportEl.clientWidth / 2;
       const ay = anchor ? anchor.y : viewportEl.clientHeight / 2;
       const worldX = (ax - mapView.x) / mapView.scale;
       const worldY = (ay - mapView.y) / mapView.scale;
-      const nextScale = mapView.scale * factor;
+      const nextScale = Math.min(MAX_SCALE, Math.max(coverScale(), mapView.scale * factor));
       setView(nextScale, ax - worldX * nextScale, ay - worldY * nextScale);
     }
 
