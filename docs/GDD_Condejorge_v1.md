@@ -50,7 +50,6 @@ El admin define, antes de pulsar "Iniciar partida":
 - Plantilla de mapa: tamaño (ej. 20 / 35 / 50 casillas) y variante concreta dentro de ese tamaño.
 - Modo de reparto inicial: **reparto total** (todo el mapa asignado desde el minuto uno, sin terreno gris, `!expansion` no tiene efecto) o **zonas pequeñas + territorio neutral** (recomendado, da una fase de expansión inicial y activa `!expansion`).
 - Si las **alianzas** están activadas o no para esta partida (si no lo están, el comando `!alianza` no existe esa partida).
-- % de usuarios activos necesario para conquistar una casilla neutral (bárbaros) — por defecto 25%.
 - % de usuarios activos necesario para activar una alianza — por defecto 50%.
 - % de usuarios activos necesario para activar la habilidad especial de una facción — por defecto 75%.
 - Duración de la Fase de Reclutamiento — por defecto 3 min.
@@ -68,7 +67,7 @@ Una vez pulsado "Iniciar partida", **nada de esto se puede volver a tocar**: no 
 | `!industria` | Fase de Acción | Levantas una industria en un terreno al azar de tu facción: +0.5 de producción por ronda, para siempre (y se pierde si te conquistan ese terreno). |
 | `!ataque <nº facción>` | Fase de Acción | P.ej. `!ataque 2`. Mismo formato que `!alianza`: solo el número de la facción objetivo. Atacas a esa facción; el sistema dirige el golpe automáticamente al punto fronterizo más débil. Inválido si hay una alianza activa esa ronda entre tu facción y la atacada. |
 | `!defender` | Fase de Acción | Refuerzas la defensa de tu facción esa ronda. |
-| `!expansion` | Fase de Acción | Intentas conquistar territorio neutral (bárbaros) fronterizo. Sin efecto si la partida se configuró con reparto total (sin terreno gris). |
+| `!expansion` | Fase de Acción | Ocupáis territorio neutral (bárbaros) fronterizo: hacen falta 2 votantes por cada casilla nueva (1 o 2 votos = 1 casilla, 4 = 2, 6 = 3). Sin efecto si la partida se configuró con reparto total (sin terreno gris). |
 | `!especial` | Fase de Acción | Vota para activar la habilidad especial de tu facción (solo una vez por partida en total). |
 | `!alianza <nº facción>` | Fase de Acción, solo si el admin activó alianzas en esta partida | Vota por un alto el fuego de una ronda con esa facción. |
 
@@ -103,7 +102,7 @@ Cada `!industria` levanta un **edificio de industria** en una casilla al azar de
 casillas × 0.1  +  edificios de industria × 0.5
 ```
 
-El edificio pertenece a la **casilla**, no a la facción: si te conquistan un terreno que tiene una industria, el nuevo dueño se queda con los `0.1 + 0.5 = 0.6` completos. Al alcanzar 4 umbrales sucesivos (valores exactos por definir), se desbloquean, en este orden y de forma automática y permanente:
+El edificio pertenece a la **casilla**, no a la facción: si te conquistan un terreno que tiene una industria, el nuevo dueño se queda con los `0.1 + 0.5 = 0.6` completos. Al alcanzar los 4 umbrales de industria acumulada (10, 20, 30 y 40 — las 4 marcas de la probeta que se ve en el panel de facciones), se desbloquean, en este orden y de forma automática y permanente:
 
 1. **Mejora de unidad** — 1 usuario al azar de la facción pasa de soldado a Tanque; mejoran sus stats de ataque y defensa.
 2. **Bombardeo** — se dispara **una sola vez**, en el instante en que se desbloquea: bombardea automáticamente a la facción que atacó a esta en la ronda anterior, causando daño y bajas (prioridad de bajas: primero quien no puso comando en esa ronda anterior). Si nadie atacó a esta facción la ronda anterior, la mejora se desbloquea pero no tiene a quién golpear esa vez.

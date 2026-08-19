@@ -16,11 +16,14 @@ const BOMBARDEO_DAMAGE = 3;
 const OPESPECIAL_DAMAGE = 3;
 
 // Las 4 mejoras, en orden fijo. threshold = industria acumulada necesaria.
+// Son tambien las 4 marcas de la probeta de industria que se ve en el panel
+// de facciones (ver public/factionCards.js): el ultimo umbral es el que llena
+// la probeta del todo, asi que cambiar estos numeros mueve las marcas solo.
 const INDUSTRY_TIERS = [
-  { key: 'tanque', threshold: 100 },
-  { key: 'bombardeo', threshold: 250 },
-  { key: 'tanque_x2', threshold: 500 },
-  { key: 'operacion_especial', threshold: 800 },
+  { key: 'tanque', threshold: 10 },
+  { key: 'bombardeo', threshold: 20 },
+  { key: 'tanque_x2', threshold: 30 },
+  { key: 'operacion_especial', threshold: 40 },
 ];
 
 /**

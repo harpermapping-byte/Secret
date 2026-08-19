@@ -55,14 +55,27 @@ html, body {
   margin: 0; height: 100%; overflow: hidden;
   font-family: var(--font-serif);
   background: #070d13; color: #eaf7ff;
+  /* Cursor propio del juego en TODA la web (publica y admin). Es un PNG
+     normal: para poner el tuyo, sobrescribe `public/sprites/cursor.png` y
+     recarga — no hay que tocar CSS. Los dos numeros son el "punto caliente"
+     (que pixel de la imagen es la punta que apunta); si tu dibujo tiene la
+     punta en otro sitio, ajustalos aqui. `auto` al final es el respaldo por
+     si el PNG no carga: el navegador usa entonces su flecha de siempre.
+     Ojo: los navegadores ignoran cursores de mas de 128x128 px. */
+  cursor: url('/sprites/cursor.png') 2 2, auto;
 }
 
 /* ---------------------------------------------------------------------------
    Mapa
    --------------------------------------------------------------------------- */
+/* El mapa hereda el cursor del juego (ver body). Antes usaba las manitas
+   `grab`/`grabbing` del navegador, que pisaban el cursor propio justo en la
+   zona mas grande de la pantalla. Si mas adelante quieres un cursor distinto
+   mientras se arrastra el mapa, añade `public/sprites/cursor-drag.png` y
+   descomenta la regla `.dragging` de aqui abajo. */
 #mapViewport { position:fixed; top:var(--map-margin-y); bottom:var(--map-margin-y); left:0; right:0;
-               overflow:hidden; background:#070d13; cursor:grab; touch-action:none; }
-#mapViewport.dragging { cursor:grabbing; }
+               overflow:hidden; background:#070d13; touch-action:none; }
+/* #mapViewport.dragging { cursor: url('/sprites/cursor-drag.png') 2 2, auto; } */
 /* Terreno horneado (public/terrain/world.png) — mas al fondo de las cuatro
    capas, ver mapRenderer.js cabecera. Mismo transform que #mapCanvas
    (aplicado en applyTransform()) para quedar alineado con el pixel a pixel;
@@ -207,15 +220,21 @@ body::after {
    anterior.
    --------------------------------------------------------------------------- */
 .factionCards { display:flex; flex-direction:column; gap:10px; }
+/* La tarjeta es ahora dos columnas: los datos a la izquierda (.factionCardMain)
+   y la probeta de industria a la derecha, en vertical. */
 .factionCard {
-  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+  display:flex; align-items:center; gap:10px;
   background: rgba(92,64,30,.13);
   border: 1px solid var(--ink-line);
   border-left: 5px solid #223140; /* lo sobreescribe el color de la facción, ver factionCards.js */
   border-radius: 4px; padding:8px 10px; font-size:12px; color:var(--ink);
 }
+.factionCardMain { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex:1; min-width:0; }
 .factionCard .fname { font-family:var(--font-title); font-weight:700; flex:1 0 100%; font-size:13px; }
 .factionCard .fstat { color:var(--ink-soft); white-space:nowrap; }
+/* Probeta de industria: la dibuja `industryFlask()` en public/factionCards.js
+   (SVG inline). `flex:none` para que no la encoja el texto de al lado. */
+.industryFlask { flex:none; display:block; }
 
 .rosterMini { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
 .rosterMini span {

@@ -220,7 +220,7 @@ Valores puestos para que el motor funcione y se pueda probar; son placeholders a
 | `PASSIVE_INDUSTRY_PER_TERRITORY` | `rules/industry.js` | 0.1 por casilla |
 | `INDUSTRY_PER_BUILDING` | `rules/industry.js` | 0.5 por edificio de industria |
 | `VOTES_PER_NEW_TILE` | `rules/expansion.js` | 2 votantes por casilla nueva |
-| `INDUSTRY_TIERS` (umbrales de las 4 mejoras) | `rules/industry.js` | 100 / 250 / 500 / 800 |
+| `INDUSTRY_TIERS` (umbrales de las 4 mejoras) | `rules/industry.js` | 10 / 20 / 30 / 40 (son tambien las 4 marcas de la probeta) |
 | `BOMBARDEO_DAMAGE`, `OPESPECIAL_DAMAGE` | `rules/industry.js` | 3 bajas |
 | `REFUERZO_REVIVE_COUNT` | `rules/specialAbilities.js` | 3 revividos |
 | `ESCUDO_DEFENSE_BONUS_PERCENT`, `FRENESI_ATTACK_BONUS_PERCENT` | `rules/specialAbilities.js` | 30% |
@@ -304,7 +304,34 @@ Reglas de oro al tocar esto:
 
 `server/lib/miniWsServer.js` sirve estos PNGs con `Content-Type: image/png` (antes cualquier `.png`, incluido el terreno, salía como `application/octet-stream`).
 
-## 10. Pendiente de documentar aquí cuando se implemente
+## 10. Decoración del mapa y sprites intercambiables (`public/sprites/`)
+
+El mapa se puebla cada partida con elementos decorativos (no tienen efecto en las reglas, solo dan vida y sensación de 2.5D):
+
+| Tipo | Cantidad | Dónde cae |
+|---|---|---|
+| `castle` | 10 | tierra |
+| `port` | 15 | **costa** (tierra que toca agua) |
+| `village` | 20 | tierra |
+| `tree` | 100 | tierra |
+| `ship-small` | 10 | agua |
+| `ship-big` | 5 | agua |
+| `whale` | 5 | agua |
+| `kraken` | 1 | agua |
+
+**Cómo sustituir un placeholder por arte real:** sobrescribe el `.png` correspondiente en `public/sprites/` y recarga. No hay que tocar código ni volver a ejecutar ningún script. Lo único que puede querer ajustarse es el ancho con el que se dibuja en el mapa: `DECOR_SPRITES` en `public/mapRenderer.js`, una línea por tipo (`worldWidth`, en píxeles de mundo) — la altura sale sola del aspecto real del PNG, así que un arte más alto o más estrecho encaja sin tocar nada más. Los placeholders los genera `tools/bakeSpritePlaceholders.js` (solo hace falta si quieres regenerarlos).
+
+**Dónde vive cada pieza:**
+- **Reparto**: `placeDecorations()` en `server/mapTemplates.js`, con la tabla `DECORATION_KINDS` (cantidad, terreno y separación mínima entre elementos del mismo tipo). Añadir un tipo nuevo = una fila ahí + su `.png`; el cliente monta la ruta desde el nombre del tipo, así que no hay que tocarlo.
+- **Por qué en el servidor y no en cada navegador**: para que el streamer y todos los espectadores vean exactamente la misma decoración. Viaja una única vez dentro del mensaje `map:layout` y son ~166 objetos (~5,5KB), nada al lado de la rejilla del mapa.
+- **Dibujado**: `drawDecorations()` dentro de la capa de objetos de `public/mapRenderer.js`. Esa capa es un canvas **del tamaño del viewport** (no del mundo), que se redibuja en cada pan/zoom pintando **solo lo que cae dentro de la pantalla** (+ un margen), así que el coste va con "cuántos elementos se ven ahora", no con "cuántos hay en el mapa". Con ~166 objetos basta un recorrido lineal: la rejilla espacial que usa `objects.bin` (pensada para decenas de miles) aquí costaría más de mantener que el propio recorrido.
+- **2.5D**: los sprites se anclan por su **base** (abajo-centro) y se dibujan ordenados por Y, así los de más al sur tapan a los de más al norte y el solape se lee como profundidad. Por debajo de `DECOR_MIN_SCALE` (zoom de planeta entero) no se dibujan: serían manchas de 2px.
+
+**Cursor del ratón**: `public/sprites/cursor.png`, aplicado en `body` desde `shared.css` (vale para la web pública y para el admin). Para poner el tuyo, sobrescribe ese PNG. Los dos números del `cursor: url(...) 2 2` son el punto caliente (qué píxel es la punta); ajústalos si tu dibujo apunta desde otro sitio. El mapa ya no usa las manitas `grab`/`grabbing` del navegador porque pisaban el cursor propio justo en la zona más grande de la pantalla — hay una regla comentada en `shared.css` por si más adelante quieres un cursor distinto al arrastrar.
+
+**Probeta de industria**: la dibuja `industryFlask()` en `public/factionCards.js` (SVG inline, sin assets). Va a la derecha de los datos de cada facción, se llena del color de la facción según su industria acumulada y lleva las 4 marcas de los umbrales de mejora, que se doran al alcanzarse. Los umbrales llegan del servidor en `state.industryThresholds` (sacados de `INDUSTRY_TIERS` en `server/rules/industry.js`, única fuente de verdad): si se reajustan, las marcas se recolocan solas. El último umbral es el que llena la probeta del todo.
+
+## 11. Pendiente de documentar aquí cuando se implemente
 
 - Eventos aleatorios (v2, no en el alcance de v1).
 - Plantillas de mapa reales con arte (v1 usa un anillo generado, ver `mapTemplates.js`).

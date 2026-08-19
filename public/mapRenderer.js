@@ -186,7 +186,15 @@
       cellRenderKind = computeCellRenderKind(layout);
       lastRasterFingerprint = null; // fuerza el repintado del raster la primera vez con este layout
 
-      if (objectLayer) objectLayer.onLayout(layout);
+      if (objectLayer) {
+        objectLayer.onLayout(layout);
+        // La decoracion (castillos, arboles, barcos...) se reparte por partida
+        // en el servidor y viaja dentro de `map:layout` — ver placeDecorations()
+        // en server/mapTemplates.js. Sus coordenadas vienen en celdas de la
+        // rejilla, igual que los centroides, asi que se pasan con el mismo
+        // BLOCK_PX que el resto del mapa.
+        objectLayer.setDecorations(newLayout.decorations, BLOCK_PX);
+      }
 
       hasFitOnce = false;
       if (lastTiles) paint(lastTiles, lastFactions, lastPlayers);
@@ -802,6 +810,53 @@
   const LOD_NONE_UP = 0.55, LOD_NONE_DOWN = 0.45; // por debajo: no se dibuja ningun objeto
   const LOD_SMALL_UP = 1.15, LOD_SMALL_DOWN = 0.95; // por debajo: solo objetos grandes (arboles/palmeras)
 
+  // ===========================================================================
+  // Sprites de decoracion del mapa (castillos, puertos, aldeas, arboles,
+  // barcos, ballenas, kraken). El servidor los reparte por partida y los manda
+  // en `map:layout` (ver placeDecorations() en server/mapTemplates.js); aqui
+  // solo se dibujan.
+  //
+  // Cada tipo se carga como IMAGEN desde `public/sprites/<tipo>.png`, no como
+  // formas dibujadas en codigo: para poner arte definitivo basta sobrescribir
+  // el PNG en esa carpeta, sin tocar nada de aqui. Lo unico ajustable es el
+  // ancho con el que se dibuja en el mapa (`worldWidth`, en pixeles de mundo);
+  // la altura sale sola del aspecto real del PNG, asi que un arte mas alto o
+  // mas estrecho encaja sin cambiar este archivo.
+  // ===========================================================================
+  const DECOR_SPRITES = {
+    castle: { worldWidth: 150 },
+    port: { worldWidth: 115 },
+    village: { worldWidth: 90 },
+    tree: { worldWidth: 55 },
+    'ship-small': { worldWidth: 95 },
+    'ship-big': { worldWidth: 140 },
+    whale: { worldWidth: 130 },
+    kraken: { worldWidth: 320 },
+  };
+
+  // Por debajo de esta escala de mapa no se dibuja decoracion: a vista de
+  // planeta entero serian manchas de 2px que solo ensucian. Mismo criterio de
+  // LOD que la capa de objetos de terreno.
+  const DECOR_MIN_SCALE = 0.14;
+
+  /**
+   * Carga (una sola vez para toda la pagina) el PNG de cada tipo de
+   * decoracion. Si alguno falta o falla, ese tipo simplemente no se dibuja y
+   * el resto del mapa sigue igual — la decoracion nunca puede tumbar el mapa.
+   */
+  const decorImages = (() => {
+    const images = {};
+    for (const type of Object.keys(DECOR_SPRITES)) {
+      const img = new Image();
+      img.src = `/sprites/${type}.png`;
+      img.addEventListener('error', () => {
+        console.warn(`[mapRenderer] falta public/sprites/${type}.png, no se dibujara ese elemento`);
+      });
+      images[type] = img;
+    }
+    return images;
+  })();
+
   /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */
   function hash01(x, y, salt) {
     let h = (x * 374761393 + y * 668265263 + salt * 2654435761) | 0;
@@ -818,11 +873,25 @@
     let lodTier = 'full'; // 'none' | 'small' | 'full' — con histeresis, ver umbrales arriba
     let rafPending = false;
     let ready = false;
+    // Decoracion de la partida (castillos, puertos, aldeas, arboles, barcos,
+    // ballenas, kraken) — llega del servidor dentro de `map:layout`, ver
+    // setDecorations(). Va aparte de `objs` porque su origen y su forma son
+    // distintos (sprites PNG con posicion en celdas de rejilla, no formas
+    // dibujadas a mano con radio en pixeles de mundo).
+    let decorations = [];
+    let decorBlockPx = 1;
 
     const ctx = objectsEl.getContext('2d');
 
     fetch('/terrain/objects.bin')
-      .then((r) => r.arrayBuffer())
+      .then((r) => {
+        // Sin comprobar el status, un 404 acababa intentando parsear la
+        // pagina de error como si fuera el binario, y el fallo salia por
+        // consola como un "Array buffer allocation failed" que no dice nada
+        // de lo que pasa de verdad (que el asset no esta generado).
+        if (!r.ok) throw new Error(`no encontrado (HTTP ${r.status})`);
+        return r.arrayBuffer();
+      })
       .then((buf) => {
         objs = parseObjectBuffer(buf);
         buildGrid();
@@ -884,6 +953,23 @@
       scheduleRedraw();
     }
 
+    /**
+     * Guarda la decoracion de esta partida (llega en `map:layout`) pasando ya
+     * sus coordenadas de celdas de rejilla a pixeles de MUNDO, que es en lo
+     * que trabaja el resto de esta capa. No hace falta rejilla espacial como
+     * la de `objs`: son ~166 objetos, recorrerlos enteros y descartar los que
+     * no se ven cuesta menos que mantener los cubos.
+     */
+    function setDecorations(list, blockPx) {
+      decorBlockPx = blockPx || 1;
+      decorations = (list || []).map((d) => ({
+        type: d.type,
+        wx: d.x * decorBlockPx,
+        wy: d.y * decorBlockPx,
+      }));
+      scheduleRedraw();
+    }
+
     function onViewChanged(mapView) {
       currentView = mapView;
       scheduleRedraw();
@@ -934,6 +1020,11 @@
       if (!w || !h) return;
       if (!objectsEl.width || !objectsEl.height) resizeCanvas();
       ctx.clearRect(0, 0, w, h);
+
+      // La decoracion de la partida se dibuja SIEMPRE que haya (no depende de
+      // `objects.bin`, que es otro dataset distinto y puede no estar).
+      drawDecorations(w, h);
+
       if (!ready || !objs || !objs.count) return;
 
       const { x: vx, y: vy, scale } = currentView;
@@ -966,6 +1057,52 @@
             drawObject(type, ox * scale + vx, oy * scale + vy, r * scale, ox, oy);
           }
         }
+      }
+    }
+
+    /**
+     * Dibuja la decoracion de la partida que cae dentro del viewport actual.
+     *
+     * Optimizacion (es la pregunta de fondo de esta funcion): NO se dibuja el
+     * mundo entero cada frame. Se calcula el rectangulo visible en
+     * coordenadas de mundo y se descarta todo lo que queda fuera antes de
+     * tocar el canvas, asi que el coste va con "cuantos elementos se ven
+     * ahora", no con "cuantos hay en el mapa". Con ~166 objetos basta un
+     * recorrido lineal — la rejilla espacial de `objs` (pensada para decenas
+     * de miles) aqui seria mas cara de mantener que el propio recorrido.
+     *
+     * Los sprites se anclan por su BASE (abajo-centro), como en cualquier
+     * juego 2.5D: asi un castillo alto se apoya en el suelo en vez de quedar
+     * centrado sobre su punto, y se dibujan ordenados por Y (los de mas al
+     * sur tapan a los de mas al norte) para que el solape entre vecinos se
+     * lea como profundidad.
+     */
+    function drawDecorations(w, h) {
+      if (!decorations.length) return;
+      const { x: vx, y: vy, scale } = currentView;
+      if (scale < DECOR_MIN_SCALE) return;
+
+      const margin = OBJ_VIEWPORT_MARGIN_PX / scale;
+      const wx0 = (0 - vx) / scale - margin;
+      const wy0 = (0 - vy) / scale - margin;
+      const wx1 = (w - vx) / scale + margin;
+      const wy1 = (h - vy) / scale + margin;
+
+      const visible = [];
+      for (const d of decorations) {
+        if (d.wx < wx0 || d.wx > wx1 || d.wy < wy0 || d.wy > wy1) continue;
+        visible.push(d);
+      }
+      visible.sort((a, b) => a.wy - b.wy);
+
+      for (const d of visible) {
+        const spec = DECOR_SPRITES[d.type];
+        const img = decorImages[d.type];
+        if (!spec || !img || !img.complete || !img.naturalWidth) continue;
+
+        const drawW = spec.worldWidth * scale;
+        const drawH = drawW * (img.naturalHeight / img.naturalWidth);
+        ctx.drawImage(img, d.wx * scale + vx - drawW / 2, d.wy * scale + vy - drawH, drawW, drawH);
       }
     }
 
@@ -1063,7 +1200,7 @@
       }
     }
 
-    return { onLayout, onViewChanged, onResize };
+    return { onLayout, onViewChanged, onResize, setDecorations };
   }
 
   window.CondejorgeMap = { createMapController };

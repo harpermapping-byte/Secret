@@ -14,7 +14,7 @@ const { generateMap } = require('./mapTemplates');
 const { resolveAlliances } = require('./rules/alliances');
 const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
-const { resolveIndustry } = require('./rules/industry');
+const { resolveIndustry, INDUSTRY_TIERS } = require('./rules/industry');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber } = require('./rules/territory');
 
@@ -442,6 +442,7 @@ function getPublicState() {
       winnerFactionNumber: null,
       timerEndsAt: null,
       timerPaused: false,
+      industryThresholds: INDUSTRY_TIERS.map((t) => t.threshold),
     };
   }
   const liveCounts = countLiveActions();
@@ -487,6 +488,12 @@ function getPublicState() {
     // la web pública para congelar su propia cuenta atrás — ver
     // `public/matchTimer.js` y docs/ACCIONES.md.
     timerPaused: !!match.timer?.paused,
+    // Los 4 umbrales de mejora de industria: son las 4 marcas de la probeta
+    // que dibuja public/factionCards.js. Se mandan desde aqui (en vez de
+    // repetirlos a mano en el cliente) para que INDUSTRY_TIERS de
+    // rules/industry.js siga siendo la unica fuente de verdad — si se
+    // reajustan los umbrales, las marcas se mueven solas.
+    industryThresholds: INDUSTRY_TIERS.map((t) => t.threshold),
   };
 }
 

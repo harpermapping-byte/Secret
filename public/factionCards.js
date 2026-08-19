@@ -32,8 +32,75 @@
     }[ch]));
   }
 
+  // Medidas de la probeta de industria, en unidades del viewBox del SVG.
+  const FLASK_W = 26;
+  const FLASK_H = 72;
+  const FLASK_BODY_TOP = 16;   // donde acaba el cuello y empieza el cuerpo
+  const FLASK_BODY_BOTTOM = 69;
+
+  /**
+   * Probeta medieval (con tapon de corcho) que se va llenando de liquido del
+   * color de la faccion segun sube su industria acumulada, con las 4 marcas de
+   * los umbrales de mejora. Va en SVG inline — se dibuja nitida a cualquier
+   * tamaño y no hace falta ningun asset extra.
+   *
+   * `thresholds` son los 4 umbrales que manda el servidor
+   * (`state.industryThresholds`, sacados de INDUSTRY_TIERS en
+   * server/rules/industry.js — unica fuente de verdad). El ULTIMO umbral es el
+   * que llena la probeta del todo, asi que si algun dia se reajustan los
+   * numeros, las marcas se recolocan solas sin tocar esto.
+   */
+  function industryFlask(industry, thresholds, color) {
+    const marks = (thresholds || []).slice().sort((a, b) => a - b);
+    const max = marks.length ? marks[marks.length - 1] : 0;
+    const fillRatio = max > 0 ? Math.max(0, Math.min(1, industry / max)) : 0;
+
+    const bodyH = FLASK_BODY_BOTTOM - FLASK_BODY_TOP;
+    const liquidH = bodyH * fillRatio;
+    const liquidY = FLASK_BODY_BOTTOM - liquidH;
+
+    const markLines = marks.map((value) => {
+      const y = FLASK_BODY_BOTTOM - bodyH * (max > 0 ? value / max : 0);
+      const reached = industry >= value;
+      return `<line x1="6" y1="${y.toFixed(1)}" x2="20" y2="${y.toFixed(1)}"
+                stroke="${reached ? '#8a6a1f' : '#7a6a52'}"
+                stroke-width="${reached ? 1.6 : 1}" opacity="${reached ? 0.95 : 0.5}" />`;
+    }).join('');
+
+    const safeColor = escapeHtml(color);
+    const title = `Industria ${industry.toFixed(1)} de ${max} (marcas: ${marks.join(', ')})`;
+
+    return `
+      <svg class="industryFlask" viewBox="0 0 ${FLASK_W} ${FLASK_H}" width="${FLASK_W}" height="${FLASK_H}"
+           role="img" aria-label="${escapeHtml(title)}">
+        <title>${escapeHtml(title)}</title>
+        <!-- corcho -->
+        <rect x="9" y="0" width="8" height="6" rx="1.5" fill="#8a6238" stroke="#4a331c" stroke-width="1" />
+        <!-- cuello -->
+        <rect x="10.5" y="5" width="5" height="7" fill="#cfe3ea" opacity=".35" stroke="#4a331c" stroke-width="1" />
+        <!-- cuerpo de cristal -->
+        <path d="M10.5 12 L10.5 ${FLASK_BODY_TOP} Q4 ${FLASK_BODY_TOP + 3} 4 ${FLASK_BODY_TOP + 12}
+                 L4 ${FLASK_BODY_BOTTOM - 5} Q4 ${FLASK_BODY_BOTTOM} 9 ${FLASK_BODY_BOTTOM}
+                 L17 ${FLASK_BODY_BOTTOM} Q22 ${FLASK_BODY_BOTTOM} 22 ${FLASK_BODY_BOTTOM - 5}
+                 L22 ${FLASK_BODY_TOP + 12} Q22 ${FLASK_BODY_TOP + 3} 15.5 ${FLASK_BODY_TOP} L15.5 12 Z"
+              fill="#cfe3ea" opacity=".28" stroke="#4a331c" stroke-width="1.4" stroke-linejoin="round" />
+        <!-- liquido: recortado a la silueta del cuerpo para que no se salga -->
+        <clipPath id="flaskClip${Math.round(industry * 1000)}${safeColor.replace(/[^a-z0-9]/gi, '')}">
+          <path d="M10.5 12 L10.5 ${FLASK_BODY_TOP} Q4 ${FLASK_BODY_TOP + 3} 4 ${FLASK_BODY_TOP + 12}
+                   L4 ${FLASK_BODY_BOTTOM - 5} Q4 ${FLASK_BODY_BOTTOM} 9 ${FLASK_BODY_BOTTOM}
+                   L17 ${FLASK_BODY_BOTTOM} Q22 ${FLASK_BODY_BOTTOM} 22 ${FLASK_BODY_BOTTOM - 5}
+                   L22 ${FLASK_BODY_TOP + 12} Q22 ${FLASK_BODY_TOP + 3} 15.5 ${FLASK_BODY_TOP} L15.5 12 Z" />
+        </clipPath>
+        ${liquidH > 0 ? `<rect x="3" y="${liquidY.toFixed(1)}" width="20" height="${(liquidH + 1).toFixed(1)}"
+              fill="${safeColor}" opacity=".85"
+              clip-path="url(#flaskClip${Math.round(industry * 1000)}${safeColor.replace(/[^a-z0-9]/gi, '')})" />` : ''}
+        ${markLines}
+      </svg>`;
+  }
+
   function renderFactionCards(container, state) {
     container.innerHTML = '';
+    const thresholds = state.industryThresholds || [];
     (state.factions || []).forEach((f) => {
       const playersInFaction = (state.players || []).filter((p) => p.factionNumber === f.number);
       const aliveCount = playersInFaction.filter((p) => p.alive).length;
@@ -44,12 +111,15 @@
       card.className = 'factionCard';
       card.style.borderLeftColor = f.color;
       card.innerHTML = `
-        <span class="dot" style="background:${color}"></span>
-        <span class="fname">#${f.number} ${name}</span>
-        <span class="fstat">${aliveCount}/${playersInFaction.length} vivos</span>
-        <span class="fstat">${f.territoryCount} terr.</span>
-        <span class="fstat">industria ${f.industry.toFixed(1)} (+${(f.industryGainedLastRound || 0).toFixed(1)})</span>
-        <span class="fstat">${f.killsCaused || 0} bajas causadas</span>
+        <div class="factionCardMain">
+          <span class="dot" style="background:${color}"></span>
+          <span class="fname">#${f.number} ${name}</span>
+          <span class="fstat">${aliveCount}/${playersInFaction.length} vivos</span>
+          <span class="fstat">${f.territoryCount} terr.</span>
+          <span class="fstat">industria ${f.industry.toFixed(1)} (+${(f.industryGainedLastRound || 0).toFixed(1)})</span>
+          <span class="fstat">${f.killsCaused || 0} bajas causadas</span>
+        </div>
+        ${industryFlask(f.industry, thresholds, f.color)}
       `;
 
       const roster = document.createElement('div');
