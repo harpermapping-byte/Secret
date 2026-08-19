@@ -102,7 +102,11 @@ Cada `!industria` levanta un **edificio de industria** en una casilla al azar de
 casillas × 0.1  +  edificios de industria × 0.5
 ```
 
-El edificio pertenece a la **casilla**, no a la facción: si te conquistan un terreno que tiene una industria, el nuevo dueño se queda con los `0.1 + 0.5 = 0.6` completos. Al alcanzar los 4 umbrales de industria acumulada (10, 20, 30 y 40 — las 4 marcas de la probeta que se ve en el panel de facciones), se desbloquean, en este orden y de forma automática y permanente:
+El edificio pertenece a la **casilla**, no a la facción: si te conquistan un terreno que tiene una industria, el nuevo dueño se queda con los `0.1 + 0.5 = 0.6` completos.
+
+Los 4 umbrales de mejora **escalan con el tamaño de la facción** (3, 8, 15 y 24 de industria por cada miembro que tenía al cerrar el reclutamiento). Es la única forma de que el juego funcione igual con 3 personas por facción que con 60: como cada `!industria` deja una renta permanente, una facción numerosa acumula industria muchísimo más rápido, y con umbrales fijos tendría las 4 mejoras en la ronda 2 mientras una pequeña tardaría 9 rondas. Escalando el umbral, ambas las desbloquean sobre las rondas 4, 7, 10 y 13 — y lo que de verdad marca el ritmo pasa a ser **cuánta gente de tu facción colabora**: con un 20% haciendo industria son las rondas 8-14-19-24; con el 100%, 3-6-8-10.
+
+Por eso la probeta del panel de facciones es comparable entre facciones de tamaños distintos: mide "cómo de bien coopera mi gente", no "cuánta gente tengo". Al alcanzar cada marca se desbloquea, en este orden y de forma automática y permanente:
 
 1. **Mejora de unidad** — 1 usuario al azar de la facción pasa de soldado a Tanque; mejoran sus stats de ataque y defensa.
 2. **Bombardeo** — se dispara **una sola vez**, en el instante en que se desbloquea: bombardea automáticamente a la facción que atacó a esta en la ronda anterior, causando daño y bajas (prioridad de bajas: primero quien no puso comando en esa ronda anterior). Si nadie atacó a esta facción la ronda anterior, la mejora se desbloquea pero no tiene a quién golpear esa vez.

@@ -14,7 +14,7 @@ const { generateMap } = require('./mapTemplates');
 const { resolveAlliances } = require('./rules/alliances');
 const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
-const { resolveIndustry, INDUSTRY_TIERS } = require('./rules/industry');
+const { resolveIndustry, industryThresholdsFor } = require('./rules/industry');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber } = require('./rules/territory');
 
@@ -83,6 +83,10 @@ function createMatch(config) {
     specialUsed: false,
     territoryIds: [],
     killsCaused: 0,
+    // Miembros que tenia la faccion al cerrar el reclutamiento. Se rellena en
+    // closeRecruitment(); antes de eso vale 0 y los umbrales de industria caen
+    // en su suelo minimo (ver industryThresholdsFor en rules/industry.js).
+    rosterSize: 0,
   }));
 
   const { tiles, mapLayout } = generateMap({
@@ -222,6 +226,17 @@ function castAction(userId, actionType, targetFactionNumber) {
 
 function closeRecruitment() {
   assertPhase(PHASE_RECRUITMENT);
+
+  // El roster queda fijo aqui (ya no se puede entrar ni cambiar de faccion),
+  // asi que este es el momento de congelar cuanta gente tiene cada faccion.
+  // Los umbrales de industria se calculan a partir de ESTE numero y no de los
+  // vivos de cada momento — ver industryThresholdsFor() en rules/industry.js
+  // para el porque (si bajara con cada baja, las marcas de la probeta se
+  // moverian solas a mitad de partida).
+  for (const faction of match.factions) {
+    faction.rosterSize = [...match.players.values()].filter((p) => p.factionNumber === faction.number).length;
+  }
+
   match.phase = PHASE_ACTION;
   match.round = 1;
   match.roundActions.clear();
@@ -442,7 +457,6 @@ function getPublicState() {
       winnerFactionNumber: null,
       timerEndsAt: null,
       timerPaused: false,
-      industryThresholds: INDUSTRY_TIERS.map((t) => t.threshold),
     };
   }
   const liveCounts = countLiveActions();
@@ -464,6 +478,11 @@ function getPublicState() {
       // roja sobre el territorio de la faccion — ver public/mapRenderer.js.
       defendersThisRound: liveCounts.defendersByFaction.get(f.number) || 0,
       incomingAttackersThisRound: liveCounts.incomingAttackersByFaction.get(f.number) || 0,
+      // Los 4 umbrales de mejora DE ESTA FACCION (dependen de su tamaño, ver
+      // industryThresholdsFor en rules/industry.js) — son las 4 marcas de su
+      // probeta. Se mandan calculados desde aqui para que la regla viva en un
+      // unico sitio y el cliente solo tenga que pintarlos.
+      industryThresholds: industryThresholdsFor(f),
     })),
     tiles: match.tiles.map((t) => ({
       id: t.id,
@@ -488,12 +507,6 @@ function getPublicState() {
     // la web pública para congelar su propia cuenta atrás — ver
     // `public/matchTimer.js` y docs/ACCIONES.md.
     timerPaused: !!match.timer?.paused,
-    // Los 4 umbrales de mejora de industria: son las 4 marcas de la probeta
-    // que dibuja public/factionCards.js. Se mandan desde aqui (en vez de
-    // repetirlos a mano en el cliente) para que INDUSTRY_TIERS de
-    // rules/industry.js siga siendo la unica fuente de verdad — si se
-    // reajustan los umbrales, las marcas se mueven solas.
-    industryThresholds: INDUSTRY_TIERS.map((t) => t.threshold),
   };
 }
 

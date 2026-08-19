@@ -15,16 +15,53 @@ const INDUSTRY_PER_BUILDING = 0.5;
 const BOMBARDEO_DAMAGE = 3;
 const OPESPECIAL_DAMAGE = 3;
 
-// Las 4 mejoras, en orden fijo. threshold = industria acumulada necesaria.
-// Son tambien las 4 marcas de la probeta de industria que se ve en el panel
-// de facciones (ver public/factionCards.js): el ultimo umbral es el que llena
-// la probeta del todo, asi que cambiar estos numeros mueve las marcas solo.
+/**
+ * Las 4 mejoras, en orden fijo. `perPlayer` = industria acumulada necesaria
+ * POR CADA JUGADOR de la faccion, no un numero absoluto.
+ *
+ * Por que por jugador y no fijo: la industria de una faccion crece con su
+ * numero de miembros (cada `!industria` levanta un edificio que renta para
+ * siempre), asi que con un umbral fijo la partida cambia por completo segun
+ * cuanta gente haya en el chat. Medido con el modelo real: con umbrales fijos
+ * de 10/20/30/40, una faccion de 3 personas desbloquea las 4 mejoras en las
+ * rondas 4-6-7-9, pero una de 60 las tiene TODAS en la ronda 2. No existe un
+ * numero fijo que funcione en los dos casos.
+ *
+ * Escalando el umbral con el tamaño de la faccion, la progresion sale igual
+ * tenga 3 o 60 miembros (rondas ~4-7-10-13 con un 60% de participacion), y lo
+ * que de verdad decide el ritmo pasa a ser cuanta gente colabora: con un 20%
+ * de la faccion haciendo industria son las rondas 8-13-19-24; con el 100%,
+ * 3-6-8-10.
+ *
+ * Son tambien las 4 marcas de la probeta del panel de facciones (ver
+ * public/factionCards.js): el ultimo umbral es el que la llena del todo, asi
+ * que cambiar estos numeros mueve las marcas solo. Y como el umbral depende
+ * del tamaño de cada faccion, la probeta es comparable entre facciones
+ * distintas: mide "como de bien coopera mi gente", no "cuanta gente tengo".
+ */
 const INDUSTRY_TIERS = [
-  { key: 'tanque', threshold: 10 },
-  { key: 'bombardeo', threshold: 20 },
-  { key: 'tanque_x2', threshold: 30 },
-  { key: 'operacion_especial', threshold: 40 },
+  { key: 'tanque', perPlayer: 3 },
+  { key: 'bombardeo', perPlayer: 8 },
+  { key: 'tanque_x2', perPlayer: 15 },
+  { key: 'operacion_especial', perPlayer: 24 },
 ];
+
+// Suelo de jugadores al calcular los umbrales. Sin el, una faccion a la que
+// no se une nadie (o que se queda sin miembros) tendria umbral 0 y
+// desbloquearia las 4 mejoras de golpe en la primera ronda.
+const MIN_PLAYERS_FOR_THRESHOLDS = 3;
+
+/**
+ * Los 4 umbrales absolutos de una faccion, ya multiplicados por su tamaño.
+ * Se usa el roster fijado al cerrar el reclutamiento (`rosterSize`), no los
+ * vivos de ahora mismo: si bajara con cada baja, las marcas de la probeta se
+ * moverian solas a mitad de partida y una faccion diezmada desbloquearia
+ * mejoras "gratis" justo por ir perdiendo.
+ */
+function industryThresholdsFor(faction) {
+  const players = Math.max(MIN_PLAYERS_FOR_THRESHOLDS, faction.rosterSize || 0);
+  return INDUSTRY_TIERS.map((tier) => tier.perPlayer * players);
+}
 
 /**
  * Levanta los edificios de industria votados esta ronda, suma la produccion
@@ -51,9 +88,10 @@ function resolveIndustry(match, context) {
     faction.industry += gained;
     faction.industryGainedLastRound = gained;
 
+    const thresholds = industryThresholdsFor(faction);
     while (
       faction.industryTierIndex < INDUSTRY_TIERS.length &&
-      faction.industry >= INDUSTRY_TIERS[faction.industryTierIndex].threshold
+      faction.industry >= thresholds[faction.industryTierIndex]
     ) {
       applyIndustryTier(match, context, faction, INDUSTRY_TIERS[faction.industryTierIndex].key);
       faction.industryTierIndex++;
@@ -135,4 +173,11 @@ function applyOperacionEspecial(match, context, faction) {
   checkFactionElimination(match, context, target.number, faction.number);
 }
 
-module.exports = { resolveIndustry, INDUSTRY_TIERS, PASSIVE_INDUSTRY_PER_TERRITORY, INDUSTRY_PER_BUILDING };
+module.exports = {
+  resolveIndustry,
+  INDUSTRY_TIERS,
+  industryThresholdsFor,
+  MIN_PLAYERS_FOR_THRESHOLDS,
+  PASSIVE_INDUSTRY_PER_TERRITORY,
+  INDUSTRY_PER_BUILDING,
+};
