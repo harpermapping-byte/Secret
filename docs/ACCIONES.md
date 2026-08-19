@@ -220,7 +220,7 @@ Valores puestos para que el motor funcione y se pueda probar; son placeholders a
 | `PASSIVE_INDUSTRY_PER_TERRITORY` | `rules/industry.js` | 0.1 por casilla |
 | `INDUSTRY_PER_BUILDING` | `rules/industry.js` | 0.5 por edificio de industria |
 | `VOTES_PER_NEW_TILE` | `rules/expansion.js` | 2 votantes por casilla nueva |
-| `INDUSTRY_TIERS` (umbrales de las 4 mejoras) | `rules/industry.js` | 10 / 20 / 30 / 40 (son tambien las 4 marcas de la probeta) |
+| `INDUSTRY_TIERS` (umbrales de las 4 mejoras) | `rules/industry.js` | 3 / 8 / 15 / 24 **por jugador** de la facción (ver más abajo) |
 | `BOMBARDEO_DAMAGE`, `OPESPECIAL_DAMAGE` | `rules/industry.js` | 3 bajas |
 | `REFUERZO_REVIVE_COUNT` | `rules/specialAbilities.js` | 3 revividos |
 | `ESCUDO_DEFENSE_BONUS_PERCENT`, `FRENESI_ATTACK_BONUS_PERCENT` | `rules/specialAbilities.js` | 30% |
@@ -231,6 +231,29 @@ Valores puestos para que el motor funcione y se pueda probar; son placeholders a
 - **No hay defensa pasiva de territorio**: si nadie de una facción escribe `!defender` esa ronda, entra al combate con **0** de defensa por muchas casillas que tenga. Toda la defensa sale de los usuarios. (Antes existía `BASE_GARRISON_PER_TERRITORY`; se eliminó.)
 - **Industria como edificio sobre la casilla**: cada `!industria` levanta un edificio en una casilla al azar de las que tenga la facción (`tile.industryCount`, ver `mapTemplates.js`). Producción de una facción por ronda = `casillas × 0.1 + edificios × 0.5`. El edificio vive en la **casilla**, no en la facción, así que conquistar una casilla con una industria le pasa al nuevo dueño los `0.1 + 0.5 = 0.6` completos sin código extra — es la propia `transferTile()` la que lo hace.
 - **Expansión por número de votantes, sin umbral de %**: hacen falta 2 votantes por cada casilla nueva, con mínimo de 1 casilla si vota alguien (1 o 2 votos → 1 casilla; 4 → 2; 6 → 3; ver `tilesWonByVotes()`). Las casillas se sortean de una en una entre las neutrales que tocan la frontera, recalculando la frontera tras cada conquista. El ajuste **`% expansión` del panel de admin se eliminó** por quedarse sin uso; `% alianza` y `% especial` siguen funcionando por porcentaje.
+
+**Umbrales de industria escalados por tamaño de facción (por qué):**
+
+Los umbrales de las 4 mejoras NO son números absolutos: son `perPlayer × jugadores de la facción` (ver `industryThresholdsFor()` en `rules/industry.js`). El motivo es que la industria de una facción crece con su número de miembros — cada `!industria` levanta un edificio que renta **para siempre** —, así que con un umbral fijo la partida cambia por completo según cuánta gente haya en el chat. Medido con el motor real, con umbrales fijos de 10/20/30/40:
+
+| Jugadores | Mejoras 1·2·3·4 en ronda |
+|---|---|
+| 3 | 4 · 6 · 7 · 9 |
+| 60 | 1 · 2 · 2 · 2 |
+
+No existe un número fijo que funcione en los dos casos. Escalando por tamaño de facción (3/8/15/24 por jugador), la progresión sale igual tenga 3 o 60 miembros — verificado con el motor: **3 jugadores → 4·7·9·12; 60 jugadores → 4·7·10·13** —, y lo que decide el ritmo pasa a ser cuánta gente colabora:
+
+| Participación (12 jugadores) | Mejoras 1·2·3·4 en ronda |
+|---|---|
+| 20% hace `!industria` | 8 · 14 · 19 · 24 |
+| 60% | 5 · 7 · 10 · 13 |
+| 100% | 3 · 6 · 8 · 10 |
+
+Detalles que importan:
+- Se usa el **roster fijado al cerrar el reclutamiento** (`faction.rosterSize`, rellenado en `closeRecruitment()`), no los vivos de cada momento: si bajara con cada baja, las marcas de la probeta se moverían solas a mitad de partida y una facción diezmada desbloquearía mejoras "gratis" justo por ir perdiendo.
+- Hay un suelo de `MIN_PLAYERS_FOR_THRESHOLDS` (3) para que una facción a la que no se une nadie no tenga umbral 0 y desbloquee las 4 mejoras de golpe en la primera ronda.
+- Los umbrales viajan **por facción** en el estado público (`faction.industryThresholds`), no como un valor global, justo porque cada facción tiene el suyo.
+- Se descartaron dos alternativas por ser demasiado lentas (la mejora 4 casi nunca llegaba a desbloquearse): pago único sin renta, y techo de 1 edificio por jugador.
 
 **Indicadores en vivo sobre el mapa (`public/mapRenderer.js`):**
 - **Escudo verde 🛡 + número** sobre una facción = cuánta gente suya está defendiendo esta ronda. **Espada roja ⚔ + número** = cuántos atacantes tiene encima ahora mismo. Se calculan en `countLiveActions()` (`gameEngine.js`) y viajan en cada `state:public`/`state:admin` como `defendersThisRound` / `incomingAttackersThisRound` por facción, así que se actualizan **mientras la gente escribe en el chat**, no al resolver la ronda. Fuera de `PHASE_ACTION` van a 0 y los iconos desaparecen solos.
