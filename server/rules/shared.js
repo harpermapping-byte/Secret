@@ -6,15 +6,31 @@ const { factionByNumber } = require('./territory');
 // Rango de azar por unidad al calcular fuerza de combate: CADA usuario que
 // ataca (o que defiende) aporta una tirada suelta dentro de este rango, asi
 // que un combate de 3 contra 3 no siempre sale igual. Mismo rango para ataque
-// y para defensa — ver docs/GDD seccion 6 "Combate".
+// y para defensa — ver docs/GDD seccion 6 "Combate". Los caballeros (mejora
+// de industria nivel 1/3, ver rules/industry.js) tiran en un rango mas alto:
+// son soldados mejores, no solo mas rapidos sobre el mapa.
 const COMBAT_RANDOM_MIN = 0.7;
 const COMBAT_RANDOM_MAX = 1.3;
+const KNIGHT_RANDOM_MIN = 0.9;
+const KNIGHT_RANDOM_MAX = 1.4;
 
-/** Suma `count` tiradas aleatorias en [COMBAT_RANDOM_MIN, COMBAT_RANDOM_MAX]. */
-function sumRandomPower(count) {
+/** Una tirada suelta, en el rango que le toque segun el tipo de unidad de quien vota. */
+function rollUnitPower(unitType) {
+  const [min, max] = unitType === 'knight' ? [KNIGHT_RANDOM_MIN, KNIGHT_RANDOM_MAX] : [COMBAT_RANDOM_MIN, COMBAT_RANDOM_MAX];
+  return min + Math.random() * (max - min);
+}
+
+/**
+ * Suma una tirada por cada userId de `userIds`, cada una en el rango que le
+ * toque segun `player.unitType` (soldado o caballero) — por eso hace falta
+ * `match` aqui y no solo un recuento de votos como antes: la fuerza ya no
+ * depende solo de CUANTOS votan, sino de QUIENES.
+ */
+function sumRandomPower(match, userIds) {
   let total = 0;
-  for (let i = 0; i < count; i++) {
-    total += COMBAT_RANDOM_MIN + Math.random() * (COMBAT_RANDOM_MAX - COMBAT_RANDOM_MIN);
+  for (const userId of userIds) {
+    const player = match.players.get(userId);
+    total += rollUnitPower(player ? player.unitType : 'soldier');
   }
   return total;
 }

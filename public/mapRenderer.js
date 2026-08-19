@@ -838,6 +838,18 @@
   const WALKER_SPRITE_WORLD_W = 22;
   const WALKER_SPRITE_WORLD_H = 36;
 
+  // Caballero (mejora de industria nivel 1/3, ver docs/ACCIONES.md sección
+  // 16): mismo mecanismo de sprite por sentido que el soldado, pero con su
+  // propio par de imágenes y "algo más grande, no mucho" como se pidió.
+  const knightImages = { right: loadSprite('knight-right'), left: loadSprite('knight-left') };
+  const KNIGHT_SPRITE_WORLD_W = 26;
+  const KNIGHT_SPRITE_WORLD_H = 42;
+  // Se mueve mas rapido que un soldado a pie ("simula un caballo") — se
+  // aplica como multiplicador sobre las dos velocidades normales (paseo y
+  // marcha) en vez de un numero fijo, para que la diferencia se note en los
+  // dos casos por igual.
+  const KNIGHT_SPEED_MULTIPLIER = 1.6;
+
   // ===========================================================================
   // Caminantes: el marcador de cada jugador vivo, que se mueve por el mapa.
   //
@@ -1056,6 +1068,7 @@
           walker.color = color;
           walker.username = p.username;
           walker.factionNumber = factionNumber;
+          walker.unitType = p.unitType; // 'soldier' | 'knight' — ver drawWalkers()/stepWalkers()
 
           // Solo se recalcula el destino si la orden ha cambiado; si no, se
           // deja que termine de andar hacia donde ya iba (si no, cada `state:*`
@@ -1625,7 +1638,8 @@
           return;
         }
 
-        const speed = w.action ? WALK_SPEED_MARCH : WALK_SPEED_WANDER;
+        const baseSpeed = w.action ? WALK_SPEED_MARCH : WALK_SPEED_WANDER;
+        const speed = w.unitType === 'knight' ? baseSpeed * KNIGHT_SPEED_MULTIPLIER : baseSpeed;
         const step = Math.min(dist, speed * dt);
         w.x += (dx / dist) * step;
         w.y += (dy / dist) * step;
@@ -1662,8 +1676,6 @@
       const wx0 = (0 - vx) / scale - margin, wx1 = (w - vx) / scale + margin;
       const wy0 = (0 - vy) / scale - margin, wy1 = (h - vy) / scale + margin;
 
-      const drawW = WALKER_SPRITE_WORLD_W * scale;
-      const drawH = WALKER_SPRITE_WORLD_H * scale;
       const showNames = scale >= WALKER_NAME_MIN_SCALE;
       const t = performance.now() / 1000;
 
@@ -1676,8 +1688,12 @@
       walkers.forEach((walker) => {
         if (walker.x < wx0 || walker.x > wx1 || walker.y < wy0 || walker.y > wy1) return;
 
-        const img = soldierImages[walker.dir] || soldierImages.right;
+        const isKnight = walker.unitType === 'knight';
+        const images = isKnight ? knightImages : soldierImages;
+        const img = images[walker.dir] || images.right;
         if (!img.complete || !img.naturalWidth) return;
+        const drawW = (isKnight ? KNIGHT_SPRITE_WORLD_W : WALKER_SPRITE_WORLD_W) * scale;
+        const drawH = (isKnight ? KNIGHT_SPRITE_WORLD_H : WALKER_SPRITE_WORLD_H) * scale;
 
         // Brinquito: solo mientras se mueve de verdad, para que los que estan
         // parados en la frontera o en un castillo se queden quietos.

@@ -217,12 +217,12 @@ Valores puestos para que el motor funcione y se pueda probar; son placeholders a
 
 | Constante | Archivo | Valor de ejemplo |
 |---|---|---|
-| `COMBAT_RANDOM_MIN` / `MAX` | `rules/shared.js` | 0.7 – 1.3 por usuario (ataque **y** defensa) |
+| `COMBAT_RANDOM_MIN` / `MAX` | `rules/shared.js` | 0.7 – 1.3 por soldado (ataque **y** defensa) |
+| `KNIGHT_RANDOM_MIN` / `MAX` | `rules/shared.js` | 0.9 – 1.4 por caballero (ataque **y** defensa) — ver sección 16 |
 | `PASSIVE_INDUSTRY_PER_TERRITORY` | `rules/industry.js` | 0.1 por casilla |
 | `INDUSTRY_PER_BUILDING` | `rules/industry.js` | 0.5 por edificio de industria |
 | `VOTES_PER_NEW_TILE` | `rules/expansion.js` | 2 votantes por casilla nueva |
-| `INDUSTRY_TIERS` (umbrales de las 4 mejoras) | `rules/industry.js` | 3 / 8 / 15 / 24 **por jugador** de la facción (ver más abajo) |
-| `BOMBARDEO_DAMAGE`, `OPESPECIAL_DAMAGE` | `rules/industry.js` | 3 bajas |
+| `INDUSTRY_TIERS` (umbrales de las 4 mejoras) | `rules/industry.js` | 3 / 8 / 15 / 24 **por jugador** de la facción (ver más abajo y sección 16) |
 | `REFUERZO_REVIVE_COUNT` | `rules/specialAbilities.js` | 3 revividos |
 | `ESCUDO_DEFENSE_BONUS_PERCENT`, `FRENESI_ATTACK_BONUS_PERCENT` | `rules/specialAbilities.js` | 30% |
 | `SUMMARY_MS_PER_BLOCK` | `gameEngine.js` | 12000 ms |
@@ -435,3 +435,40 @@ Un acompañante (`cow-follower.png`, un único sprite, sin variante de sentido �
 El bucle de animación (`startWalkerLoop()`, ver sección 11) ya no se para solo porque no haya jugadores: sigue corriendo mientras haya caminantes, la vaca, O ALGUNA NUBE (`needsAnimationLoop()`) — y como las nubes se reponen solas sin parar, en la práctica el bucle ya no se detiene nunca mientras la página esté abierta. Es el coste esperado de tener un efecto de cielo siempre encendido, no una fuga.
 
 **Sustituir los placeholders**: `public/sprites/soldier-{left,right}.png`, `industry.png`, `cow-{left,right}.png`, `cow-follower.png`, `cloud-{1,2,3}.png` — todos en `public/sprites/`, generados por `tools/bakeSpritePlaceholders.js`. Sobrescribe el archivo y recarga; si el arte nuevo cambia mucho de proporción, los anchos de mundo/pantalla de cada uno (`WALKER_SPRITE_WORLD_W/H`, `INDUSTRY_SPRITE_WORLD_WIDTH`, `COW_SPRITE_WORLD_W`, `COW_FOLLOWER_SPRITE_WORLD_W`) están todos en `public/mapRenderer.js`, cerca de donde se cargan.
+
+## 16. Las 4 mejoras de industria de verdad, logotipo, y varias correcciones
+
+Quinta tanda: las 4 mejoras de industria (secciones 7 y 9 ya las mencionaban, pero con la mecánica vieja de v1 — subir a "tanque", bombardeo/operación especial contra un enemigo) pasan a la mecánica definitiva que pidió el streamer. Ninguna se vota: las 4 saltan solas al cruzar su umbral (`industryThresholdsFor()`, sin cambios — sigue siendo `perPlayer × rosterSize`, ver sección 7).
+
+| Nivel | `tierKey` | Qué hace |
+|---|---|---|
+| 1 | `caballero` | 1 soldado al azar de la facción pasa a **caballero** |
+| 2 | `industria_extra` | Se levantan **3 edificios de industria** de golpe (como si 3 usuarios hubieran votado `!industria` esa ronda) |
+| 3 | `caballeros_x3` | **3 soldados más** pasan a caballero (nunca repite a quien ya lo sea) |
+| 4 | `tregua` | Nadie puede atacar a esta facción la **ronda siguiente** |
+
+**Caballeros** (`upgradeRandomSoldiers()` en `rules/industry.js`): sube a caballero a `count` soldados al azar (`unitType: 'soldier'` → `'knight'`). El filtro por `unitType === 'soldier'` es lo único que hace falta para que el nivel 3 nunca repita a quien ya ascendió el nivel 1 — no hace falta ninguna lista de exclusión aparte. Si la facción tiene menos soldados vivos que los que tocan, sube a todos los que haya (verificado con el motor real: una facción de 3 jugadores que cruza los 4 umbrales acaba con sus 3 miembros de caballeros, ni uno repetido, ni un error).
+
+Un caballero **cuenta más en combate**: tira su fuerza en 0.9–1.4 en vez de 0.7–1.3 (`KNIGHT_RANDOM_MIN/MAX` en `rules/shared.js`). Esto obligó a cambiar `sumRandomPower()`: antes recibía solo un **número** de votantes (daba igual quién fuera cada uno), ahora recibe `match` + la lista de **userIds** y mira el `unitType` de cada uno para tirar en el rango que le toque — `resolveCombat()` en `rules/combat.js` le pasa los userIds de verdad (`attackers.flatMap(a => a.userIds)` para atacantes, el array de `!defender` tal cual para defensores) en vez de solo sus longitudes. Verificado estadísticamente sobre 20.000 tiradas: media 1.00 para soldado, 1.15 para caballero, justo el punto medio de cada rango.
+
+En el mapa el caballero es un sprite distinto (`knight-{left,right}.png`, "algo más grande, no mucho" que el soldado — 26×42 px de mundo frente a 22×36) y se mueve más rápido ("simula un caballo"): `KNIGHT_SPEED_MULTIPLIER = 1.6` en `public/mapRenderer.js`, aplicado sobre las dos velocidades normales (paseo y marcha) en `stepWalkers()`. Por lo demás se comporta exactamente igual que un soldado — mismo `!ataque`/`!defender`/`!expansion`/`!industria`, va a los mismos sitios — así que no hizo falta tocar nada de la lógica de destino de los caminantes, solo qué sprite/velocidad le corresponde.
+
+**Tregua** (nivel 4): igual que una alianza automática con **todas** las facciones vivas, pero sin depender de que el admin tenga las alianzas activadas en esa partida (`resolveIndustryImmunity()` en `rules/industry.js`, independiente de `resolveAlliances()`). Se arma en la ronda que se desbloquea (`faction.attackImmuneNextRound = true`) y se activa la ronda SIGUIENTE — mismo patrón en dos pasos que ya usaba el Sabotaje (`industryPenaltyActive`/`industryPenaltyNextRound`): al principio de `resolveRound()` en `gameEngine.js` se "activa" lo que quedó armado la ronda anterior, y solo entonces `resolveIndustryImmunity()` anula (mueve a `context.forceInactive` y borra del mapa de votos) cualquier ataque que reciba esa facción esa ronda. Verificado en dos niveles: una prueba unitaria aislada de `resolveIndustryImmunity()` (con un `context` de mentira, sin pasar por generación de mapa) confirma que anula SOLO los ataques que le llegan a la facción con tregua y deja intactos los demás; y una partida real de punta a punta confirma que, tras cruzar el nivel 4, un ataque real de otra facción no causa bajas ni conquista ninguna casilla.
+
+**Nombres nuevos en la interfaz**: `TIER_LABELS` en `public/index.html` (resumen de ronda), la columna "Caballeros" de la clasificación (antes "Tanques"), y la etiqueta 🐴 en el roster (antes 🛡) — todo lo que decía `tank`/`unitType==='tank'` pasa a `knight`.
+
+### Logotipo
+
+`#gameLogo` en `public/index.html`, arriba del todo y centrado, con `z-index` por encima de la barra de madera para que sobresalga por encima de ella (`height: calc(var(--map-margin-y) * 1.7)`, a propósito más grande que pidió el streamer — "mejor que sobre y lo recorte yo"). `pointer-events:none`: es solo una imagen superpuesta, nunca le roba el click al título ni a los botones de debajo. Placeholder: `public/sprites/logo.png` (320×140, fondo transparente, un escudo dorado simple), generado por `tools/bakeSpritePlaceholders.js`. Sobrescribe el archivo y recarga.
+
+### Bot de Twitch: una línea de chat mala ya no se comía el resto de la tanda
+
+Bug real encontrado al investigar el aviso del streamer de que a veces el bot "no lee todos los comandos" cuando el chat va muy rápido. Twitch manda varias líneas IRC (varios mensajes de chat) dentro de un único frame de WebSocket cuando hay mucho tráfico. `server/twitchBot.js` las recorría con un `forEach(handleLine)` sin ningún `try/catch`: si UNA línea de la tanda hacía saltar una excepción en cualquier punto (parseo raro, o más abajo en el motor/broadcast), el `forEach` entero se paraba ahí y **todas las líneas siguientes de esa misma tanda se perdían sin más** — comandos de chat válidos incluidos, o incluso el PONG de un PING que llegara después en la misma tanda (lo que a la larga puede hacer que Twitch cierre la conexión). Arreglado envolviendo el procesado de cada línea en su propio `try/catch`: una línea rara ahora solo se pierde a sí misma, el resto de la tanda sigue igual. No es un límite de Twitch (el bot es de solo lectura, con sesión anónima — el límite de "20 mensajes/30s" de Twitch es para mensajes que el bot ENVÍA al chat, no para los que recibe), era un bug de verdad en este repositorio.
+
+### Probeta de industria: los datos ya estaban bien, el problema era el tamaño
+
+El aviso del streamer de que "el líquido no sube y las 4 rayas no se ven" se investigó con datos reales del motor (no a ojo): tanto `industryGainedLastRound` como `industryThresholds` llegan correctos al cliente en cada ronda, y el SVG de la probeta ya incluía el rectángulo de líquido y las 4 líneas de marca con los valores exactos — no había ningún bug de datos. Lo que pasaba es que a 26×72 píxeles reales (el tamaño con el que se venía dibujando) una marca sin alcanzar quedaba en un trazo de menos de 1px, prácticamente invisible, y con los umbrales ya afinados a "ritmo medio" (sección 9) el líquido tarda muchas rondas reales en notarse. Se agrandó el renderizado un 40% (`FLASK_RENDER_SCALE` en `public/factionCards.js`, sin tocar el `viewBox` ni ninguna coordenada del dibujo — así no hizo falta recalcular a mano la docena de puntos del cristal/corcho) y se subió el contraste de las marcas sin alcanzar (antes `#7a6a52` al 50% de opacidad, ahora `#5a4a32` al 80%, con más grosor de trazo).
+
+### Panel de facciones con 1 o con 100 jugadores: sin solapes
+
+Comprobado con una partida real (una facción de 100 jugadores, otra de 1) y una comprobación de solapes de verdad (rectángulos de cada tarjeta/estadística/probeta/etiqueta del roster, no "se ven cerca" sino intersección de área > 0) sobre 113 elementos: **0 solapes**. `.factionCardMain`/`.rosterMini` ya usan `flex-wrap`, así que las estadísticas y las etiquetas de jugador simplemente pasan a la siguiente línea en vez de superponerse — con 100 jugadores la tarjeta sale más alta (muchas líneas de etiquetas), no rota. El panel entero (`.sidePanel`) ya tenía `overflow-y:auto`, así que una tarjeta muy alta no rompe nada, solo hace más largo el scroll.

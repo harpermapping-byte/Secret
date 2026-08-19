@@ -37,6 +37,12 @@
   const FLASK_H = 72;
   const FLASK_BODY_TOP = 16;   // donde acaba el cuello y empieza el cuerpo
   const FLASK_BODY_BOTTOM = 69;
+  // El VIEWBOX se queda igual (así no hay que recalcular a mano la docena de
+  // coordenadas del cristal/corcho): solo se agranda el TAMAÑO renderizado
+  // (atributos width/height), que es lo que de verdad hacía que el relleno y
+  // las 4 marcas de nivel casi no se vieran en la barra lateral — a 26x72 la
+  // línea de una marca sin alcanzar medía menos de 1px de grosor en pantalla.
+  const FLASK_RENDER_SCALE = 1.4;
 
   /**
    * Probeta medieval (con tapon de corcho) que se va llenando de liquido del
@@ -65,15 +71,15 @@
       const y = FLASK_BODY_BOTTOM - bodyH * (max > 0 ? value / max : 0);
       const reached = industry >= value;
       return `<line x1="6" y1="${y.toFixed(1)}" x2="20" y2="${y.toFixed(1)}"
-                stroke="${reached ? '#8a6a1f' : '#7a6a52'}"
-                stroke-width="${reached ? 1.6 : 1}" opacity="${reached ? 0.95 : 0.5}" />`;
+                stroke="${reached ? '#8a6a1f' : '#5a4a32'}"
+                stroke-width="${reached ? 2 : 1.4}" opacity="${reached ? 1 : 0.8}" />`;
     }).join('');
 
     const safeColor = escapeHtml(color);
     const title = `Industria ${industry.toFixed(1)} de ${max} (marcas: ${marks.join(', ')})`;
 
     return `
-      <svg class="industryFlask" viewBox="0 0 ${FLASK_W} ${FLASK_H}" width="${FLASK_W}" height="${FLASK_H}"
+      <svg class="industryFlask" viewBox="0 0 ${FLASK_W} ${FLASK_H}" width="${Math.round(FLASK_W * FLASK_RENDER_SCALE)}" height="${Math.round(FLASK_H * FLASK_RENDER_SCALE)}"
            role="img" aria-label="${escapeHtml(title)}">
         <title>${escapeHtml(title)}</title>
         <!-- corcho -->
@@ -131,7 +137,7 @@
         playersInFaction.forEach((p) => {
           const tag = document.createElement('span');
           tag.className = p.alive ? '' : 'dead';
-          tag.textContent = `${p.username}${p.unitType === 'tank' ? ' 🛡' : ''}`;
+          tag.textContent = `${p.username}${p.unitType === 'knight' ? ' 🐴' : ''}`;
           roster.appendChild(tag);
         });
       }

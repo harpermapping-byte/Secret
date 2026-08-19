@@ -189,6 +189,44 @@ const SPRITES = {
     c.rect(2, 30, 7, 8, body, 2);    // pie de delante -> zancada a la izquierda
   },
 
+  // CABALLERO (mejora de industria nivel 1 y 3, ver docs/ACCIONES.md seccion
+  // 16): mismo dibujo que el soldado pero un poco mas grande (28x46 en vez
+  // de 24x40, "algo mas grande, no mucho" como se pidio) y con un yelmo
+  // (banda oscura en la cabeza) para poder distinguirlo del soldado normal
+  // incluso en el placeholder. El juego lo tiñe del color de faccion igual
+  // que al soldado (ver drawTintedSprite en mapRenderer.js), un unico PNG
+  // gris sirve para todas las facciones.
+  'knight-right': (c) => {
+    const body = [222, 222, 222];
+    const helmet = [120, 120, 128];
+    c.rect(6, 4, 16, 14, body, 2);
+    c.rect(6, 4, 16, 5, helmet, 0); // yelmo
+    c.rect(5, 19, 18, 20, body, 2);
+    c.rect(12, 39, 8, 7, body, 2);   // pie de atras
+    c.rect(18, 35, 8, 9, body, 2);   // pie de delante -> zancada a la derecha
+  },
+  'knight-left': (c) => {
+    const body = [222, 222, 222];
+    const helmet = [120, 120, 128];
+    c.rect(6, 4, 16, 14, body, 2);
+    c.rect(6, 4, 16, 5, helmet, 0);
+    c.rect(5, 19, 18, 20, body, 2);
+    c.rect(8, 39, 8, 7, body, 2);
+    c.rect(2, 35, 8, 9, body, 2);
+  },
+
+  // LOGOTIPO (arriba del todo, centrado — ver #gameLogo en public/index.html
+  // y docs/ACCIONES.md seccion 16). Fondo transparente, escudo simple en
+  // dorado solo para marcar el hueco: el streamer lo sustituye por su
+  // logotipo de verdad. A proposito grande (320x140): mejor que sobre y lo
+  // recorte el CSS a que se quede corto, como pidio expresamente.
+  'logo': (c) => {
+    const gold = [201, 158, 72];
+    const border = [74, 52, 20];
+    c.rect(40, 10, 240, 90, gold, 5, border);      // cuerpo del escudo
+    c.triangle(40, 95, 160, 135, 280, 95, gold, border); // punta inferior
+  },
+
   // EDIFICIO DE INDUSTRIA: antes un cuadrado amarillo semitransparente
   // dibujado a mano (paintIndustryMarkers), ahora sprite sustituible. Mas
   // pequeño que `village` en el mapa (ver INDUSTRY_SPRITE_WORLD_WIDTH en
@@ -253,6 +291,8 @@ const SIZES = {
   'ship-small': [30, 22], 'ship-big': [46, 28], whale: [48, 18], kraken: [96, 96],
   cursor: [32, 32], skeleton: [64, 110], 'help-icon': [64, 64],
   'soldier-right': [24, 40], 'soldier-left': [24, 40],
+  'knight-right': [28, 46], 'knight-left': [28, 46],
+  logo: [320, 140],
   industry: [36, 28],
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
