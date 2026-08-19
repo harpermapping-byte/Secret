@@ -354,9 +354,37 @@ El mapa se puebla cada partida con elementos decorativos (no tienen efecto en la
 
 **Probeta de industria**: la dibuja `industryFlask()` en `public/factionCards.js` (SVG inline, sin assets). Va a la derecha de los datos de cada facción, se llena del color de la facción según su industria acumulada y lleva las 4 marcas de los umbrales de mejora, que se doran al alcanzarse. Los umbrales llegan del servidor en `state.industryThresholds` (sacados de `INDUSTRY_TIERS` en `server/rules/industry.js`, única fuente de verdad): si se reajustan, las marcas se recolocan solas. El último umbral es el que llena la probeta del todo.
 
-## 11. Pendiente de documentar aquí cuando se implemente
+## 11. Caminantes: los marcadores de jugador se mueven según su comando
+
+Cada jugador vivo tiene un marcador (triángulo del color de su facción, con su nombre) que **se mueve solo por el mapa**. A dónde va depende de lo que haya escrito en el chat esa ronda:
+
+| Comando | A dónde va su marcador |
+|---|---|
+| *(ninguno)*, o fuera de la Fase de Acción | Pasea por el territorio de su facción, a pasitos cortos |
+| `!ataque <N>` | A la frontera con la facción N |
+| `!defender` | Al castillo o aldea más cercano de su territorio |
+| `!expansion` | A la frontera con el territorio neutral |
+| `!industria` | A una casilla suya que tenga industria levantada |
+
+Al resolverse la ronda, el servidor deja de mandar acción y los supervivientes **vuelven solos a pasear**. Los muertos dejan de tener marcador.
+
+**Toda la animación es local de cada navegador.** El servidor NO manda posiciones: mandarlas a 60fps por WebSocket para decenas de jugadores no sería viable. Solo manda *qué está haciendo* cada uno (`player.action` y `player.actionTargetFactionNumber` en `getPublicState()`, y solo durante `PHASE_ACTION`), y cada cliente decide el destino y mueve el marcador por su cuenta. Que dos espectadores vean al mismo aldeano dos pasos desplazado da igual: es decoración, no estado de juego.
+
+**Dónde vive**: la capa de caminantes está dentro de `createObjectLayer()` en `public/mapRenderer.js`, es decir en el canvas del tamaño del **viewport**. Los marcadores estaban antes en `markersEl` (canvas del tamaño del mundo entero, 8800×4604): limpiarlo y repintarlo en cada frame habría sido carísimo. En `markersEl` se quedan solo las cosas estáticas (etiquetas de casilla, cuadros de industria, escudo/espada). El bucle de animación **solo corre mientras hay caminantes**; sin jugadores no gasta un frame cada 16ms.
+
+Detalles que costaron un par de vueltas y conviene no deshacer:
+
+- **Rutas por tierra, no líneas rectas** (`setRoute()` / `tilePathBetween()`): marchar en línea recta hacía que los soldados cruzaran bahías andando sobre el agua, porque el destino era válido pero el trayecto no. Ahora se busca el camino entre casillas vecinas (que por definición se tocan por tierra) y se va pasando por el centro de cada una, sin atravesar territorio ajeno. Es una búsqueda en anchura sobre unas pocas decenas de casillas: cuesta nada.
+- **El paseo también valida el trayecto** (`pathStaysInside()`), no solo el punto de destino, por lo mismo.
+- **Dos velocidades** (`WALK_SPEED_WANDER` 55 / `WALK_SPEED_MARCH` 300 px de mundo por segundo): a paso de paseo no daba tiempo a llegar a la frontera dentro de la fase de acción (medido: ~1.100px hasta un castillo, 16 segundos a la velocidad de paseo). Que además se note el cambio de ritmo al dar una orden es lo que hace legible de un vistazo quién va a algún sitio y quién no.
+- **Frontera "de mentira" cuando no hay frontera real** (`coastFacing()`): en el mapa del mundo es muy habitual que dos facciones no se toquen por tierra (están en continentes distintos y la adyacencia del juego solo existe entre casillas que se tocan píxel a píxel). En ese caso el atacante va al borde de su territorio que **mira** hacia el enemigo, que se lee como "juntándose en la costa para embarcar", en vez de quedarse paseando como si no hubiera dado ninguna orden. Ver la nota sobre continentes en la sección de pendientes.
+- **El triángulo escala con el mundo** (es un personaje sobre el suelo, como los árboles) pero **el nombre va a tamaño de pantalla fijo**, y solo se dibuja por encima de cierto zoom: escalarlo con el mundo lo hace ilegible de lejos y gigante de cerca, y dibujar texto es de largo lo más caro de esta capa.
+- `mapCtrl.getPlayerPositions()` devuelve dónde está cada marcador ahora mismo (píxeles de mundo). Lo usa el buscador de jugadores del panel para saltar a donde está uno **en ese momento**, no a donde estaba en el último cambio de estado.
+
+## 12. Pendiente de documentar aquí cuando se implemente
 
 - Eventos aleatorios (v2, no en el alcance de v1).
 - Plantillas de mapa reales con arte (v1 usa un anillo generado, ver `mapTemplates.js`).
-- Animaciones del marcador de jugador según la acción que haga (moverse al atacar/defender, efecto al hacer industria, efecto al morir) — hoy el marcador es estático mientras el jugador siga vivo en la misma facción, ver sección 6 "Marcadores de jugador en el mapa".
+- Efectos del marcador de jugador más allá del movimiento (algo al hacer industria, algo al morir) — el **movimiento** según el comando ya está hecho, ver sección 11 "Caminantes".
+- **Facciones en continentes distintos**: la adyacencia del juego solo existe entre casillas que se tocan por tierra, así que en el mapa del mundo real es habitual que dos facciones no compartan **ninguna** frontera (medido en varias partidas de prueba: 0 pares de casillas vecinas entre dos facciones, incluso en modo de reparto total, donde las bandas caen en América / África-Europa / Asia). Consecuencia: pueden atacarse (el combate se resuelve y causa bajas) pero **nunca conquistarse territorio**, porque `pickBorderTileToConquer()` no encuentra casilla fronteriza. La partida no se queda bloqueada del todo — una facción puede seguir siendo eliminada por bajas —, pero la conquista entre continentes es imposible. Pendiente de decidir con el usuario: opciones serían permitir ataques por mar (adyacencia entre casillas costeras cercanas aunque no se toquen), repartir las facciones dentro de un mismo continente, o dejarlo así a propósito y que la expansión por territorio neutral sea el camino para encontrarse.
 - "Opción A" del mapa: en vez de mandar `cellTileIds` empaquetado (sección 6, "opción B", la que sí está implementada), el servidor renderizaría el mapa como una imagen (PNG, con un codificador escrito a mano sobre el `zlib` nativo de Node, sin dependencias nuevas) y los clientes cargarían esa imagen por HTTP en vez de recibir datos crudos por el WebSocket — comprimiría mucho más que el empaquetado actual (aprovecha las zonas de color plano) y movería el coste de "pintar" del navegador de cada espectador al servidor, una sola vez. Discutido con el usuario, pendiente de decidir si se implementa tras probar la opción B. **Actualización:** el codificador PNG hecho a mano de esta idea ya existe y se usa (`tools/pngEncoder.js`, ver sección 8), pero de momento solo para el terreno horneado — no se ha aplicado todavía a `cellTileIds` en tiempo real.
