@@ -7,44 +7,77 @@
 <link rel="stylesheet" href="/shared.css" />
 <style>
   /* Estilos propios de esta pagina; lo compartido con la web publica (mapa a
-     pantalla completa, cabecera flotante, panel lateral) vive en shared.css. */
-  body { font-family: system-ui, sans-serif; }
-  #login, #configForm { max-width: 720px; margin: 60px auto; padding: 20px 24px;
-                         background:#101c26; border:1px solid #223140; border-radius:14px; }
-  h2 { font-size: 16px; margin: 0 0 12px; }
-  h3 { font-size: 13px; margin: 0; }
-  label { display:block; margin-top: 12px; font-size: 13px; color:#8fd9f5; }
-  input, select { width:100%; padding:8px; margin-top:4px; border-radius:6px; border:1px solid #223140; background:#152029; color:#eaf7ff; box-sizing:border-box; }
+     pantalla completa, barras de madera, botones de chapa, panel lateral de
+     pergamino) vive en shared.css — incluidas las variables de tipografía y
+     color (--font-title/--font-serif/--gold/--ink) que se usan aquí abajo.
+     El panel de admin lleva el MISMO tema medieval que la web pública: los
+     formularios de configuración son hojas de pergamino. */
+
+  /* Login y formulario de configuración = hoja de pergamino sobre la mesa. */
+  #login, #configForm { max-width: 720px; margin: 60px auto; padding: 22px 26px;
+                        background-image:url('/ui/parchment.png'); background-size:260px 260px;
+                        color:var(--ink); font-family:var(--font-serif);
+                        border:2px solid #4a331c; border-radius:3px;
+                        box-shadow:0 14px 40px rgba(0,0,0,.6), 0 0 60px rgba(60,40,15,.3) inset; }
+  #login h1, #configForm h1 { font-family:var(--font-title); color:var(--ink); letter-spacing:.03em; }
+  h2 { font-size: 17px; margin: 0 0 12px; font-family:var(--font-title); color:var(--ink); letter-spacing:.03em; }
+  h3 { font-size: 14px; margin: 0; font-family:var(--font-title); color:var(--ink); }
+  label { display:block; margin-top: 12px; font-size: 13px; color:var(--ink-soft); }
+  input, select, textarea { width:100%; padding:8px; margin-top:4px; border-radius:3px;
+                            border:1px solid #8a7350; background:rgba(255,250,235,.55); color:var(--ink);
+                            font-family:var(--font-serif); font-size:13px; box-sizing:border-box; }
   .faction-row { display:flex; gap:8px; margin-top:8px; align-items:center; }
   .faction-row input[type=text] { flex:2; }
   .faction-row input[type=color] { flex:0 0 50px; padding:2px; height:36px; }
-  button { padding:10px 16px; border-radius:8px; border:none; background:#7fd4f0; color:#04141c; font-weight:600; cursor:pointer; }
-  button.secondary { background:#223140; color:#eaf7ff; }
-  button.danger { background:#ffb4a2; color:#3a0a0a; }
+
+  /* Botones DENTRO del pergamino (crear partida, añadir facción, entrar...):
+     misma chapa de latón que los de la barra de madera — se hereda de
+     .headerBtn en shared.css aplicando aquí la misma receta de border-image,
+     para que un <button> suelto del formulario no se quede con el estilo por
+     defecto del navegador. */
+  button { border:11px solid transparent;
+           border-image:url('/ui/metal-plate.png') 11 fill / 11px stretch;
+           image-rendering:pixelated; background:none; padding:2px 10px;
+           font-family:var(--font-title); font-size:13px; font-weight:600; letter-spacing:.02em;
+           color:var(--gold); text-shadow:0 1px 1px rgba(45,25,5,.85); cursor:pointer;
+           transition:filter .12s ease; }
+  button:hover { filter:brightness(1.14); }
+  button.secondary { filter:saturate(.8) brightness(.9); }
+  button.secondary:hover { filter:saturate(.8) brightness(1.02); }
+  button.danger { filter:hue-rotate(-22deg) saturate(1.5); }
+  button.danger:hover { filter:hue-rotate(-22deg) saturate(1.5) brightness(1.12); }
+  button:disabled { filter:grayscale(.75) brightness(.62); cursor:default; }
+
   .row { display:flex; gap:10px; flex-wrap:wrap; }
-  #status { font-size:13px; color:#7fe0a8; margin-top:10px; }
+  #status { font-size:13px; color:#3d6b34; margin-top:10px; }
   .hidden { display:none; }
 
   /* .factionCards/.factionCard/.rosterMini viven en shared.css — las usan
      tanto este panel como el de la web pública (ver public/factionCards.js). */
 
+  /* Diagnóstico (bot de Twitch, log de chat, JSON en crudo): va dentro del
+     panel lateral de pergamino, así que en tinta oscura sobre papel. */
   #liveState { margin-top:16px; }
-  #liveState summary { cursor:pointer; font-size:12px; color:#8fd9f5; }
-  #liveState pre { margin-top:8px; font-size:11px; white-space:pre-wrap; background:#0f1a22; padding:10px; border-radius:8px; max-height:260px; overflow:auto; }
+  #liveState summary { cursor:pointer; font-size:12px; color:var(--ink-soft); font-style:italic; }
+  #liveState pre { margin-top:8px; font-size:11px; white-space:pre-wrap; background:rgba(60,40,15,.12);
+                   border:1px solid var(--ink-line); color:var(--ink); padding:10px; border-radius:3px;
+                   max-height:260px; overflow:auto; font-family:ui-monospace, Menlo, Consolas, monospace; }
 
-  #botStatusBox { font-size:12px; background:#152029; border-radius:10px; padding:8px 10px; display:flex; flex-direction:column; gap:4px; }
-  #botStatusBox .botStateLine { display:flex; align-items:center; gap:6px; font-weight:600; }
+  #botStatusBox { font-size:12px; background:rgba(92,64,30,.1); border:1px solid var(--ink-line);
+                  border-radius:4px; padding:8px 10px; display:flex; flex-direction:column; gap:4px; color:var(--ink); }
+  #botStatusBox .botStateLine { display:flex; align-items:center; gap:6px; font-weight:700; font-family:var(--font-title); }
   #botStatusBox .botDot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
-  #botStatusBox .botDetail { color:#8fd9f5; }
-  #botStatusBox .botError { color:#ffb4a2; }
+  #botStatusBox .botDetail { color:var(--ink-soft); }
+  #botStatusBox .botError { color:#8c3a1e; font-weight:600; }
 
   #chatLogBox { margin-top:8px; display:flex; flex-direction:column; gap:4px; max-height:220px; overflow:auto; }
-  #chatLogBox .chatLogEmpty { font-size:12px; opacity:.5; }
-  .chatLogRow { font-size:11px; background:#0f1a22; border-left:3px solid #223140; border-radius:5px; padding:4px 6px; }
-  .chatLogRow.ok { border-left-color:#7fe0a8; }
-  .chatLogRow.rejected { border-left-color:#ffb4a2; }
-  .chatLogRow .clUser { font-weight:600; }
-  .chatLogRow .clReason { opacity:.7; }
+  #chatLogBox .chatLogEmpty { font-size:12px; color:var(--ink-soft); font-style:italic; }
+  .chatLogRow { font-size:11px; background:rgba(92,64,30,.1); border:1px solid var(--ink-line);
+                border-left:3px solid var(--ink-line); border-radius:3px; padding:4px 6px; color:var(--ink); }
+  .chatLogRow.ok { border-left-color:#4f7a3a; }
+  .chatLogRow.rejected { border-left-color:#a34a24; }
+  .chatLogRow .clUser { font-weight:700; }
+  .chatLogRow .clReason { color:var(--ink-soft); }
 </style>
 </head>
 <body>
@@ -61,7 +94,7 @@
     <h2>Fase 0 — Configurar partida</h2>
 
     <label>Canales de Twitch a escuchar (uno por línea — vale el nombre solo, "condejorge", o el link completo, "https://twitch.tv/condejorge", como prefieras)</label>
-    <textarea id="channels" rows="2" style="width:100%;padding:8px;border-radius:6px;background:#152029;color:#eaf7ff;border:1px solid #223140;">condejorge</textarea>
+    <textarea id="channels" rows="2">condejorge</textarea>
 
     <label>Tamaño del mapa (nº de casillas)</label>
     <input type="number" id="tileCount" value="18" min="6" />
@@ -111,8 +144,8 @@
     <div class="overlayTopBar">
       <div>
         <h1>Condejorge Wars <span style="opacity:.5">— Admin</span></h1>
-        <span class="phaseTag" id="livephaseTag" style="font-size:12px;color:#8fd9f5">—</span>
-        <span id="adminTimer" style="font-size:12px;color:#8fd9f5;font-variant-numeric:tabular-nums;margin-left:8px">--:--</span>
+        <span class="phaseTag" id="livephaseTag" style="font-size:12px;color:var(--gold-dim);font-family:var(--font-title);text-shadow:0 1px 0 #2a1608">—</span>
+        <span id="adminTimer" style="font-size:13px;color:var(--gold);font-family:var(--font-title);font-variant-numeric:tabular-nums;margin-left:8px;text-shadow:0 1px 0 #2a1608">--:--</span>
       </div>
       <div class="topRight">
         <div id="liveActionButtons" class="row" style="gap:10px">

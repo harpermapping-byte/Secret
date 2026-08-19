@@ -1,18 +1,65 @@
 /*
  * Estilos compartidos por la web pública y el panel de admin: el mapa a
- * pantalla completa, la cabecera flotante y el panel lateral desplegable.
- * Es el único sitio del proyecto con estas reglas — ninguna de las dos
- * páginas las reimplementa por su cuenta (ver docs/ACCIONES.md sección 6).
- * Cada página añade encima, en su propio <style>, solo lo que le es propio
- * (formularios de admin, popups de la web pública, etc).
+ * pantalla completa, las barras de madera flotantes (arriba/abajo) y el panel
+ * lateral desplegable. Es el único sitio del proyecto con estas reglas —
+ * ninguna de las dos páginas las reimplementa por su cuenta (ver
+ * docs/ACCIONES.md sección 6). Cada página añade encima, en su propio
+ * <style>, solo lo que le es propio (formularios de admin, popups de la web
+ * pública, etc).
+ *
+ * TEMA MEDIEVAL (v2 estética): las tres texturas (madera, chapa de latón,
+ * pergamino) NO son gradientes CSS ni SVG inline — son PNGs de pixel art
+ * horneados una vez por `tools/bakeUiTextures.js` y servidos desde
+ * `public/ui/` (~30KB los tres juntos). Se repiten/estiran por CSS, así que
+ * valen para cualquier tamaño de botón o de pantalla sin generar nada por
+ * partida. Si se regeneran con OTRAS dimensiones hay que revisar
+ * `--wood-tile-w` y el `border-image-slice` de los botones de aquí abajo.
  */
-/* Margen arriba/abajo del mapa (deja ver el fondo de la pagina por encima y
-   por debajo, como en streamer-wars.com) para que el mapa no llegue nunca
-   pegado al borde superior/inferior de la pantalla — el mapa ya no ocupa el
-   100% de la altura, "cover" se calcula sobre este viewport mas pequeño. */
-:root { color-scheme: dark; --map-margin-y: 6vh; }
-html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, sans-serif; background:#070d13; color:#eaf7ff; }
 
+:root {
+  color-scheme: dark;
+
+  /* Alto de las dos barras de madera (arriba y abajo). El mapa vive
+     exactamente entre ellas (ver #mapViewport). Es un `max()` con un mínimo
+     en px para que los botones de la barra superior quepan siempre, incluso
+     en ventanas bajas donde un 6vh a secas se quedaría corto. */
+  --map-margin-y: max(66px, 6vh);
+  /* La textura de madera mide 384x64 (ver WOOD_W/WOOD_H en
+     tools/bakeUiTextures.js), o sea 6 veces mas ancha que alta: al escalarla
+     a la altura de la barra, su ancho tiene que ser 6x para no deformar el
+     grano. Si se regenera con otras dimensiones, cuadrar este 6 con
+     WOOD_W/WOOD_H de ese script. */
+  --wood-tile-w: calc(var(--map-margin-y) * 6);
+
+  /* Tipografías. Sin webfonts a propósito (el proyecto no depende de ninguna
+     red externa, igual que el resto de assets): se listan primero un par de
+     serifas "de romano/medieval" por si el equipo las tiene instaladas, y se
+     cae a Palatino/Georgia, que están en la práctica en todas partes y se
+     leen bien en pantalla. Si algún día se quiere una tipografía de época de
+     verdad, basta añadir un @font-face aquí y meterla al principio de
+     --font-title. */
+  --font-title: 'Cinzel', 'Trajan Pro', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  --font-serif: Georgia, 'Palatino Linotype', 'Book Antiqua', 'Times New Roman', serif;
+
+  /* Dorado del texto sobre las chapas de latón. */
+  --gold: #f7dc9c;
+  --gold-dim: #d9b76a;
+  /* Tinta sobre pergamino (los popups y paneles son hoja antigua, así que su
+     texto va en marrón oscuro, no en el azul claro del tema anterior). */
+  --ink: #33230f;
+  --ink-soft: #6b563a;
+  --ink-line: #b9a276;
+}
+
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  font-family: var(--font-serif);
+  background: #070d13; color: #eaf7ff;
+}
+
+/* ---------------------------------------------------------------------------
+   Mapa
+   --------------------------------------------------------------------------- */
 #mapViewport { position:fixed; top:var(--map-margin-y); bottom:var(--map-margin-y); left:0; right:0;
                overflow:hidden; background:#070d13; cursor:grab; touch-action:none; }
 #mapViewport.dragging { cursor:grabbing; }
@@ -29,55 +76,150 @@ html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, san
 #mapObjects { position:absolute; top:0; left:0; pointer-events:none; }
 /* Capa transparente superpuesta a #mapCanvas: etiquetas de casilla y marcadores
    de jugador. Va aparte del raster (tierra/oceano) para poder repintarla sola
-   cuando se unen/mueren jugadores sin tener que repintar las ~10M celdas del
+   cuando se unen/mueren jugadores sin tener que repintar las celdas del
    raster — ver mapRenderer.js, funcion paintOverlay(). pointer-events:none
    para que no interfiera con el arrastre/zoom del mapa (los gestiona
    #mapViewport, no las capas de canvas). */
 #mapMarkers { position:absolute; top:0; left:0; transform-origin:0 0; pointer-events:none; }
 
-.overlayTopBar { position:fixed; top:0; left:0; right:0; z-index:20; display:flex; justify-content:space-between;
-                 align-items:center; gap:12px; padding:12px 18px; background:linear-gradient(#0c1720ee, #0c172000);
-                 pointer-events:none; flex-wrap:wrap; }
-.overlayTopBar > * { pointer-events:auto; }
-.overlayTopBar h1 { font-size: 16px; margin:0; }
+/* ---------------------------------------------------------------------------
+   Barras de madera (arriba y abajo)
+   La de arriba es el fondo de .overlayTopBar (así crece sola si los botones
+   se van a una segunda línea en ventanas estrechas, cosa que un alto fijo no
+   permitiría). La de abajo no tiene contenido, así que se pinta con un
+   pseudo-elemento de <body> en vez de gastar un <div> en cada página.
+   Las dos usan la MISMA textura: la de abajo, volteada en vertical
+   (scaleY(-1)), para que el borde irregular de la madera mire siempre hacia
+   el mapa y el borde recto quede pegado al borde de la pantalla.
+   --------------------------------------------------------------------------- */
+.overlayTopBar, body::after {
+  background-image: url('/ui/wood-bar.png');
+  background-repeat: repeat-x;
+  background-size: var(--wood-tile-w) 100%;
+  /* Es pixel art: se escala a bloques nítidos, nunca interpolado/borroso. */
+  image-rendering: pixelated;
+  /* drop-shadow (y no box-shadow) porque sigue la silueta con transparencia:
+     la sombra cae siguiendo el borde irregular de la madera, no un rectángulo. */
+  filter: drop-shadow(0 2px 5px rgba(0,0,0,.6));
+}
+
+body::after {
+  content: ''; position: fixed; left: 0; right: 0; bottom: 0;
+  height: var(--map-margin-y); z-index: 18; pointer-events: none;
+  transform: scaleY(-1);
+}
+
+.overlayTopBar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 8px 18px; min-height: var(--map-margin-y); box-sizing: border-box;
+  pointer-events: none; flex-wrap: wrap;
+}
+.overlayTopBar > * { pointer-events: auto; }
+.overlayTopBar h1 {
+  font-family: var(--font-title); font-size: 17px; margin: 0;
+  color: var(--gold); letter-spacing: .04em;
+  /* Relieve tallado en la madera: sombra oscura abajo + luz tenue arriba. */
+  text-shadow: 0 1px 0 #2a1608, 0 -1px 0 rgba(255,225,170,.18);
+}
 .topRight, .topLeft { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 
-.headerBtn { background:#152029ee; color:#8fd9f5; border:1px solid #223140; border-radius:8px; padding:8px 14px;
-             font-size:13px; cursor:pointer; }
-.headerBtn:hover { background:#1c2b38; }
-.headerBtn.secondary { background:#223140ee; color:#eaf7ff; }
-.headerBtn.danger { background:#ffb4a2ee; color:#3a0a0a; }
-.headerBtn:disabled { opacity:.35; cursor:default; }
-.headerBtn:disabled:hover { background:#223140ee; }
+/* ---------------------------------------------------------------------------
+   Botones = chapas de latón clavadas en la madera
+   La textura (32x32, ver METAL_SIZE en tools/bakeUiTextures.js) se usa como
+   `border-image` con recorte de 9 zonas: las 4 esquinas (que llevan el
+   remache dibujado) se quedan intactas y solo se estiran los lados y el
+   centro, así la MISMA chapa sirve para un botón cuadrado de "+" y para uno
+   ancho de "🏆 Clasificación" sin deformar los remaches.
+   El `11` del slice tiene que seguir cubriendo el remache: si se regenera la
+   textura con otro tamaño, cuadrarlo con METAL_SLICE de ese script.
+   Las variantes (secondary/danger) no tienen textura propia: se tiñen con
+   `filter` sobre la misma chapa, que además tiñe el dorado del texto a juego.
+   --------------------------------------------------------------------------- */
+.headerBtn, .mapToolbar button {
+  border: 11px solid transparent;
+  border-image: url('/ui/metal-plate.png') 11 fill / 11px stretch;
+  image-rendering: pixelated;
+  background: none;
+  padding: 2px 8px;
+  font-family: var(--font-title);
+  font-size: 13px; font-weight: 600; letter-spacing: .02em;
+  color: var(--gold);
+  text-shadow: 0 1px 1px rgba(45,25,5,.85);
+  cursor: pointer;
+  transition: filter .12s ease;
+}
+.headerBtn:hover, .mapToolbar button:hover { filter: brightness(1.14); }
+.headerBtn:active, .mapToolbar button:active { filter: brightness(.92); }
+/* Latón un punto más apagado (sin llegar a gris): acciones secundarias. */
+.headerBtn.secondary { filter: saturate(.8) brightness(.9); }
+.headerBtn.secondary:hover { filter: saturate(.8) brightness(1.02); }
+/* Cobre rojizo: acciones destructivas (terminar partida, nueva partida). */
+.headerBtn.danger { filter: hue-rotate(-22deg) saturate(1.5) brightness(.98); }
+.headerBtn.danger:hover { filter: hue-rotate(-22deg) saturate(1.5) brightness(1.12); }
+.headerBtn:disabled { filter: grayscale(.75) brightness(.62); cursor: default; }
+.headerBtn:disabled:hover { filter: grayscale(.75) brightness(.62); }
 
 .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
 
-.mapToolbar { position:fixed; bottom:calc(var(--map-margin-y) + 18px); left:18px; z-index:20; display:flex; gap:6px; }
-.mapToolbar button { background:#152029ee; color:#8fd9f5; border:1px solid #223140; border-radius:8px;
-                      padding:8px 12px; font-size:15px; cursor:pointer; }
-.mapToolbar button:hover { background:#1c2b38; }
+/* Controles de zoom del mapa: mismas chapas, pero cuadradas y algo mayores
+   (son iconos sueltos sobre el mapa, no texto). */
+.mapToolbar { position:fixed; bottom:calc(var(--map-margin-y) + 18px); left:18px; z-index:20; display:flex; gap:8px; }
+.mapToolbar button { font-size:16px; padding:1px 6px; min-width:20px; }
 
-/* Panel lateral desplegable (roster/facciones en la web pública, facciones+debug
-   en el admin) — por defecto se desliza desde la derecha. Añadir `.left` lo
-   hace deslizarse desde la izquierda en su lugar (ver panel de facciones de la
-   web pública, `public/index.html`), misma mecánica de abrir/cerrar. */
-.sidePanel { position:fixed; top:0; right:0; bottom:0; width:280px; z-index:19; background:#0c1720f0;
-             border-left:1px solid #223140; padding:60px 16px 16px; overflow-y:auto; transform:translateX(100%);
-             transition:transform .2s ease; }
+/* ---------------------------------------------------------------------------
+   Panel lateral desplegable = hoja de pergamino
+   Ocupa exactamente el hueco entre las dos barras de madera (top/bottom a
+   --map-margin-y) para no taparlas ni pisar los botones de la cabecera.
+   Por defecto se desliza desde la derecha; añadir `.left` lo hace deslizarse
+   desde la izquierda (ver panel de facciones de la web pública).
+   --------------------------------------------------------------------------- */
+.sidePanel {
+  position: fixed; top: var(--map-margin-y); bottom: var(--map-margin-y); right: 0;
+  width: 300px; z-index: 19; box-sizing: border-box;
+  background-image: url('/ui/parchment.png');
+  background-repeat: repeat;
+  background-size: 220px 220px;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  border-left: 3px solid #4a331c;
+  box-shadow: -6px 0 18px rgba(0,0,0,.55) inset, -4px 0 14px rgba(0,0,0,.45);
+  padding: 18px 16px 16px; overflow-y: auto;
+  transform: translateX(100%); transition: transform .2s ease;
+}
 .sidePanel.open { transform:translateX(0); }
-.sidePanel.left { right:auto; left:0; border-left:none; border-right:1px solid #223140; transform:translateX(-100%); }
+.sidePanel.left {
+  right:auto; left:0; border-left:none; border-right:3px solid #4a331c;
+  box-shadow: 6px 0 18px rgba(0,0,0,.55) inset, 4px 0 14px rgba(0,0,0,.45);
+  transform:translateX(-100%);
+}
 .sidePanel.left.open { transform:translateX(0); }
-.sidePanel h2 { font-size:13px; margin: 0 0 12px; color:#8fd9f5; }
+.sidePanel h2 {
+  font-family: var(--font-title); font-size:15px; margin:0 0 12px; color:var(--ink);
+  border-bottom:1px solid var(--ink-line); padding-bottom:6px; letter-spacing:.03em;
+}
 
-/* Tarjetas de facción: las pinta `public/factionCards.js` (único sitio del
-   proyecto que las dibuja), las usan tanto el panel de admin como el nuevo
-   panel "🏳️ Facciones" de la web pública. */
+/* ---------------------------------------------------------------------------
+   Tarjetas de facción: las pinta `public/factionCards.js` (único sitio del
+   proyecto que las dibuja), las usan tanto el panel de admin como el panel
+   "🏳️ Facciones" de la web pública. Sobre pergamino, así que van en tinta
+   oscura sobre un tono de papel algo más tostado, no en el azul del tema
+   anterior.
+   --------------------------------------------------------------------------- */
 .factionCards { display:flex; flex-direction:column; gap:10px; }
-.factionCard { display:flex; flex-wrap:wrap; align-items:center; gap:8px; background:#152029; border-radius:10px; padding:8px 10px;
-               border-left: 5px solid #223140; font-size:12px; }
-.factionCard .fname { font-weight:600; flex:1 0 100%; font-size:13px; }
-.factionCard .fstat { color:#8fd9f5; white-space:nowrap; }
+.factionCard {
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+  background: rgba(92,64,30,.13);
+  border: 1px solid var(--ink-line);
+  border-left: 5px solid #223140; /* lo sobreescribe el color de la facción, ver factionCards.js */
+  border-radius: 4px; padding:8px 10px; font-size:12px; color:var(--ink);
+}
+.factionCard .fname { font-family:var(--font-title); font-weight:700; flex:1 0 100%; font-size:13px; }
+.factionCard .fstat { color:var(--ink-soft); white-space:nowrap; }
 
 .rosterMini { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
-.rosterMini span { font-size:11px; background:#0f1a22; border:1px solid #223140; border-radius:5px; padding:2px 6px; }
-.rosterMini span.dead { opacity:.4; text-decoration:line-through; }
+.rosterMini span {
+  font-size:11px; background:rgba(92,64,30,.1); border:1px solid var(--ink-line);
+  border-radius:3px; padding:2px 6px; color:var(--ink);
+}
+.rosterMini span.dead { opacity:.45; text-decoration:line-through; }
