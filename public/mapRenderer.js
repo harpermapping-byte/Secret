@@ -88,16 +88,21 @@
   const MARKER_RING_BASE_RADIUS = 26;
   const MARKER_RING_STEP = 24;
 
-  // Placeholder de edificio de industria (ver paintIndustryMarkers): cuadrado
-  // amarillo semitransparente, a sustituir mas adelante por un PNG de campo de
-  // trigo/herreria. INDUSTRY_SIZE va en px de pantalla; INDUSTRY_STEP en
-  // celdas de la rejilla del mapa (como los centroides), porque es una
-  // separacion sobre el mapa, no sobre la pantalla.
-  const INDUSTRY_SIZE = 9;
-  const INDUSTRY_STEP = 13;
+  // Sprite del edificio de industria (ver paintIndustryMarkers): PNG
+  // sustituible en public/sprites/industry.png (antes era un cuadrado
+  // amarillo dibujado a mano). El ancho va en pixeles de MUNDO, igual que
+  // `DECOR_SPRITES` mas abajo — a proposito mas pequeño que `village`
+  // (90 ahi) para que no parezca mas grande que una aldea de verdad.
+  // INDUSTRY_STEP_WORLD tambien en pixeles de mundo: es la separacion entre
+  // industrias de la misma casilla cuando hay varias.
+  const INDUSTRY_SPRITE_WORLD_WIDTH = 46;
+  const INDUSTRY_STEP_WORLD = 30;
   const INDUSTRY_PER_ROW = 4;
-  const INDUSTRY_FILL = 'rgba(240, 206, 62, .62)';
-  const INDUSTRY_STROKE = 'rgba(90, 66, 8, .85)';
+  const industrySpriteImg = new Image();
+  industrySpriteImg.src = '/sprites/industry.png';
+  industrySpriteImg.addEventListener('error', () => {
+    console.warn('[mapRenderer] falta public/sprites/industry.png, no se dibujaran las industrias');
+  });
 
   // Chapitas de combate en vivo (escudo de defensores / espada de atacantes,
   // ver paintCombatBadges). BADGE_OFFSET_Y va en celdas de rejilla: cuanto se
@@ -381,19 +386,23 @@
     }
 
     /**
-     * Un cuadrado amarillo semitransparente por edificio de industria en pie
-     * sobre cada casilla (`tile.industryCount`, ver server/rules/industry.js).
-     * Placeholder a proposito: ya sustituira un PNG de campo de trigo/herreria.
-     * Se dibujan en cuadricula alrededor del centroide de SU casilla (no del
-     * centro de la faccion) porque la industria pertenece a la casilla: si la
-     * casilla se conquista, el cuadrado se queda donde esta y pasa a contar
-     * para el nuevo dueño, que es justo lo que hace el motor.
+     * Un sprite de industria por edificio en pie sobre cada casilla
+     * (`tile.industryCount`, ver server/rules/industry.js) — PNG sustituible,
+     * ver `industrySpriteImg` arriba. Se dibujan en cuadricula alrededor del
+     * centroide de SU casilla (no del centro de la faccion) porque la
+     * industria pertenece a la casilla: si la casilla se conquista, el
+     * sprite se queda donde esta y pasa a contar para el nuevo dueño, que es
+     * justo lo que hace el motor.
+     *
+     * `markersEl` SI recibe el mismo transform CSS que `canvasEl` (a
+     * diferencia de la capa de objetos, ver cabecera del archivo), asi que
+     * basta con dibujar en pixeles de MUNDO tal cual — el propio navegador
+     * escala con el zoom, igual que hace con el resto del raster.
      */
     function paintIndustryMarkers(ctx, tiles) {
-      const size = screenPx(INDUSTRY_SIZE);
-      const step = screenPx(INDUSTRY_STEP);
-      const half = size / 2;
-      ctx.lineWidth = screenPx(1);
+      if (!industrySpriteImg.complete || !industrySpriteImg.naturalWidth) return;
+      const drawW = INDUSTRY_SPRITE_WORLD_WIDTH;
+      const drawH = drawW * (industrySpriteImg.naturalHeight / industrySpriteImg.naturalWidth);
       tiles.forEach((t) => {
         const count = t.industryCount || 0;
         if (count <= 0) return;
@@ -405,12 +414,10 @@
           // en una casilla no se solapen en el mismo pixel.
           const col = i % INDUSTRY_PER_ROW;
           const row = Math.floor(i / INDUSTRY_PER_ROW);
-          const cx = c.x * BLOCK_PX + (col - (INDUSTRY_PER_ROW - 1) / 2) * step;
-          const cy = c.y * BLOCK_PX + (row + 1) * step;
-          ctx.fillStyle = INDUSTRY_FILL;
-          ctx.fillRect(cx - half, cy - half, size, size);
-          ctx.strokeStyle = INDUSTRY_STROKE;
-          ctx.strokeRect(cx - half, cy - half, size, size);
+          const cx = c.x * BLOCK_PX + (col - (INDUSTRY_PER_ROW - 1) / 2) * INDUSTRY_STEP_WORLD;
+          const cy = c.y * BLOCK_PX + (row + 1) * INDUSTRY_STEP_WORLD;
+          // Anclado por la base (abajo-centro), igual que las decoraciones.
+          ctx.drawImage(industrySpriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
         }
       });
     }
@@ -708,6 +715,8 @@
        * la logica de movimiento.
        */
       getPlayerPositions: () => (objectLayer ? objectLayer.getMarkerPositions() : new Map()),
+      /** Posicion de la vaca-easter-egg y su acompañante (px de mundo), o null. Ver docs/ACCIONES.md sección 15. */
+      getCowPosition: () => (objectLayer ? objectLayer.getCowPosition() : null),
     };
   }
 
@@ -811,6 +820,24 @@
     return images;
   })();
 
+  /** Carga (una sola vez) un PNG suelto de `public/sprites/` que no forma parte de `DECOR_SPRITES`. */
+  function loadSprite(name) {
+    const img = new Image();
+    img.src = `/sprites/${name}.png`;
+    img.addEventListener('error', () => {
+      console.warn(`[mapRenderer] falta public/sprites/${name}.png, no se dibujara ese elemento`);
+    });
+    return img;
+  }
+
+  // Marcador de jugador (antes triangulo dibujado a mano, ver drawWalkers):
+  // dos sprites, uno por sentido, que se alternan solos segun hacia donde se
+  // mueve cada caminante (ver stepWalkers()). El ancho/alto van en pixeles de
+  // MUNDO — igual que DECOR_SPRITES — porque esta capa SI escala con el zoom.
+  const soldierImages = { right: loadSprite('soldier-right'), left: loadSprite('soldier-left') };
+  const WALKER_SPRITE_WORLD_W = 22;
+  const WALKER_SPRITE_WORLD_H = 36;
+
   // ===========================================================================
   // Caminantes: el marcador de cada jugador vivo, que se mueve por el mapa.
   //
@@ -846,11 +873,11 @@
   const WANDER_PAUSE_MS = 900;    // descanso al llegar antes de elegir otro sitio
   const HOP_HEIGHT = 9;           // altura del brinquito, en pixeles de mundo
   const HOP_SPEED = 7.5;          // brincos por segundo
-  // "Radio" del triangulo, en pixeles de MUNDO: escala con el zoom como el
-  // resto del terreno (es un personaje sobre el suelo, no un icono de
-  // interfaz). Se elige algo menor que un arbol — `tree` mide 55 de ancho en
-  // DECOR_SPRITES — para que un aldeano no parezca mas grande que un pino.
-  const WALKER_SIZE = 20;
+  // Umbral de movimiento horizontal (px de mundo por frame) para decidir si
+  // el caminante mira a izquierda o derecha (ver stepWalkers()). Un umbral
+  // pequeño pero no cero evita que el sprite "tiemble" cambiando de sentido
+  // cuando el movimiento es casi vertical.
+  const WALKER_DIR_THRESHOLD = 0.05;
   // El NOMBRE, en cambio, va a tamaño de pantalla fijo: escalarlo con el mundo
   // lo hace ilegible de lejos y gigante de cerca.
   const WALKER_NAME_PX = 11;
@@ -890,6 +917,18 @@
     let walkerWorld = null;
     let walkerLoopRunning = false;
     let lastFrameAt = 0;
+
+    // Easter egg: una unica vaca vagando por tierra, con un acompañante que
+    // la sigue a corta distancia — ver stepCow()/drawCow() y
+    // docs/ACCIONES.md seccion 15. Se siembra sola en cuanto hay mapa (no
+    // depende de que haya partida ni jugadores).
+    let cow = null;
+
+    // Nubes del cielo (decorativo, ver stepClouds()/drawClouds()): pocas a
+    // la vez, en pantalla (no en coordenadas de mundo), cruzando solo la
+    // franja del mapa.
+    const clouds = [];
+    let nextCloudSpawnAt = 0;
 
     const ctx = objectsEl.getContext('2d');
 
@@ -960,6 +999,7 @@
 
     function onLayout() {
       resizeCanvas();
+      initClouds(); // por si el viewport no tenia medidas todavia al construir la capa
       scheduleRedraw();
     }
 
@@ -976,6 +1016,7 @@
     function setWalkerWorld({ tiles, factions, players, layout, blockPx }) {
       if (!layout) return;
       walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1 };
+      if (!cow) spawnCow();
 
       const alive = new Set();
       const byFaction = new Map();
@@ -1008,6 +1049,7 @@
               pauseUntil: 0,
               path: [], // tramos pendientes de la ruta actual, ver setRoute()
               action: null, actionTarget: null,
+              dir: 'right', // que sprite le toca (soldier-left/right), ver stepWalkers()
             };
             walkers.set(p.userId, walker);
           }
@@ -1281,6 +1323,218 @@
       return null;
     }
 
+    // -----------------------------------------------------------------------
+    // Easter egg: la vaca. Unica en todo el mapa, vaga por TIERRA sin mirar
+    // de quien es el territorio (a diferencia de los caminantes, que solo se
+    // mueven dentro de su propia facción) — es puro decorado, no cuenta para
+    // ninguna regla. Un acompañante (un unico sprite, sin variante de
+    // sentido) la sigue siempre a poca distancia seguiendo su propio rastro,
+    // asi nunca "corta camino" por sitios por los que la vaca no ha pasado.
+    // Ver docs/ACCIONES.md seccion 15.
+    // -----------------------------------------------------------------------
+    const COW_WALK_SPEED = 42; // px de mundo por segundo, mas lento que un paseo normal de jugador
+    const COW_WANDER_RADIUS = 170;
+    const COW_PAUSE_MS = 1400;
+    const COW_TRAIL_SAMPLE_MS = 110; // cada cuanto se apunta un punto del rastro
+    const COW_FOLLOWER_LAG_MS = 650; // "a poco espacio": cuanto por detras va el acompañante
+    const cowFollowerImg = loadSprite('cow-follower');
+    const cowImages = { right: loadSprite('cow-right'), left: loadSprite('cow-left') };
+    const COW_SPRITE_WORLD_W = 34;
+    const COW_FOLLOWER_SPRITE_WORLD_W = 15;
+
+    /** ¿Hay tierra en este punto del mundo? (cualquier facción o neutral, da igual). */
+    function isLandAtWorld(wx, wy) {
+      return tileIdAtWorld(wx, wy) !== OCEAN;
+    }
+
+    /** Igual que pathStaysInside() pero sin restringir a ninguna facción: solo "que no se moje". */
+    function pathStaysOnLand(x0, y0, x1, y1) {
+      const SAMPLES = 6;
+      for (let i = 1; i <= SAMPLES; i++) {
+        const t = i / SAMPLES;
+        if (!isLandAtWorld(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false;
+      }
+      return true;
+    }
+
+    function spawnCow() {
+      const tile = randomOf(walkerWorld.tiles);
+      if (!tile) return; // sin mapa todavia
+      const start = tileCenter(tile.id);
+      if (!start) return;
+      cow = {
+        x: start.x, y: start.y, tx: start.x, ty: start.y,
+        dir: 'right', pauseUntil: 0, hopSeed: Math.random() * Math.PI * 2,
+        trail: [{ x: start.x, y: start.y, t: performance.now() }],
+        lastSampleAt: 0,
+        follower: { x: start.x, y: start.y },
+      };
+      startWalkerLoop();
+    }
+
+    /** Siguiente sitio al que vagar, igual que wanderTarget() pero sin mirar de quien es la tierra. */
+    function cowWanderTarget() {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = COW_WANDER_RADIUS * (0.3 + Math.random() * 0.7);
+        const x = cow.x + Math.cos(angle) * dist;
+        const y = cow.y + Math.sin(angle) * dist;
+        if (pathStaysOnLand(cow.x, cow.y, x, y)) return { x, y };
+      }
+      return null;
+    }
+
+    /** Avanza la vaca y, a poca distancia detras, a su acompañante (sigue el rastro, nunca atajos). */
+    function stepCow(dt, now) {
+      if (!cow) return;
+      const dx = cow.tx - cow.x, dy = cow.ty - cow.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= WALK_ARRIVE_DIST) {
+        if (now >= cow.pauseUntil) {
+          const next = cowWanderTarget();
+          if (next) { cow.tx = next.x; cow.ty = next.y; }
+          cow.pauseUntil = now + COW_PAUSE_MS * (0.5 + Math.random());
+        }
+      } else {
+        const step = Math.min(dist, COW_WALK_SPEED * dt);
+        cow.x += (dx / dist) * step;
+        cow.y += (dy / dist) * step;
+        if (dx > WALKER_DIR_THRESHOLD) cow.dir = 'right';
+        else if (dx < -WALKER_DIR_THRESHOLD) cow.dir = 'left';
+      }
+
+      // Rastro para el acompañante: se apunta la posicion cada pocos ms y se
+      // recorta lo que ya no hace falta (mas viejo que el retraso que necesita).
+      if (now - cow.lastSampleAt >= COW_TRAIL_SAMPLE_MS) {
+        cow.trail.push({ x: cow.x, y: cow.y, t: now });
+        cow.lastSampleAt = now;
+        const cutoff = now - COW_FOLLOWER_LAG_MS - 500;
+        while (cow.trail.length > 2 && cow.trail[0].t < cutoff) cow.trail.shift();
+      }
+      const targetT = now - COW_FOLLOWER_LAG_MS;
+      let followPoint = cow.trail[0];
+      for (const p of cow.trail) {
+        if (p.t > targetT) break;
+        followPoint = p;
+      }
+      cow.follower.x = followPoint.x;
+      cow.follower.y = followPoint.y;
+    }
+
+    /** Dibuja la vaca y su acompañante, si caen dentro de lo visible. */
+    function drawCow(w, h) {
+      if (!cow) return;
+      const { x: vx, y: vy, scale } = currentView;
+      const margin = OBJ_VIEWPORT_MARGIN_PX / scale;
+      const wx0 = (0 - vx) / scale - margin, wx1 = (w - vx) / scale + margin;
+      const wy0 = (0 - vy) / scale - margin, wy1 = (h - vy) / scale + margin;
+
+      const followerImg = cowFollowerImg;
+      if (followerImg.complete && followerImg.naturalWidth &&
+          cow.follower.x >= wx0 && cow.follower.x <= wx1 && cow.follower.y >= wy0 && cow.follower.y <= wy1) {
+        const fw = COW_FOLLOWER_SPRITE_WORLD_W * scale;
+        const fh = fw * (followerImg.naturalHeight / followerImg.naturalWidth);
+        ctx.drawImage(followerImg, cow.follower.x * scale + vx - fw / 2, cow.follower.y * scale + vy - fh, fw, fh);
+      }
+
+      const cowImg = cowImages[cow.dir] || cowImages.right;
+      if (cowImg.complete && cowImg.naturalWidth &&
+          cow.x >= wx0 && cow.x <= wx1 && cow.y >= wy0 && cow.y <= wy1) {
+        const cwWidth = COW_SPRITE_WORLD_W * scale;
+        const cwHeight = cwWidth * (cowImg.naturalHeight / cowImg.naturalWidth);
+        ctx.drawImage(cowImg, cow.x * scale + vx - cwWidth / 2, cow.y * scale + vy - cwHeight, cwWidth, cwHeight);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Nubes del cielo: decoracion pura, sin ninguna relacion con el mapa de
+    // la partida. Van en coordenadas de PANTALLA (no de mundo: no hay que
+    // convertir nada al hacer pan/zoom) y se dibujan en ESTE mismo canvas,
+    // que ya esta recortado exactamente a la franja del mapa entre las dos
+    // barras de madera (ver `#mapViewport` en shared.css) — por eso nunca
+    // hace falta comprobar aparte que no se salgan hacia los menus ni se
+    // superpongan a un popup (los popups van muy por encima en z-index).
+    // Ver docs/ACCIONES.md seccion 15.
+    // -----------------------------------------------------------------------
+    const CLOUD_SPRITE_NAMES = ['cloud-1', 'cloud-2', 'cloud-3'];
+    const cloudImages = CLOUD_SPRITE_NAMES.map((name) => loadSprite(name));
+    const CLOUD_ALPHA = 0.3; // "muy transparentes", ver cabecera de esta seccion
+    const CLOUD_SPEED_MIN = 10, CLOUD_SPEED_MAX = 20; // px de PANTALLA por segundo
+    const CLOUD_MAX_ON_SCREEN = 9;
+    const CLOUD_SPAWN_MIN_MS = 4000, CLOUD_SPAWN_MAX_MS = 9000;
+    const CLOUD_GROUP_GAP_PX = 26; // "a pocos cm" entre nubes de un mismo grupo
+    let cloudsInitialized = false;
+
+    /** 55% solas, 30% en pareja, 15% en grupo de 4 — "no muchas, unas pocas". */
+    function pickCloudGroupSize() {
+      const r = Math.random();
+      if (r < 0.55) return 1;
+      if (r < 0.85) return 2;
+      return 4;
+    }
+
+    /**
+     * Crea un grupo de nubes nuevo. `seeded` es solo para el sembrado inicial
+     * (al cargar la pagina): esas aparecen ya repartidas por la pantalla en
+     * vez de entrando por un borde, para que el cielo no se vea vacio los
+     * primeros segundos. El resto de grupos, ya en marcha la partida, entran
+     * siempre por un lado y van derechas hacia el otro sin rebotar ni
+     * "engancharse" al tocar el borde — se despachan solas en stepClouds().
+     */
+    function spawnCloudBatch(seeded) {
+      const w = viewportEl.clientWidth, h = viewportEl.clientHeight;
+      if (!w || !h) return;
+      const ltr = Math.random() < 0.5; // izquierda->derecha o al reves, al azar
+      const speed = CLOUD_SPEED_MIN + Math.random() * (CLOUD_SPEED_MAX - CLOUD_SPEED_MIN);
+      const vx = ltr ? speed : -speed;
+      const groupSize = pickCloudGroupSize();
+      const baseY = h * (0.08 + Math.random() * 0.7);
+      for (let i = 0; i < groupSize; i++) {
+        const img = cloudImages[Math.floor(Math.random() * cloudImages.length)];
+        const naturalW = img.naturalWidth || 68;
+        const groupOffset = i * CLOUD_GROUP_GAP_PX * (ltr ? -1 : 1); // el resto del grupo, por detras
+        const x = seeded ? Math.random() * w : (ltr ? -naturalW : w + naturalW) + groupOffset;
+        clouds.push({ img, x, y: baseY + (Math.random() - 0.5) * 30, vx, naturalW });
+      }
+    }
+
+    function initClouds() {
+      if (cloudsInitialized) return;
+      if (!viewportEl.clientWidth || !viewportEl.clientHeight) return; // se reintenta en el proximo onLayout/onResize
+      cloudsInitialized = true;
+      spawnCloudBatch(true);
+      spawnCloudBatch(true);
+      nextCloudSpawnAt = performance.now() + 2000 + Math.random() * 3000;
+      startWalkerLoop();
+    }
+
+    /** Avanza las nubes y retira las que ya salieron del todo por el lado contrario (no rebotan). */
+    function stepClouds(dt, now) {
+      const w = viewportEl.clientWidth;
+      for (let i = clouds.length - 1; i >= 0; i--) {
+        const c = clouds[i];
+        c.x += c.vx * dt;
+        const margin = c.naturalW + 40;
+        if (c.x < -margin || c.x > w + margin) clouds.splice(i, 1);
+      }
+      if (now >= nextCloudSpawnAt && clouds.length < CLOUD_MAX_ON_SCREEN) {
+        spawnCloudBatch(false);
+        nextCloudSpawnAt = now + CLOUD_SPAWN_MIN_MS + Math.random() * (CLOUD_SPAWN_MAX_MS - CLOUD_SPAWN_MIN_MS);
+      }
+    }
+
+    function drawClouds(w, h) {
+      if (!clouds.length) return;
+      ctx.save();
+      ctx.globalAlpha = CLOUD_ALPHA;
+      for (const c of clouds) {
+        if (!c.img.complete || !c.img.naturalWidth) continue;
+        const dw = c.img.naturalWidth, dh = c.img.naturalHeight;
+        ctx.drawImage(c.img, c.x - dw / 2, c.y - dh / 2, dw, dh);
+      }
+      ctx.restore();
+    }
+
     /**
      * Fija el destino de un caminante como una RUTA POR TIERRA, no como una
      * linea recta: se busca el camino entre casillas vecinas (que por
@@ -1375,10 +1629,32 @@
         const step = Math.min(dist, speed * dt);
         w.x += (dx / dist) * step;
         w.y += (dy / dist) * step;
+        // Sprite de izquierda/derecha segun el sentido horizontal del ultimo
+        // paso — con umbral, para que un tramo casi vertical no lo haga
+        // parpadear entre los dos sprites.
+        if (dx > WALKER_DIR_THRESHOLD) w.dir = 'right';
+        else if (dx < -WALKER_DIR_THRESHOLD) w.dir = 'left';
       });
     }
 
-    /** Dibuja los caminantes visibles, con su brinquito y su nombre. */
+    /**
+     * Tiñe un sprite ya dibujado con un color plano, respetando su silueta:
+     * `source-atop` solo pinta donde el propio sprite ya dejo pixeles
+     * opacos, asi que el rectangulo de color no se sale de su forma. Es lo
+     * que permite tener UN solo PNG de soldado (gris neutro) y que cada
+     * facción se vea de su color sin necesitar un PNG por facción.
+     */
+    function drawTintedSprite(img, dx, dy, dw, dh, color, alpha) {
+      ctx.drawImage(img, dx, dy, dw, dh);
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      ctx.fillRect(dx, dy, dw, dh);
+      ctx.restore();
+    }
+
+    /** Dibuja los caminantes visibles, con su brinquito, su sprite segun sentido y su nombre. */
     function drawWalkers(w, h) {
       if (!walkers.size || !walkerWorld) return;
       const { x: vx, y: vy, scale } = currentView;
@@ -1386,7 +1662,8 @@
       const wx0 = (0 - vx) / scale - margin, wx1 = (w - vx) / scale + margin;
       const wy0 = (0 - vy) / scale - margin, wy1 = (h - vy) / scale + margin;
 
-      const size = WALKER_SIZE * scale;
+      const drawW = WALKER_SPRITE_WORLD_W * scale;
+      const drawH = WALKER_SPRITE_WORLD_H * scale;
       const showNames = scale >= WALKER_NAME_MIN_SCALE;
       const t = performance.now() / 1000;
 
@@ -1395,10 +1672,12 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
       }
-      ctx.lineWidth = Math.max(1, size * 0.09);
 
       walkers.forEach((walker) => {
         if (walker.x < wx0 || walker.x > wx1 || walker.y < wy0 || walker.y > wy1) return;
+
+        const img = soldierImages[walker.dir] || soldierImages.right;
+        if (!img.complete || !img.naturalWidth) return;
 
         // Brinquito: solo mientras se mueve de verdad, para que los que estan
         // parados en la frontera o en un castillo se queden quietos.
@@ -1408,25 +1687,17 @@
         const sx = walker.x * scale + vx;
         const sy = (walker.y - hop) * scale + vy;
 
-        ctx.beginPath();
-        ctx.moveTo(sx, sy - size);
-        ctx.lineTo(sx - size * 0.87, sy + size * 0.5);
-        ctx.lineTo(sx + size * 0.87, sy + size * 0.5);
-        ctx.closePath();
-        ctx.fillStyle = walker.color;
-        ctx.fill();
-        ctx.strokeStyle = '#04141c';
-        ctx.stroke();
+        // Anclado por la base (abajo-centro), como el resto de sprites del mapa.
+        drawTintedSprite(img, sx - drawW / 2, sy - drawH, drawW, drawH, walker.color, 0.65);
 
         if (showNames) {
           // Sombra fina detras del nombre: sobre terreno claro (desierto,
           // nieve) el texto blanco solo se perdia del todo.
           ctx.lineWidth = 3;
           ctx.strokeStyle = 'rgba(6,18,26,.85)';
-          ctx.strokeText(walker.username, sx, sy - size - 3);
+          ctx.strokeText(walker.username, sx, sy - drawH - 3);
           ctx.fillStyle = '#f5fbff';
-          ctx.fillText(walker.username, sx, sy - size - 3);
-          ctx.lineWidth = Math.max(1, size * 0.09);
+          ctx.fillText(walker.username, sx, sy - drawH - 3);
         }
       });
     }
@@ -1442,21 +1713,32 @@
       return out;
     }
 
+    /** Hay algo que necesite el bucle de animacion corriendo ahora mismo. */
+    function needsAnimationLoop() {
+      return walkers.size > 0 || cow != null || clouds.length > 0;
+    }
+
     /**
-     * Bucle de animacion. Solo corre mientras haya caminantes: sin jugadores
-     * (antes de que empiece la partida, o si mueren todos) la capa vuelve a
-     * repintarse solo cuando hace falta, sin gastar un frame cada 16ms.
+     * Bucle de animacion. Solo corre mientras haga falta (caminantes, la
+     * vaca o alguna nube en pantalla): sin partida ni jugadores, antes de que
+     * se hornee la primera nube, la capa vuelve a repintarse solo cuando hace
+     * falta, sin gastar un frame cada 16ms. Una vez hay nubes (ver
+     * spawnCloudBatch(), se siembran solas nada mas cargar la pagina) el
+     * bucle practicamente no para nunca, y eso esta bien: es un efecto de
+     * cielo pensado para estar siempre ahi.
      */
     function startWalkerLoop() {
-      if (walkerLoopRunning || !walkers.size) return;
+      if (walkerLoopRunning || !needsAnimationLoop()) return;
       walkerLoopRunning = true;
       lastFrameAt = performance.now();
       const tick = () => {
-        if (!walkers.size) { walkerLoopRunning = false; drawObjectLayer(); return; }
+        if (!needsAnimationLoop()) { walkerLoopRunning = false; drawObjectLayer(); return; }
         const now = performance.now();
         const dt = Math.min(0.1, (now - lastFrameAt) / 1000); // techo por si la pestaña estuvo en segundo plano
         lastFrameAt = now;
         stepWalkers(dt, now);
+        stepCow(dt, now);
+        stepClouds(dt, now);
         drawObjectLayer();
         requestAnimationFrame(tick);
       };
@@ -1487,6 +1769,7 @@
 
     function onResize() {
       resizeCanvas();
+      initClouds();
       scheduleRedraw();
     }
 
@@ -1532,12 +1815,16 @@
       ctx.clearRect(0, 0, w, h);
 
       // Orden de capas dentro de este canvas, de atras hacia delante:
-      // decoracion del mapa -> objetos de terreno -> caminantes. Los
-      // caminantes van los ULTIMOS para que nunca se los coma un arbol ni un
-      // castillo: son lo que hay que poder seguir con la vista.
+      // decoracion del mapa -> objetos de terreno -> vaca -> caminantes ->
+      // nubes. Los caminantes van antes de las nubes pero despues de todo lo
+      // demas del suelo para que nunca se los coma un arbol ni un castillo:
+      // son lo que hay que poder seguir con la vista. Las nubes van las
+      // ULTIMAS de todas, por encima de todo, como corresponde al cielo.
       drawDecorations(w, h);
       drawTerrainObjects(w, h);
+      drawCow(w, h);
       drawWalkers(w, h);
+      drawClouds(w, h);
     }
 
     /** Arboles/rocas/etc. de `objects.bin` (si ese asset llego a generarse). */
@@ -1717,7 +2004,12 @@
       }
     }
 
-    return { onLayout, onViewChanged, onResize, setDecorations, setWalkerWorld, getMarkerPositions };
+    /** Posicion actual de la vaca y su acompañante (px de mundo), o null si no se ha sembrado todavia. */
+    function getCowPosition() {
+      return cow ? { x: cow.x, y: cow.y, followerX: cow.follower.x, followerY: cow.follower.y } : null;
+    }
+
+    return { onLayout, onViewChanged, onResize, setDecorations, setWalkerWorld, getMarkerPositions, getCowPosition };
   }
 
   window.CondejorgeMap = { createMapController };
