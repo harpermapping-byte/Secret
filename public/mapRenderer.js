@@ -104,6 +104,27 @@
     console.warn('[mapRenderer] falta public/sprites/industry.png, no se dibujaran las industrias');
   });
 
+  // Edificios de tropa (!levas/!arqueros/!caballeros, ver
+  // rules/troopBuildings.js): mismo mecanismo que paintIndustryMarkers (uno
+  // por edificio en pie, en cuadricula sobre el centroide de SU casilla),
+  // pero cada tipo en su propia "columna" (LANE_OFFSET en X) para no
+  // amontonarse con las industrias ni entre ellos.
+  const TROOP_BUILDING_SPRITE_WORLD_WIDTH = 46;
+  const TROOP_BUILDING_STEP_WORLD = 22;
+  const TROOP_BUILDING_PER_ROW = 3;
+  const TROOP_BUILDING_LANE_OFFSET = 60;
+  function loadBuildingSprite(fileName) {
+    const img = new Image();
+    img.src = `/sprites/${fileName}.png`;
+    img.addEventListener('error', () => {
+      console.warn(`[mapRenderer] falta public/sprites/${fileName}.png, no se dibujara ese edificio`);
+    });
+    return img;
+  }
+  const barracaSpriteImg = loadBuildingSprite('barraca');
+  const campoArqueriaSpriteImg = loadBuildingSprite('campo-arqueria');
+  const caballerizaSpriteImg = loadBuildingSprite('caballeriza');
+
   // Chapitas de combate en vivo (escudo de defensores / espada de atacantes,
   // ver paintCombatBadges). BADGE_OFFSET_Y va en celdas de rejilla: cuanto se
   // suben respecto al centro de la faccion para no taparse con la nube de
@@ -382,6 +403,9 @@
       ctx.clearRect(0, 0, markersEl.width, markersEl.height);
       if (showLabels) paintTileLabels(ctx, tiles);
       paintIndustryMarkers(ctx, tiles);
+      paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, -TROOP_BUILDING_LANE_OFFSET);
+      paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, -TROOP_BUILDING_LANE_OFFSET * 2);
+      paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, TROOP_BUILDING_LANE_OFFSET);
       paintCombatBadges(ctx, tiles, factions);
     }
 
@@ -418,6 +442,31 @@
           const cy = c.y * BLOCK_PX + (row + 1) * INDUSTRY_STEP_WORLD;
           // Anclado por la base (abajo-centro), igual que las decoraciones.
           ctx.drawImage(industrySpriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
+        }
+      });
+    }
+
+    /**
+     * Generico para los 3 edificios de tropa (barraca/campo-arqueria/
+     * caballeriza) — misma tecnica de cuadricula que paintIndustryMarkers,
+     * pero desplazada `laneDx` pixeles de mundo a un lado del centroide para
+     * que las 3 columnas (mas la de industria, sin desplazar) no se pisen.
+     */
+    function paintBuildingMarkers(ctx, tiles, tileField, spriteImg, laneDx) {
+      if (!spriteImg.complete || !spriteImg.naturalWidth) return;
+      const drawW = TROOP_BUILDING_SPRITE_WORLD_WIDTH;
+      const drawH = drawW * (spriteImg.naturalHeight / spriteImg.naturalWidth);
+      tiles.forEach((t) => {
+        const count = t[tileField] || 0;
+        if (count <= 0) return;
+        const c = layout.centroids[t.id];
+        if (!c) return;
+        for (let i = 0; i < count; i++) {
+          const col = i % TROOP_BUILDING_PER_ROW;
+          const row = Math.floor(i / TROOP_BUILDING_PER_ROW);
+          const cx = c.x * BLOCK_PX + laneDx + (col - (TROOP_BUILDING_PER_ROW - 1) / 2) * TROOP_BUILDING_STEP_WORLD;
+          const cy = c.y * BLOCK_PX + (row + 1) * TROOP_BUILDING_STEP_WORLD;
+          ctx.drawImage(spriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
         }
       });
     }
@@ -864,7 +913,14 @@
   // por sitios por los que su "general" no ha pasado. Con más de una tropa,
   // cada una va a un retraso mayor sobre ese mismo rastro (fila india).
   const troopImg = loadSprite('troop');
+  // Arquero (!arqueros) y caballero de IA (!caballeros, ver
+  // rules/troopBuildings.js) — mismo mecanismo de seguimiento que `troop`
+  // (soldado), sprite propio. El de caballero es un pelin mas grande (va a
+  // caballo), igual que el caballero de verdad es mas grande que el soldado.
+  const archerTroopImg = loadSprite('troop-archer');
+  const cavalryTroopImg = loadSprite('troop-cavalry');
   const TROOP_SPRITE_WORLD_W = 12;
+  const CAVALRY_TROOP_SPRITE_WORLD_W = 14;
   const TROOP_TRAIL_SAMPLE_MS = 110;
   const TROOP_FOLLOWER_LAG_MS = 450;
   const TROOP_FOLLOWER_LAG_STEP_MS = 220;
@@ -920,7 +976,10 @@
   // se reutiliza para pintarlo). Sin entrada = sin icono (paseando, sin
   // orden). Se pidio expresamente que expansion NO fuera un arco: al ser
   // "ganar terreno" se usa una banderita, no un icono de ataque a distancia.
-  const ACTION_ICONS = { ATTACK: ' ⚔️', DEFEND: ' 🛡️', INDUSTRY: ' ⚒️', EXPAND: ' 🚩' };
+  const ACTION_ICONS = {
+    ATTACK: ' ⚔️', DEFEND: ' 🛡️', INDUSTRY: ' ⚒️', EXPAND: ' 🚩',
+    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎',
+  };
 
   /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */
   function hash01(x, y, salt) {
@@ -1088,6 +1147,8 @@
               action: null, actionTarget: null,
               dir: 'right', // que sprite le toca (soldier-left/right), ver stepWalkers()
               aiTroops: 0,
+              archerTroops: 0,
+              cavalryTroops: 0,
               trail: [], // rastro de posiciones para las tropas que le sigan, ver stepWalkers()
               lastTrailSampleAt: 0,
             };
@@ -1098,6 +1159,8 @@
           walker.factionNumber = factionNumber;
           walker.unitType = p.unitType; // 'soldier' | 'knight' — ver drawWalkers()/stepWalkers()
           walker.aiTroops = p.aiTroops || 0; // cuantos acompañantes le siguen, ver drawWalkers()
+          walker.archerTroops = p.archerTroops || 0;
+          walker.cavalryTroops = p.cavalryTroops || 0;
 
           // Solo se recalcula el destino si la orden ha cambiado; si no, se
           // deja que termine de andar hacia donde ya iba (si no, cada `state:*`
@@ -1650,7 +1713,8 @@
         if (now - w.lastTrailSampleAt >= TROOP_TRAIL_SAMPLE_MS) {
           w.trail.push({ x: w.x, y: w.y, t: now });
           w.lastTrailSampleAt = now;
-          const maxLagNeeded = TROOP_FOLLOWER_LAG_MS + Math.max(0, w.aiTroops - 1) * TROOP_FOLLOWER_LAG_STEP_MS;
+          const totalFollowers = (w.aiTroops || 0) + (w.archerTroops || 0) + (w.cavalryTroops || 0);
+          const maxLagNeeded = TROOP_FOLLOWER_LAG_MS + Math.max(0, totalFollowers - 1) * TROOP_FOLLOWER_LAG_STEP_MS;
           const cutoff = now - maxLagNeeded - 500;
           while (w.trail.length > 2 && w.trail[0].t < cutoff) w.trail.shift();
         }
@@ -1758,17 +1822,32 @@
 
         // Tropas de IA: se dibujan ANTES que al jugador, para que quede
         // claro que van detras/debajo de su "general" — siguen el rastro
-        // real, no la posicion actual (ver trailPositionAt()).
-        if (walker.aiTroops > 0 && troopImg.complete && troopImg.naturalWidth) {
-          const tw = TROOP_SPRITE_WORLD_W * scale;
-          const th = tw * (troopImg.naturalHeight / troopImg.naturalWidth);
+        // real, no la posicion actual (ver trailPositionAt()). Los 3 tipos
+        // (soldado/arquero/caballero, ver rules/troopBuildings.js) forman
+        // UNA sola fila india: el indice de retraso sigue subiendo de un
+        // tipo al siguiente en vez de reiniciarse, para que no se
+        // superpongan al dibujarse los tres a la vez.
+        if (walker.aiTroops > 0 || walker.archerTroops > 0 || walker.cavalryTroops > 0) {
           const nowMs = t * 1000;
-          for (let i = 0; i < walker.aiTroops; i++) {
-            const lag = TROOP_FOLLOWER_LAG_MS + i * TROOP_FOLLOWER_LAG_STEP_MS;
-            const pos = trailPositionAt(walker.trail, lag, nowMs) || { x: walker.x, y: walker.y };
-            const tsx = pos.x * scale + vx;
-            const tsy = pos.y * scale + vy;
-            ctx.drawImage(troopImg, tsx - tw / 2, tsy - th, tw, th);
+          let followerIndex = 0;
+          const followerGroups = [
+            { count: walker.aiTroops, img: troopImg, worldW: TROOP_SPRITE_WORLD_W },
+            { count: walker.archerTroops, img: archerTroopImg, worldW: TROOP_SPRITE_WORLD_W },
+            { count: walker.cavalryTroops, img: cavalryTroopImg, worldW: CAVALRY_TROOP_SPRITE_WORLD_W },
+          ];
+          for (const group of followerGroups) {
+            if (group.count <= 0) continue;
+            if (!group.img.complete || !group.img.naturalWidth) { followerIndex += group.count; continue; }
+            const tw = group.worldW * scale;
+            const th = tw * (group.img.naturalHeight / group.img.naturalWidth);
+            for (let i = 0; i < group.count; i++) {
+              const lag = TROOP_FOLLOWER_LAG_MS + followerIndex * TROOP_FOLLOWER_LAG_STEP_MS;
+              followerIndex++;
+              const pos = trailPositionAt(walker.trail, lag, nowMs) || { x: walker.x, y: walker.y };
+              const tsx = pos.x * scale + vx;
+              const tsy = pos.y * scale + vy;
+              ctx.drawImage(group.img, tsx - tw / 2, tsy - th, tw, th);
+            }
           }
         }
 

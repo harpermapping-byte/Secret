@@ -271,6 +271,45 @@ const SPRITES = {
     c.rect(2, 8, 10, 13, [176, 196, 168], 1); // cuerpo
   },
 
+  // TROPA DE IA - ARQUERO (!arqueros, ver rules/troopBuildings.js seccion
+  // 19): mismo mecanismo que `troop` (sigue al jugador), color distinto para
+  // diferenciarse de un vistazo (tono arena/cuero). 14x22.
+  'troop-archer': (c) => {
+    c.rect(4, 2, 6, 6, [196, 176, 120], 1);
+    c.rect(2, 8, 10, 13, [196, 176, 120], 1);
+  },
+
+  // TROPA DE IA - CABALLERO (!caballeros): un pelin mas grande que el resto
+  // de tropas (va a caballo), mismo mecanismo de seguimiento, tono
+  // azul-acero. 16x26.
+  'troop-cavalry': (c) => {
+    c.rect(5, 2, 6, 6, [150, 150, 168], 1);
+    c.rect(2, 8, 12, 16, [150, 150, 168], 1);
+  },
+
+  // EDIFICIO DE LEVAS (barraca, !levas): misma tecnica que `industry` pero
+  // tejado rojizo, para diferenciarlo de un vistazo en el mapa. Da +5
+  // soldados de IA a quien lo construye y +1/turno despues (repartido en la
+  // faccion, ver rules/troopBuildings.js). 36x28.
+  barraca: (c) => {
+    c.rect(3, 12, 30, 14, [176, 132, 90], 2, [72, 46, 20]); // cuerpo de madera
+    c.rect(0, 2, 36, 12, [150, 58, 46], 2, [72, 30, 20]);   // tejado rojizo
+  },
+
+  // CAMPO DE ARQUERIA (!arqueros): torreta de madera, tejado verde oscuro.
+  // Da +5 arqueros de IA al construirlo y +1/turno despues. 36x28.
+  'campo-arqueria': (c) => {
+    c.rect(6, 8, 24, 18, [150, 132, 96], 2, [64, 52, 30]); // torre
+    c.rect(2, 0, 32, 10, [70, 96, 58], 2, [30, 44, 24]);   // tejado verde
+  },
+
+  // CABALLERIZA (!caballeros): establo de piedra, tejado azul-grisaceo. Da
+  // +5 caballeros de IA al construirlo y +1/turno despues. 36x28.
+  caballeriza: (c) => {
+    c.rect(2, 12, 32, 14, [120, 108, 96], 2, [50, 44, 38]); // cuerpo piedra
+    c.rect(0, 2, 36, 12, [90, 100, 116], 2, [40, 44, 54]);  // tejado azulado
+  },
+
   // NUBES DEL CIELO (decorativo, ver docs/ACCIONES.md seccion 15): 3 tamaños
   // para que no se vean todas iguales al agruparse. Blancas y opacas aqui a
   // proposito — la transparencia final ("muy transparentes" segun se pidio)
@@ -304,7 +343,8 @@ const SIZES = {
   logo: [320, 140],
   industry: [36, 28],
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
-  troop: [14, 22],
+  troop: [14, 22], 'troop-archer': [14, 22], 'troop-cavalry': [16, 26],
+  barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };
 
@@ -320,4 +360,4 @@ if (require.main === module) {
   console.log(`placeholders escritos en ${outDir}: ${Object.keys(SPRITES).join(', ')}`);
 }
 
-module.exports = { SPRITES, SIZES };
+module.exports = { SPRITES, SIZES, createCanvas };

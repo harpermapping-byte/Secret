@@ -28,8 +28,8 @@ function resolveCombat(match, context) {
 
     // Cada tirada depende de QUIEN vota (soldado o caballero, ver rules/shared.js),
     // no solo de cuantos son.
-    const attackPower = sumRandomPower(match, attackerUserIds) * combatModifier(match, defenderNumber, 'attack');
-    const defensePower = sumRandomPower(match, defenderUserIds) * combatModifier(match, defenderNumber, 'defense');
+    const attackPower = sumRandomPower(match, attackerUserIds, 'attack') * combatModifier(match, defenderNumber, 'attack');
+    const defensePower = sumRandomPower(match, defenderUserIds, 'defense') * combatModifier(match, defenderNumber, 'defense');
 
     if (attackPower > defensePower) {
       // Gana el ataque: baja la faccion defensora y conquista territorio.

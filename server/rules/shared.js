@@ -23,21 +23,32 @@ function rollUnitPower(unitType) {
 // Cada tropa de IA que lleva un jugador (ver rules/troops.js) le suma esto
 // de fuerza FIJA cuando ese jugador ataca o defiende — no es una tirada, es
 // un bonus llano por unidad, igual de grande gane o pierda el dado ese turno.
+// Los soldados (aiTroops) valen igual en ataque y defensa; los arqueros y
+// caballeros (rules/troopBuildings.js) son especialistas: el arquero solo
+// suma atacando, el caballero solo defendiendo, tal y como se pidió.
 const AI_TROOP_COMBAT_BONUS = 0.1;
+const ARCHER_ATTACK_BONUS = 0.2;
+const ARCHER_DEFENSE_BONUS = 0;
+const CAVALRY_ATTACK_BONUS = 0;
+const CAVALRY_DEFENSE_BONUS = 0.2;
 
 /**
  * Suma una tirada por cada userId de `userIds`, cada una en el rango que le
  * toque segun `player.unitType` (soldado o caballero) — por eso hace falta
  * `match` aqui y no solo un recuento de votos como antes: la fuerza ya no
  * depende solo de CUANTOS votan, sino de QUIENES. Encima de la tirada, se
- * suma el bonus fijo de las tropas de IA que lleve cada uno.
+ * suma el bonus fijo de las tropas de IA que lleve cada uno, distinto segun
+ * `kind` ('attack' | 'defense') porque arqueros y caballeros son
+ * especialistas de un solo lado del combate.
  */
-function sumRandomPower(match, userIds) {
+function sumRandomPower(match, userIds, kind) {
   let total = 0;
   for (const userId of userIds) {
     const player = match.players.get(userId);
     total += rollUnitPower(player ? player.unitType : 'soldier');
     total += AI_TROOP_COMBAT_BONUS * (player?.aiTroops || 0);
+    total += (kind === 'attack' ? ARCHER_ATTACK_BONUS : ARCHER_DEFENSE_BONUS) * (player?.archerTroops || 0);
+    total += (kind === 'attack' ? CAVALRY_ATTACK_BONUS : CAVALRY_DEFENSE_BONUS) * (player?.cavalryTroops || 0);
   }
   return total;
 }
@@ -107,4 +118,14 @@ function shuffle(array) {
   return array;
 }
 
-module.exports = { sumRandomPower, applyCasualties, killPlayer, shuffle };
+module.exports = {
+  sumRandomPower,
+  applyCasualties,
+  killPlayer,
+  shuffle,
+  AI_TROOP_COMBAT_BONUS,
+  ARCHER_ATTACK_BONUS,
+  ARCHER_DEFENSE_BONUS,
+  CAVALRY_ATTACK_BONUS,
+  CAVALRY_DEFENSE_BONUS,
+};

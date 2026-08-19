@@ -131,6 +131,14 @@ function generateMap({ tileCount, factionCount, mode }) {
       // conquista, su industria se va con ella al nuevo dueño sin codigo
       // extra — ver docs/GDD seccion 6 "Industria".
       industryCount: 0,
+      // Edificios de tropas de IA (!levas/!arqueros/!caballeros, ver
+      // rules/troopBuildings.js), mismo mecanismo que industryCount: viven en
+      // la CASILLA, asi que conquistarla se lleva el edificio al nuevo dueño
+      // sin codigo extra (incluida una casilla que vuelve a neutral y luego
+      // la captura otra faccion, ver neutralizeTile/transferTile).
+      leviesCount: 0,
+      archeryCount: 0,
+      cavalryCount: 0,
     });
   }
 

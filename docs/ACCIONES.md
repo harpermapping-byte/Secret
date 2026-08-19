@@ -33,6 +33,9 @@ Solo `gameEngine.js` puede cambiar la fase actual. Ningún otro módulo la modif
 | `!expansion` | `ACTION_EXPAND` | `PHASE_ACTION` (sin efecto si el mapa es de reparto total) |
 | `!especial` | `ACTION_SPECIAL` | `PHASE_ACTION` |
 | `!alianza <N>` | `ACTION_ALLIANCE` | `PHASE_ACTION` (solo si la partida tiene alianzas activadas) |
+| `!levas` | `ACTION_LEVAS` | `PHASE_ACTION` — misma mecánica que `!industria` (un voto, un edificio, sin objetivo), ver sección 19 |
+| `!arqueros` | `ACTION_ARQUEROS` | `PHASE_ACTION` — igual que `!levas`, ver sección 19 |
+| `!caballeros` | `ACTION_CABALLEROS` | `PHASE_ACTION` — igual que `!levas`, ver sección 19 |
 
 Solo `commands.js` interpreta texto de chat. Ningún otro módulo hace parsing de comandos por su cuenta.
 
@@ -220,6 +223,9 @@ Valores puestos para que el motor funcione y se pueda probar; son placeholders a
 | `COMBAT_RANDOM_MIN` / `MAX` | `rules/shared.js` | 0.7 – 1.3 por soldado (ataque **y** defensa) |
 | `KNIGHT_RANDOM_MIN` / `MAX` | `rules/shared.js` | 0.9 – 1.4 por caballero (ataque **y** defensa) — ver sección 16 |
 | `AI_TROOP_COMBAT_BONUS` | `rules/shared.js` | +0.1 fijo por tropa de IA (ataque **y** defensa) — ver sección 18 |
+| `ARCHER_ATTACK_BONUS` / `ARCHER_DEFENSE_BONUS` | `rules/shared.js` | +0.2 atacando / 0 defendiendo, por arquero de IA — ver sección 19 |
+| `CAVALRY_ATTACK_BONUS` / `CAVALRY_DEFENSE_BONUS` | `rules/shared.js` | 0 atacando / +0.2 defendiendo, por caballero de IA — ver sección 19 |
+| `BUILDING_INITIAL_BONUS` | `rules/troopBuildings.js` | +5 tropas directas al votante al construir `!levas`/`!arqueros`/`!caballeros` — ver sección 19 |
 | `PASSIVE_INDUSTRY_PER_TERRITORY` | `rules/industry.js` | 0.1 por casilla |
 | `INDUSTRY_PER_BUILDING` | `rules/industry.js` | 0.5 por edificio de industria |
 | `VOTES_PER_NEW_TILE` | `rules/expansion.js` | 2 votantes por casilla nueva |
@@ -495,3 +501,34 @@ Cada casilla que controla una facción genera **1 tropa por ronda**, automático
 **Sincronizar entre pantallas no hizo falta programarlo aparte**: el servidor solo manda un número (`aiTroops`) por jugador, y cada navegador calcula el rastro y las posiciones de las tropas por su cuenta a partir de eso — exactamente el mismo principio que ya usa todo el resto del mapa (caminantes, vaca), donde la posición exacta es decoración local, no estado de partida.
 
 **Sustituir el placeholder**: `public/sprites/troop.png` (14×22, fondo transparente, sin variante de sentido — igual que el acompañante de la vaca, no se pidió). Generado por `tools/bakeSpritePlaceholders.js`.
+
+## 19. Edificios de tropa votados: `!levas` / `!arqueros` / `!caballeros`
+
+Tres comandos nuevos, **misma mecánica que `!industria`**: se votan en la Fase de Acción, uno por votante, sin objetivo, y cada voto levanta un edificio en una casilla al azar de las que controla la facción (`server/rules/troopBuildings.js`, nuevo). A diferencia de un edificio de industria (que no le pertenece a nadie en particular), el bono inicial de estos SÍ es directo para quien votó:
+
+| Comando | Edificio (`public/sprites/`) | Campo en la casilla | Tropa que da | Campo en el jugador |
+|---|---|---|---|---|
+| `!levas` | `barraca.png` | `tile.leviesCount` | soldado de IA | `player.aiTroops` (el mismo campo que ya alimentaba la generación pasiva por territorio, sección 18 — se suman) |
+| `!arqueros` | `campo-arqueria.png` | `tile.archeryCount` | arquero de IA | `player.archerTroops` |
+| `!caballeros` | `caballeriza.png` | `tile.cavalryCount` | caballero de IA | `player.cavalryTroops` (no confundir con el caballero de la mejora de industria nivel 1/3, sección 16 — ese es un jugador que cambia de `unitType`, esto es un acompañante más) |
+
+**Producción, en dos pasadas dentro de `resolveTroopBuildings()`, llamada desde `resolveRound()` justo después de `resolveAiTroops()`:**
+
+1. **Primero**, los edificios YA en pie (de rondas anteriores) producen: 1 tropa de su tipo por edificio, en las casillas que la facción controla AHORA MISMO (si conquistó una casilla con el edificio de otra facción, ya cuenta como suyo — vive en la casilla igual que `industryCount`, ver `mapTemplates.js`). Se reparte con `distributeTroops()` (la misma función genérica de la sección 18, ahora parametrizada por el campo: sección 18 la llamaba `distributeAiTroops` a secas) — prioriza a quien tenga menos de ESE tipo, no necesariamente a quien construyó el edificio.
+2. **Después**, se construyen los edificios votados ESTA ronda: uno por voto, y el bono inicial (`BUILDING_INITIAL_BONUS = 5`) va directo al votante.
+
+El orden importa: un edificio construido esta ronda no cuenta todavía en el paso 1 de esta misma ronda, así que da su +5 pero no un +1 extra encima — empieza a producir la ronda SIGUIENTE, tal y como se pidió ("el primer turno de colocación dan +5 y luego +1"). Si el territorio donde está cambia de dueño, el edificio se va con él sin código extra (mismo mecanismo que `industryCount`) — y si pasa por zona neutral antes de que otra facción lo capture, sigue ahí esperando, sin producir para nadie mientras tanto (una casilla neutral no tiene facción a la que repartirle nada).
+
+**Fuerza de combate — especialistas, no genéricos:** a diferencia del soldado de IA (que suma +0.1 igual en ataque y defensa, sección 18), arqueros y caballeros de IA solo aportan de un lado — `sumRandomPower()` en `rules/shared.js` ahora recibe un tercer argumento `kind` (`'attack'` | `'defense'`, ver los dos sitios donde se llama en `rules/combat.js`):
+
+| Tropa | Bonus atacando | Bonus defendiendo |
+|---|---|---|
+| soldado (`aiTroops`) | +0.1 | +0.1 |
+| arquero (`archerTroops`) | **+0.2** | 0 |
+| caballero de IA (`cavalryTroops`) | 0 | **+0.2** |
+
+Verificado estadísticamente sobre 20.000 tiradas por caso: con 3 arqueros por jugador, la media de ataque sube de ~1.0 a ~1.6 (exactamente +0.2×3) y la de defensa se queda en ~1.0; con 3 caballeros de IA, es al revés (defensa sube a ~1.6, ataque se queda en ~1.0). Verificado también con el motor real (no solo estadística): una facción de 2 jugadores donde uno vota `!levas` y el otro `!arqueros` — el votante recibe su +5 inmediato del tipo correcto y ninguno del otro tipo (sin contaminación cruzada), se levanta exactamente 1 edificio de cada tipo en territorio de la facción, y en la ronda siguiente el +1 de cada edificio en pie va, por prioridad, a quien menos tuviera de ese tipo — no siempre a quien lo construyó.
+
+**En el mapa:** los 3 edificios se pintan con la misma técnica de cuadrícula que las industrias (`paintBuildingMarkers()` en `mapRenderer.js`, generalización de `paintIndustryMarkers()`), cada tipo desplazado a su propia "columna" horizontal (`TROOP_BUILDING_LANE_OFFSET`) para no pisarse con las industrias ni entre ellos. Los acompañantes de arquero y caballero de IA siguen el mismo mecanismo de rastro que el soldado (sección 18): los 3 tipos forman UNA sola fila india detrás del jugador — el índice de retraso sigue subiendo de un tipo al siguiente (primero soldados, luego arqueros, luego caballeros) en vez de reiniciarse, así que no se superponen al dibujarse los tres a la vez. Verificado visualmente: con un jugador que construye los 3 edificios en 3 rondas seguidas (13 soldados + 6 arqueros + 5 caballeros de IA tras la tercera), los acompañantes se ven en fila detrás de él, con el caballero de IA (sprite algo más grande) el más alejado por ser el último tipo en la cola.
+
+**Sustituir los placeholders**: `public/sprites/barraca.png`, `campo-arqueria.png`, `caballeriza.png` (36×28, mismo formato que `industry.png`) y `public/sprites/troop-archer.png` (14×22), `troop-cavalry.png` (16×26, un pelin más grande, como se pidió). Generados por `tools/bakeSpritePlaceholders.js` — **importante**: ese script regenera TODOS los sprites de su tabla de golpe, así que para este lote se generaron solo los 5 archivos nuevos con un script aparte, sin volver a ejecutar el baker completo (que habría sobrescrito `industry.png` y otros PNG que el usuario ya personalizó a mano).
