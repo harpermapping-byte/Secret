@@ -17,6 +17,7 @@ const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
 const { resolveIndustry, resolveIndustryImmunity, industryThresholdsFor } = require('./rules/industry');
 const { resolveAiTroops } = require('./rules/troops');
+const { resolveTroopBuildings } = require('./rules/troopBuildings');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
@@ -25,6 +26,9 @@ const {
   ACTION_ATTACK,
   ACTION_ALLIANCE,
   ACTION_DEFEND,
+  ACTION_LEVAS,
+  ACTION_ARQUEROS,
+  ACTION_CABALLEROS,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -204,6 +208,8 @@ function joinFaction(userId, username, factionNumber) {
     unitType: existing ? existing.unitType : 'soldier',
     participation: existing ? existing.participation : 0,
     aiTroops: existing ? existing.aiTroops : 0,
+    archerTroops: existing ? existing.archerTroops : 0,
+    cavalryTroops: existing ? existing.cavalryTroops : 0,
     diedOnRound: null,
   });
   notifyStateChange();
@@ -320,6 +326,7 @@ function resolveRound() {
   resolveCombat(match, context);
   resolveIndustry(match, context);
   resolveAiTroops(match);
+  resolveTroopBuildings(match, context);
   resolveExpansion(match, context);
 
   match.summaryBlocks = buildRoundSummary(context);
@@ -372,6 +379,9 @@ function tallyActions() {
       [commands.ACTION_EXPAND]: [],
       [commands.ACTION_SPECIAL]: [],
       [ACTION_ALLIANCE]: new Map(),
+      [ACTION_LEVAS]: [],
+      [ACTION_ARQUEROS]: [],
+      [ACTION_CABALLEROS]: [],
     });
     activePlayerCountByFaction.set(faction.number, 0);
   }
@@ -543,6 +553,9 @@ function getPublicState() {
       ownerFactionNumber: t.ownerFactionNumber,
       neutral: t.neutral,
       industryCount: t.industryCount,
+      leviesCount: t.leviesCount,
+      archeryCount: t.archeryCount,
+      cavalryCount: t.cavalryCount,
     })),
     players: [...match.players.values()].map((p) => {
       // Que esta haciendo este jugador AHORA MISMO, para que el mapa pueda
@@ -559,10 +572,15 @@ function getPublicState() {
         factionNumber: p.factionNumber,
         alive: p.alive,
         unitType: p.unitType,
-        // Tropas de IA que lleva este jugador (ver rules/troops.js) — el
-        // cliente pinta un acompañante por cada una, siguiendo su rastro en
-        // el mapa (ver public/mapRenderer.js).
+        // Tropas de IA que lleva este jugador — el cliente pinta un
+        // acompañante por cada una, siguiendo su rastro en el mapa (ver
+        // public/mapRenderer.js). aiTroops = soldados (generación pasiva por
+        // territorio, ver rules/troops.js, y !levas), archerTroops/
+        // cavalryTroops = solo via !arqueros/!caballeros (ver
+        // rules/troopBuildings.js).
         aiTroops: p.aiTroops || 0,
+        archerTroops: p.archerTroops || 0,
+        cavalryTroops: p.cavalryTroops || 0,
         action: action ? action.type : null,
         actionTargetFactionNumber: action ? action.targetFactionNumber ?? null : null,
       };

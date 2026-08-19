@@ -70,6 +70,9 @@ Una vez pulsado "Iniciar partida", **nada de esto se puede volver a tocar**: no 
 | `!expansion` | Fase de Acción | Ocupáis territorio neutral (bárbaros) fronterizo: hacen falta 2 votantes por cada casilla nueva (1 o 2 votos = 1 casilla, 4 = 2, 6 = 3). Sin efecto si la partida se configuró con reparto total (sin terreno gris). |
 | `!especial` | Fase de Acción | Vota para activar la habilidad especial de tu facción (solo una vez por partida en total). |
 | `!alianza <nº facción>` | Fase de Acción, solo si el admin activó alianzas en esta partida | Vota por un alto el fuego de una ronda con esa facción. |
+| `!levas` | Fase de Acción | Levantas una barraca en un terreno al azar de tu facción (igual que `!industria`) y te lleva de inmediato +5 soldados de IA que te siguen por el mapa, +1 por ronda a partir de la siguiente por cada barraca en pie. |
+| `!arqueros` | Fase de Acción | Igual que `!levas` pero con un campo de arquería: +5 arqueros de IA al momento, especialistas de ataque (+0.2 fijo atacando, 0 defendiendo). |
+| `!caballeros` | Fase de Acción | Igual que `!levas` pero con una caballeriza: +5 caballeros de IA al momento, especialistas de defensa (+0.2 fijo defendiendo, 0 atacando). No confundir con el caballero de la mejora de industria (ese es un jugador con sprite propio, no un acompañante). |
 
 Solo cuenta el **último comando** que escribas antes de que cierre la Fase de Acción — puedes cambiar de opinión mientras dure.
 
@@ -116,6 +119,11 @@ Por eso la probeta del panel de facciones es comparable entre facciones de tama�
 
 ### Tropas de IA
 Cada casilla que controla una facción genera **1 tropa de IA por ronda**, automático — se reparte entre los jugadores vivos de la facción dándole siempre la siguiente al que menos tropas tenga (así, con más jugadores que territorios, primero les toca a los que todavía no tienen ninguna). Cada tropa sigue siempre en el mapa al jugador que la lleva (su "general"), formando una fila detrás de él, y le suma **+0.1 fijo** de fuerza cuando ese jugador escribe `!ataque` o `!defender` — no es una tirada, es un plus por cada tropa que lleve encima.
+
+### Edificios de tropa: `!levas`, `!arqueros`, `!caballeros`
+Además de la generación pasiva de arriba, cada jugador puede votar uno de estos 3 comandos (misma mecánica que `!industria`: un voto, un edificio, en una casilla al azar de tu facción) para levantar una barraca, un campo de arquería o una caballeriza. El edificio le da a **quien lo construyó** un bono inmediato de +5 tropas del tipo correspondiente, y a partir de la ronda siguiente sigue produciendo +1 por ronda mientras siga en pie — ese +1 ya no va necesariamente a quien lo construyó, sino que se reparte por la facción con la misma prioridad de siempre (al que menos tenga). Si el terreno donde está el edificio cambia de dueño, la producción pasa a la nueva facción sin más, igual que con una industria.
+
+Los soldados de barraca son iguales que los de la generación pasiva (+0.1 fijo, ataque y defensa). Los arqueros y los caballeros de IA son **especialistas**: el arquero solo suma atacando (+0.2), el caballero de IA solo defendiendo (+0.2) — ninguno de los dos aporta nada del otro lado. (No confundir al caballero de IA, un acompañante que sigue al jugador, con el caballero de la mejora de industria nivel 1/3, que es un jugador que cambia de sprite y de unidad.)
 
 ### Combate
 Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa).

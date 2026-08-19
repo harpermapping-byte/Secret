@@ -672,6 +672,9 @@
     { cmd: '!expansion', phase: 'Acción', desc: 'Ocupáis terreno neutral vecino: hacen falta 2 personas por cada terreno nuevo (1 o 2 votos = 1 terreno, 4 votos = 2 terrenos...). No hace nada si la partida es de "reparto total", sin neutrales.' },
     { cmd: '!especial', phase: 'Acción', desc: 'Votas para activar la habilidad especial de tu facción cuando llegue al % necesario.' },
     { cmd: '!alianza <N>', phase: 'Acción', desc: 'Votas para proponer una alianza con la facción número N (solo si el admin activó alianzas al crear la partida).' },
+    { cmd: '!levas', phase: 'Acción', desc: 'Levantas una barraca 🏕️ en un terreno al azar de tu facción (igual que !industria) y te lleva de inmediato +5 soldados de IA que te siguen por el mapa. Cada soldado te suma +0.1 fijo tanto en ataque como en defensa. Además, cada barraca en pie da +1 soldado por ronda a partir de la siguiente, repartido entre tu facción priorizando a quien menos tenga. Si te conquistan el terreno, la barraca pasa a producir para el nuevo dueño.' },
+    { cmd: '!arqueros', phase: 'Acción', desc: 'Levantas un campo de arquería 🏹 (igual mecánica que !levas) y te da +5 arqueros de IA al momento, +1 por ronda después por cada campo en pie. Los arqueros son especialistas de ataque: +0.2 fijo atacando, 0 defendiendo.' },
+    { cmd: '!caballeros', phase: 'Acción', desc: 'Levantas una caballeriza 🐎 (igual mecánica que !levas) y te da +5 caballeros de IA al momento, +1 por ronda después por cada caballeriza en pie. Los caballeros de IA son especialistas de defensa: +0.2 fijo defendiendo, 0 atacando (no confundir con el caballero 🐴 de la mejora de industria, que es un jugador que cambia de sprite).' },
   ];
 
   function openCommands() {

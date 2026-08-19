@@ -12,6 +12,12 @@ const ACTION_DEFEND = 'DEFEND';
 const ACTION_EXPAND = 'EXPAND';
 const ACTION_SPECIAL = 'SPECIAL';
 const ACTION_ALLIANCE = 'ALLIANCE';
+// Los 3 tipos de tropa de IA que se pueden construir con edificio propio
+// (ver rules/troopBuildings.js) — misma mecanica que !industria: un voto,
+// un edificio, sin objetivo. Ver docs/ACCIONES.md seccion 19.
+const ACTION_LEVAS = 'LEVAS';
+const ACTION_ARQUEROS = 'ARQUEROS';
+const ACTION_CABALLEROS = 'CABALLEROS';
 
 // En que fase es valido cada tipo de accion.
 const VALID_PHASE_BY_ACTION = {
@@ -22,6 +28,9 @@ const VALID_PHASE_BY_ACTION = {
   [ACTION_EXPAND]: PHASE_ACTION,
   [ACTION_SPECIAL]: PHASE_ACTION,
   [ACTION_ALLIANCE]: PHASE_ACTION,
+  [ACTION_LEVAS]: PHASE_ACTION,
+  [ACTION_ARQUEROS]: PHASE_ACTION,
+  [ACTION_CABALLEROS]: PHASE_ACTION,
 };
 
 const JOIN_RE = /^!faccion(\d+)$/i;
@@ -31,6 +40,9 @@ const DEFEND_RE = /^!defender$/i;
 const EXPAND_RE = /^!expansion$/i;
 const SPECIAL_RE = /^!especial$/i;
 const ALLIANCE_RE = /^!alianza\s+(\d+)$/i;
+const LEVAS_RE = /^!levas$/i;
+const ARQUEROS_RE = /^!arqueros$/i;
+const CABALLEROS_RE = /^!caballeros$/i;
 
 /**
  * Convierte un mensaje de chat en { type, targetFactionNumber } o null si no es un comando reconocido.
@@ -56,6 +68,12 @@ function parseCommand(rawText) {
   match = text.match(ALLIANCE_RE);
   if (match) return { type: ACTION_ALLIANCE, targetFactionNumber: Number(match[1]) };
 
+  if (LEVAS_RE.test(text)) return { type: ACTION_LEVAS, targetFactionNumber: null };
+
+  if (ARQUEROS_RE.test(text)) return { type: ACTION_ARQUEROS, targetFactionNumber: null };
+
+  if (CABALLEROS_RE.test(text)) return { type: ACTION_CABALLEROS, targetFactionNumber: null };
+
   return null;
 }
 
@@ -67,6 +85,9 @@ module.exports = {
   ACTION_EXPAND,
   ACTION_SPECIAL,
   ACTION_ALLIANCE,
+  ACTION_LEVAS,
+  ACTION_ARQUEROS,
+  ACTION_CABALLEROS,
   VALID_PHASE_BY_ACTION,
   parseCommand,
 };
