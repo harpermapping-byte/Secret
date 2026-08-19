@@ -869,7 +869,7 @@
   const WALK_SPEED_WANDER = 55;
   const WALK_SPEED_MARCH = 300;
   const WALK_ARRIVE_DIST = 6;     // a que distancia se considera que ya llego
-  const WANDER_RADIUS = 130;      // como de lejos puede irse el siguiente paseo
+  const WANDER_RADIUS = 250;      // como de lejos puede irse el siguiente paseo
   const WANDER_PAUSE_MS = 900;    // descanso al llegar antes de elegir otro sitio
   const HOP_HEIGHT = 9;           // altura del brinquito, en pixeles de mundo
   const HOP_SPEED = 7.5;          // brincos por segundo
