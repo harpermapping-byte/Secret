@@ -18,6 +18,7 @@ const { resolveCombat } = require('./rules/combat');
 const { resolveIndustry, resolveIndustryImmunity, industryThresholdsFor } = require('./rules/industry');
 const { resolveAiTroops } = require('./rules/troops');
 const { resolveTroopBuildings } = require('./rules/troopBuildings');
+const { resolveConquista, structureAttackPower, structureDefensePower } = require('./rules/structures');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
@@ -29,6 +30,7 @@ const {
   ACTION_LEVAS,
   ACTION_ARQUEROS,
   ACTION_CABALLEROS,
+  ACTION_CONQUISTA,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -98,7 +100,7 @@ function createMatch(config) {
     rosterSize: 0,
   }));
 
-  const { tiles, mapLayout } = generateMap({
+  const { tiles, mapLayout, structures } = generateMap({
     tileCount: normalizedConfig.map.tileCount,
     factionCount: factions.length,
     mode: normalizedConfig.map.mode,
@@ -116,6 +118,12 @@ function createMatch(config) {
     factions,
     tiles,
     mapLayout, // estatico durante toda la partida, ver getMapLayout() y docs/ACCIONES.md
+    // Estructuras conquistables (castillo/aldea/puerto, ver `!conquista` en
+    // rules/structures.js): a diferencia de `mapLayout` esto SÍ es estado
+    // mutable de partida (guarnición neutral, se vacía al conquistarse), por
+    // eso vive aquí y no dentro de `mapLayout` — viaja en cada
+    // `state:public`/`state:admin`, no solo una vez.
+    structures,
     players: new Map(),
     round: 0,
     roundActions: new Map(),
@@ -324,6 +332,7 @@ function resolveRound() {
   resolveSpecialAbilities(match, context);
   context.allInactiveUserIds = new Set([...context.inactiveUserIds, ...context.forceInactive]);
   resolveCombat(match, context);
+  resolveConquista(match, context);
   resolveIndustry(match, context);
   resolveAiTroops(match);
   resolveTroopBuildings(match, context);
@@ -382,6 +391,7 @@ function tallyActions() {
       [ACTION_LEVAS]: [],
       [ACTION_ARQUEROS]: [],
       [ACTION_CABALLEROS]: [],
+      [ACTION_CONQUISTA]: [],
     });
     activePlayerCountByFaction.set(faction.number, 0);
   }
@@ -416,7 +426,7 @@ function tallyActions() {
     forceInactive: new Set(),
     // Sucesos de la ronda que van llenando resolveExpansion/resolveCombat/resolveIndustry a medida
     // que ocurren, para poder construir despues el resumen por fases (ver docs/ACCIONES.md seccion 6).
-    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [] },
+    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [] },
   };
 }
 
@@ -441,6 +451,7 @@ function buildRoundSummary(context) {
   if (context.roundEvents.combats.length > 0) blocks.push({ kind: 'combats', data: context.roundEvents.combats });
   if (context.roundEvents.industryUnlocks.length > 0) blocks.push({ kind: 'industryUnlocks', data: context.roundEvents.industryUnlocks });
   if (context.roundEvents.eliminations.length > 0) blocks.push({ kind: 'eliminations', data: context.roundEvents.eliminations });
+  if (context.roundEvents.structureConquests.length > 0) blocks.push({ kind: 'structureConquests', data: context.roundEvents.structureConquests });
 
   const casualties = [...match.players.values()]
     .filter((p) => p.diedOnRound === match.round)
@@ -515,6 +526,7 @@ function getPublicState() {
       round: 0,
       factions: [],
       tiles: [],
+      structures: [],
       players: [],
       summaryBlocks: [],
       winnerFactionNumber: null,
@@ -557,6 +569,21 @@ function getPublicState() {
       archeryCount: t.archeryCount,
       cavalryCount: t.cavalryCount,
     })),
+    // Estructuras conquistables todavía con guarnición (ver `!conquista` en
+    // rules/structures.js) — las ya conquistadas se omiten a propósito: su
+    // guarnición está a 0 y ya no hay nada que enseñar sobre ellas (su
+    // producción se ve igual que cualquier edificio, en `tiles` de arriba).
+    structures: match.structures
+      .filter((s) => s.aiTroops + s.archerTroops + s.cavalryTroops > 0)
+      .map((s) => ({
+        tileId: s.tileId,
+        type: s.type,
+        aiTroops: s.aiTroops,
+        archerTroops: s.archerTroops,
+        cavalryTroops: s.cavalryTroops,
+        attackPower: Number(structureAttackPower(s).toFixed(2)),
+        defensePower: Number(structureDefensePower(s).toFixed(2)),
+      })),
     players: [...match.players.values()].map((p) => {
       // Que esta haciendo este jugador AHORA MISMO, para que el mapa pueda
       // animar su marcador segun el comando que haya escrito (irse a la

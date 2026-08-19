@@ -142,14 +142,16 @@ function generateMap({ tileCount, factionCount, mode }) {
     });
   }
 
+  const decorations = placeDecorations();
+
   const mapLayout = {
     cols: RASTER_COLS,
     rows: RASTER_ROWS,
     cellTileIds,
     centroids,
-    decorations: placeDecorations(),
+    decorations,
   };
-  return { tiles, mode, mapLayout };
+  return { tiles, mode, mapLayout, structures: buildStructures(decorations, cellTileIds) };
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +243,57 @@ function placeDecorations() {
   }
 
   return decorations;
+}
+
+// ---------------------------------------------------------------------------
+// Estructuras conquistables: castillo/aldea/puerto (ver `!conquista`,
+// server/rules/structures.js, docs/ACCIONES.md sección 20). Son las MISMAS
+// decoraciones de arriba (mismo x/y), no un tipo nuevo de objeto — aquí solo
+// se les añade el `tileId` que les toca (para saber "está en TU territorio")
+// y una guarnición neutral inicial al azar, distinta por partida ("al
+// colocarse cada partida aleatorio tiene más gracia", tal y como se pidió).
+//
+// Rango [min, max] de cada tropa de guarnición, AMBOS INCLUSIVE, por tipo de
+// estructura. La guarnición usa las MISMAS constantes de bonus de combate que
+// las tropas del jugador (AI_TROOP_COMBAT_BONUS/ARCHER_*/CAVALRY_* en
+// rules/shared.js) — aquí solo se decide CUÁNTAS tropas de cada tipo le
+// tocan a cada estructura, no su fuerza (esa la calcula rules/structures.js).
+const STRUCTURE_GARRISON_RANGES = {
+  castle: { aiTroops: [5, 10], archerTroops: [0, 2], cavalryTroops: [0, 2] },
+  village: { aiTroops: [3, 15], archerTroops: [0, 0], cavalryTroops: [0, 0] },
+  port: { aiTroops: [6, 12], archerTroops: [0, 5], cavalryTroops: [0, 0] },
+};
+
+function randomInRange([min, max]) {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+/**
+ * A partir de las decoraciones ya colocadas, arma la lista de estructuras
+ * conquistables (solo castillo/aldea/puerto — árboles, barcos, etc. quedan
+ * fuera, son decoración pura). `cellTileIds` es la MISMA rejilla que ya
+ * decidió a qué territorio pertenece cada celda (ver rasterizeLand()), así
+ * que reutilizarla aquí garantiza que "la estructura está en la casilla X"
+ * coincide exactamente con lo que el jugador ve pintado en el mapa.
+ */
+function buildStructures(decorations, cellTileIds) {
+  const structures = [];
+  for (const d of decorations) {
+    const ranges = STRUCTURE_GARRISON_RANGES[d.type];
+    if (!ranges) continue; // no es castillo/aldea/puerto (arbol, barco...): no es conquistable
+
+    const tileId = cellTileIds[d.y * RASTER_COLS + d.x];
+    if (tileId === OCEAN) continue; // defensivo: no debería pasar (castillo/aldea/puerto solo salen en tierra)
+
+    structures.push({
+      tileId,
+      type: d.type,
+      aiTroops: randomInRange(ranges.aiTroops),
+      archerTroops: randomInRange(ranges.archerTroops),
+      cavalryTroops: randomInRange(ranges.cavalryTroops),
+    });
+  }
+  return structures;
 }
 
 /**

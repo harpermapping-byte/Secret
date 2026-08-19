@@ -125,6 +125,17 @@
   const campoArqueriaSpriteImg = loadBuildingSprite('campo-arqueria');
   const caballerizaSpriteImg = loadBuildingSprite('caballeriza');
 
+  // Marcador de guarnición neutral sobre castillo/aldea/puerto todavía sin
+  // conquistar (!conquista, ver rules/structures.js y docs/ACCIONES.md
+  // sección 20): icono + cuántas tropas de cada tipo tiene + su ataque/
+  // defensa ya calculados por el servidor (mismas constantes que las tropas
+  // del jugador, ver getPublicState() en gameEngine.js — el cliente no
+  // repite esa cuenta, solo la pinta).
+  const guardiaSpriteImg = loadBuildingSprite('guardia');
+  const STRUCTURE_MARKER_ICON_W = 16;
+  const STRUCTURE_MARKER_OFFSET_Y = 90; // px de mundo por encima del centroide de la casilla
+  const STRUCTURE_TYPE_ICON = { castle: '🏰', village: '🏘️', port: '⚓' };
+
   // Chapitas de combate en vivo (escudo de defensores / espada de atacantes,
   // ver paintCombatBadges). BADGE_OFFSET_Y va en celdas de rejilla: cuanto se
   // suben respecto al centro de la faccion para no taparse con la nube de
@@ -151,9 +162,10 @@
     let hasFitOnce = false;
     let dragging = false;
     let dragStart = { x: 0, y: 0, viewX: 0, viewY: 0 };
-    let lastTiles = null; // ultimo `state.tiles`/`state.factions`/`state.players` recibidos, por si `map:layout`
+    let lastTiles = null; // ultimo `state.tiles`/`state.factions`/`state.players`/`state.structures` recibidos, por si `map:layout`
     let lastFactions = null; // llega despues de un `state:public`/`state:admin` (el orden de los
     let lastPlayers = null; // mensajes WS no esta garantizado en todos los casos — ver docs/ACCIONES.md seccion 5).
+    let lastStructures = null; // estructuras conquistables con guarnicion todavia (ver paintStructureMarkers()).
     let lastRasterFingerprint = null; // ver paint(): evita repintar el raster si la propiedad de las casillas no cambio
     let overlayRepaintPending = false; // ver scheduleOverlayRepaint()
 
@@ -288,16 +300,17 @@
       return kind;
     }
 
-    /** tiles: state.tiles (id, neutral, ownerFactionNumber). factions: state.factions (number, color). players: state.players. */
-    function setTiles(tiles, factions, players) {
+    /** tiles: state.tiles (id, neutral, ownerFactionNumber). factions: state.factions (number, color). players: state.players. structures: state.structures (ver paintStructureMarkers()). */
+    function setTiles(tiles, factions, players, structures) {
       lastTiles = tiles;
       lastFactions = factions;
       lastPlayers = players || [];
+      lastStructures = structures || [];
       if (!layout) return; // aun no ha llegado `map:layout` — se pintara en cuanto llegue, ver setLayout()
-      paint(tiles, factions, lastPlayers);
+      paint(tiles, factions, lastPlayers, lastStructures);
     }
 
-    function paint(tiles, factions, players) {
+    function paint(tiles, factions, players, structures) {
       const colorByTileId = new Array(tiles.length);
       const fingerprintParts = new Array(tiles.length);
       tiles.forEach((t) => {
@@ -325,7 +338,7 @@
         lastRasterFingerprint = fingerprint;
       }
 
-      paintOverlay(tiles, factions, players);
+      paintOverlay(tiles, factions, players, structures);
 
       // `hasFitOnce` solo se marca a true si reset() de verdad pudo encajar
       // el mapa (viewport con medidas reales). En el panel de admin el mapa
@@ -390,7 +403,7 @@
      * salto este repintado por el fingerprint sin cambios) — las dos paginas
      * del proyecto pasan siempre `markersEl`.
      */
-    function paintOverlay(tiles, factions, players) {
+    function paintOverlay(tiles, factions, players, structures) {
       // Los marcadores de jugador YA NO se pintan en `markersEl`: se movieron
       // a la capa de objetos (canvas del tamaño del VIEWPORT) porque ahora se
       // animan a 60fps, y `markersEl` es del tamaño del mundo entero —
@@ -406,6 +419,7 @@
       paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, -TROOP_BUILDING_LANE_OFFSET);
       paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, -TROOP_BUILDING_LANE_OFFSET * 2);
       paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, TROOP_BUILDING_LANE_OFFSET);
+      paintStructureMarkers(ctx, structures);
       paintCombatBadges(ctx, tiles, factions);
     }
 
@@ -469,6 +483,60 @@
           ctx.drawImage(spriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
         }
       });
+    }
+
+    /**
+     * Marcador sobre cada castillo/aldea/puerto que TODAVÍA tiene guarnición
+     * neutral (los ya conquistados no vienen en `structures`, ver
+     * getPublicState()) — icono del tipo, cuántas tropas de cada clase tiene
+     * (guardia por unidad, hasta un máximo visual) y su ataque/defensa ya
+     * calculados por el servidor, para saber de un vistazo si merece la pena
+     * intentar `!conquista`.
+     */
+    function paintStructureMarkers(ctx, structures) {
+      if (!structures || !structures.length || !layout) return;
+      structures.forEach((s) => {
+        const c = layout.centroids[s.tileId];
+        if (!c) return;
+        const cx = c.x * BLOCK_PX;
+        const cy = c.y * BLOCK_PX - STRUCTURE_MARKER_OFFSET_Y;
+
+        const label = `${STRUCTURE_TYPE_ICON[s.type] || ''} Lv${s.aiTroops} Ar${s.archerTroops} Cb${s.cavalryTroops}  ⚔${s.attackPower} 🛡${s.defensePower}`;
+        ctx.font = '13px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const paddingX = 8;
+        const textW = ctx.measureText(label).width;
+        const boxW = textW + paddingX * 2 + STRUCTURE_MARKER_ICON_W;
+        const boxH = 22;
+
+        ctx.fillStyle = 'rgba(30, 14, 12, .82)';
+        ctx.strokeStyle = 'rgba(140, 60, 52, .9)';
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, cx - boxW / 2, cy - boxH / 2, boxW, boxH, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        if (guardiaSpriteImg.complete && guardiaSpriteImg.naturalWidth) {
+          const iw = STRUCTURE_MARKER_ICON_W;
+          const ih = iw * (guardiaSpriteImg.naturalHeight / guardiaSpriteImg.naturalWidth);
+          ctx.drawImage(guardiaSpriteImg, cx - boxW / 2 + 4, cy - ih / 2, iw, ih);
+        }
+
+        ctx.fillStyle = '#f5e9df';
+        ctx.fillText(label, cx + STRUCTURE_MARKER_ICON_W / 2 + 2, cy + 1);
+      });
+    }
+
+    /** Rectángulo con esquinas redondeadas — sin `ctx.roundRect()` nativo por compatibilidad, usado solo por paintStructureMarkers(). */
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
     }
 
     /**
@@ -656,7 +724,7 @@
       overlayRepaintPending = true;
       requestAnimationFrame(() => {
         overlayRepaintPending = false;
-        if (layout && lastTiles) paintOverlay(lastTiles, lastFactions, lastPlayers);
+        if (layout && lastTiles) paintOverlay(lastTiles, lastFactions, lastPlayers, lastStructures);
       });
     }
 
@@ -978,7 +1046,7 @@
   // "ganar terreno" se usa una banderita, no un icono de ataque a distancia.
   const ACTION_ICONS = {
     ATTACK: ' ⚔️', DEFEND: ' 🛡️', INDUSTRY: ' ⚒️', EXPAND: ' 🚩',
-    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎',
+    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎', CONQUISTA: ' 🗡️',
   };
 
   /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */

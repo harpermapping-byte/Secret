@@ -36,6 +36,7 @@ Solo `gameEngine.js` puede cambiar la fase actual. Ningún otro módulo la modif
 | `!levas` | `ACTION_LEVAS` | `PHASE_ACTION` — misma mecánica que `!industria` (un voto, un edificio, sin objetivo), ver sección 19 |
 | `!arqueros` | `ACTION_ARQUEROS` | `PHASE_ACTION` — igual que `!levas`, ver sección 19 |
 | `!caballeros` | `ACTION_CABALLEROS` | `PHASE_ACTION` — igual que `!levas`, ver sección 19 |
+| `!conquista` | `ACTION_CONQUISTA` | `PHASE_ACTION` — ataca a una estructura neutral (castillo/aldea/puerto) al azar dentro de tu territorio, ver sección 20 |
 
 Solo `commands.js` interpreta texto de chat. Ningún otro módulo hace parsing de comandos por su cuenta.
 
@@ -226,6 +227,7 @@ Valores puestos para que el motor funcione y se pueda probar; son placeholders a
 | `ARCHER_ATTACK_BONUS` / `ARCHER_DEFENSE_BONUS` | `rules/shared.js` | +0.2 atacando / 0 defendiendo, por arquero de IA — ver sección 19 |
 | `CAVALRY_ATTACK_BONUS` / `CAVALRY_DEFENSE_BONUS` | `rules/shared.js` | 0 atacando / +0.2 defendiendo, por caballero de IA — ver sección 19 |
 | `BUILDING_INITIAL_BONUS` | `rules/troopBuildings.js` | +5 tropas directas al votante al construir `!levas`/`!arqueros`/`!caballeros` — ver sección 19 |
+| `STRUCTURE_GARRISON_RANGES` | `mapTemplates.js` | guarnición al azar por tipo de estructura (castillo/aldea/puerto) — ver sección 20 |
 | `PASSIVE_INDUSTRY_PER_TERRITORY` | `rules/industry.js` | 0.1 por casilla |
 | `INDUSTRY_PER_BUILDING` | `rules/industry.js` | 0.5 por edificio de industria |
 | `VOTES_PER_NEW_TILE` | `rules/expansion.js` | 2 votantes por casilla nueva |
@@ -532,3 +534,40 @@ Verificado estadísticamente sobre 20.000 tiradas por caso: con 3 arqueros por j
 **En el mapa:** los 3 edificios se pintan con la misma técnica de cuadrícula que las industrias (`paintBuildingMarkers()` en `mapRenderer.js`, generalización de `paintIndustryMarkers()`), cada tipo desplazado a su propia "columna" horizontal (`TROOP_BUILDING_LANE_OFFSET`) para no pisarse con las industrias ni entre ellos. Los acompañantes de arquero y caballero de IA siguen el mismo mecanismo de rastro que el soldado (sección 18): los 3 tipos forman UNA sola fila india detrás del jugador — el índice de retraso sigue subiendo de un tipo al siguiente (primero soldados, luego arqueros, luego caballeros) en vez de reiniciarse, así que no se superponen al dibujarse los tres a la vez. Verificado visualmente: con un jugador que construye los 3 edificios en 3 rondas seguidas (13 soldados + 6 arqueros + 5 caballeros de IA tras la tercera), los acompañantes se ven en fila detrás de él, con el caballero de IA (sprite algo más grande) el más alejado por ser el último tipo en la cola.
 
 **Sustituir los placeholders**: `public/sprites/barraca.png`, `campo-arqueria.png`, `caballeriza.png` (36×28, mismo formato que `industry.png`) y `public/sprites/troop-archer.png` (14×22), `troop-cavalry.png` (16×26, un pelin más grande, como se pidió). Generados por `tools/bakeSpritePlaceholders.js` — **importante**: ese script regenera TODOS los sprites de su tabla de golpe, así que para este lote se generaron solo los 5 archivos nuevos con un script aparte, sin volver a ejecutar el baker completo (que habría sobrescrito `industry.png` y otros PNG que el usuario ya personalizó a mano).
+
+## 20. Estructuras neutrales conquistables: `!conquista`
+
+Los castillos/aldeas/puertos que ya salían como decoración aleatoria del mapa (`DECORATION_KINDS` en `mapTemplates.js`, sección 15) ahora también son **estructuras conquistables**: empiezan sin dueño, con una guarnición neutral de tropas de IA al azar, y hay que ganarles un combate con `!conquista` para quedárselas.
+
+**Generación (`buildStructures()` en `mapTemplates.js`, se llama una vez dentro de `generateMap()`):** por cada decoración de tipo castillo/aldea/puerto, se calcula a qué `tileId` pertenece (con la MISMA rejilla `cellTileIds` que ya decide los territorios, así "está en tu territorio" coincide exacto con lo que se ve pintado) y se le da una guarnición al azar, distinta cada partida:
+
+| Tipo | Levas (`aiTroops`) | Arqueros (`archerTroops`) | Caballeros de IA (`cavalryTroops`) |
+|---|---|---|---|
+| Castillo 🏰 | 5–10 | 0–2 | 0–2 |
+| Aldea 🏘️ | 3–15 | 0 | 0 |
+| Puerto ⚓ | 6–12 | 0–5 | 0 |
+
+`match.structures` (nuevo, separado de `match.mapLayout`) guarda esta lista — a propósito NO vive dentro de `mapLayout` porque esa es estática y se manda una única vez al empezar la partida, mientras que la guarnición SÍ cambia (se vacía al conquistarse) y tiene que viajar en cada `state:public`/`state:admin`.
+
+**`!conquista` (`ACTION_CONQUISTA`, Fase de Acción, sin objetivo)** — misma agrupación que `!ataque`: todos los votantes de una facción se suman en un único asalto. En la resolución (`resolveConquista()`, nuevo `server/rules/structures.js`, llamado justo después de `resolveCombat()`):
+
+1. Se eligen las estructuras con guarnición (`aiTroops+archerTroops+cavalryTroops > 0`) cuya casilla pertenece AHORA MISMO a la facción del votante — si no hay ninguna, el voto se desperdicia sin más (igual que `!expansion` en un mapa de reparto total).
+2. Se elige UNA al azar entre las elegibles ("conquista aleatoriamente... una estructura", tal y como se pidió — no se puede elegir cuál).
+3. Ataque: `sumRandomPower(match, votantes, 'attack')` — exactamente la misma tirada que un `!ataque` normal, con las tropas propias de cada votante sumando su bonus de siempre.
+4. Defensa: **fija, sin tirada** — la guarnición no tiene "jugador" al mando que tire dado, solo suma sus bonus llanos con las MISMAS constantes que las tropas del jugador (`AI_TROOP_COMBAT_BONUS`/`ARCHER_DEFENSE_BONUS`/`CAVALRY_DEFENSE_BONUS`, ver sección 19). Por eso el número es reproducible y se puede mandar tal cual al cliente para el marcador (`structureDefensePower()`).
+5. Si gana el ataque: la guarnición se vacía a 0 (queda conquistada para siempre, `pickEligibleStructure()` ya no la vuelve a proponer) y su bonus de producción se traslada a la CASILLA, reutilizando los MISMOS campos que ya usan `!industria`/`!levas`/`!arqueros`/`!caballeros` — **sin código nuevo de producción ni de traspaso de dueño**:
+   - Castillo → `tile.cavalryCount += 1` (+1 caballero de IA/ronda, tal y como se pidió)
+   - Aldea → `tile.leviesCount += 2` (+2 levas/ronda)
+   - Puerto → `tile.industryCount += 2` (cada edificio de industria ya vale `INDUSTRY_PER_BUILDING` = 0.5/ronda, así que 2 dan exactamente el +1 de industria pedido, sin inventar una constante aparte)
+
+   Como `industryCount`/`leviesCount`/`cavalryCount` viven en la CASILLA (no en la facción) desde que se crearon en lotes anteriores, y `transferTile()`/`neutralizeTile()` nunca los tocan, "si luego pierdes ese terreno se lo lleva quien te lo conquiste a ti" sale gratis: es EXACTAMENTE el mismo mecanismo que ya tenían las industrias y los edificios de tropa, no una regla nueva.
+6. Si pierde: los votantes sufren bajas — `Math.round(defensa - ataque)`, aplicadas al azar entre ELLOS MISMOS (`applyStructureCasualties()`, un `shuffle()`+`killPlayer()` directo; no reutiliza `applyCasualties()` de `rules/shared.js` porque esa reparte con una prioridad de 4 bolsas pensada para el combate normal entre facciones — aquí la única bolsa posible es "quien votó `!conquista`"). La guarnición no pierde nada si gana, igual que cualquier combate en v1 (sección 7).
+
+**Marcador en el mapa (`paintStructureMarkers()` en `mapRenderer.js`):** sobre cada estructura TODAVÍA con guarnición se pinta una chapa con el icono de guarnición (`public/sprites/guardia.png`, mismo tamaño que `troop.png` pero en tono rojo oscuro/hostil para distinguirla de las tropas propias) más `Lv/Ar/Cb` (cuántas de cada tipo) y `⚔/🛡` con el ataque/defensa YA calculados por el servidor (`attackPower`/`defensePower` en `getPublicState()` — el cliente no repite la cuenta). Las estructuras ya conquistadas se omiten del todo en `state.structures` (su guarnición es 0, no hay nada que enseñar; su producción se ve como cualquier otro edificio en `tiles`).
+
+Verificado con el motor real: `getPublicState().structures` trae 45 estructuras al crear partida (10 castillos + 15 puertos + 20 aldeas, igual que `DECORATION_KINDS`) con `attackPower`/`defensePower` coincidiendo exactos con la fórmula; con 5 votantes de `!conquista` a la vez (fuerza mínima combinada 3.5, por encima de cualquier guarnición posible ~1.5), se conquistó exactamente 1 de las varias estructuras elegibles en 3 partidas de prueba distintas (una de cada tipo), y en los 3 casos el campo de la casilla correspondiente subió exactamente el delta esperado (`cavalryCount +1`, `leviesCount +2`, `industryCount +2`) y el resumen de ronda incluyó el bloque `structureConquests`. El caso de fallo (bajas a los votantes) se verificó aparte, en aislado: sobre 2000 tiradas de un solo atacante contra una guarnición de 1.4 de defensa, un 32.9% terminó en baja — coincide con la probabilidad teórica de que la tirada del atacante (0.7–1.3) caiga por debajo de 0.9 (déficit ≥ 0.5, `Math.round` sube a 1 baja).
+
+**Interpretaciones tomadas al implementar** (a confirmar con el usuario si no es lo que tenía en mente):
+- El enunciado decía "2 a 0 caballero, 2 a 0 arqueros" para el castillo — se interpretó como rango 0–2 (orden invertido, escritura rápida).
+- El número de "ataque" que se enseña sobre cada estructura es puramente informativo — la guarnición nunca ataca a nadie, solo defiende si alguien vota `!conquista`.
+- `!conquista` solo se resuelve UNA vez por facción por ronda (agrupa a todos los votantes en un único asalto contra una única estructura), igual que `!ataque` agrupa a todos los atacantes de una facción contra un único objetivo.

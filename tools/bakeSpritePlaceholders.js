@@ -287,6 +287,17 @@ const SPRITES = {
     c.rect(2, 8, 12, 16, [150, 150, 168], 1);
   },
 
+  // GUARNICION NEUTRAL (ver docs/ACCIONES.md seccion 20, rules/structures.js):
+  // la IA que defiende castillo/aldea/puerto antes de que alguien conquiste
+  // con !conquista. Mismo tamaño que `troop` (14x22, sin variante de
+  // sentido) para que se lea igual de "una unidad" en el marcador de la
+  // estructura, pero tono rojo oscuro/hostil para distinguirla a simple
+  // vista de las tropas del propio jugador (verdosas/arena/azuladas).
+  guardia: (c) => {
+    c.rect(4, 2, 6, 6, [140, 60, 52], 1);
+    c.rect(2, 8, 10, 13, [140, 60, 52], 1);
+  },
+
   // EDIFICIO DE LEVAS (barraca, !levas): misma tecnica que `industry` pero
   // tejado rojizo, para diferenciarlo de un vistazo en el mapa. Da +5
   // soldados de IA a quien lo construye y +1/turno despues (repartido en la
@@ -345,6 +356,7 @@ const SIZES = {
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
   troop: [14, 22], 'troop-archer': [14, 22], 'troop-cavalry': [16, 26],
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
+  guardia: [14, 22],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };
 
