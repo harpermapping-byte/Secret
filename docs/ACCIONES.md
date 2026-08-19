@@ -219,6 +219,7 @@ Valores puestos para que el motor funcione y se pueda probar; son placeholders a
 |---|---|---|
 | `COMBAT_RANDOM_MIN` / `MAX` | `rules/shared.js` | 0.7 – 1.3 por soldado (ataque **y** defensa) |
 | `KNIGHT_RANDOM_MIN` / `MAX` | `rules/shared.js` | 0.9 – 1.4 por caballero (ataque **y** defensa) — ver sección 16 |
+| `AI_TROOP_COMBAT_BONUS` | `rules/shared.js` | +0.1 fijo por tropa de IA (ataque **y** defensa) — ver sección 18 |
 | `PASSIVE_INDUSTRY_PER_TERRITORY` | `rules/industry.js` | 0.1 por casilla |
 | `INDUSTRY_PER_BUILDING` | `rules/industry.js` | 0.5 por edificio de industria |
 | `VOTES_PER_NEW_TILE` | `rules/expansion.js` | 2 votantes por casilla nueva |
@@ -472,3 +473,25 @@ El aviso del streamer de que "el líquido no sube y las 4 rayas no se ven" se in
 ### Panel de facciones con 1 o con 100 jugadores: sin solapes
 
 Comprobado con una partida real (una facción de 100 jugadores, otra de 1) y una comprobación de solapes de verdad (rectángulos de cada tarjeta/estadística/probeta/etiqueta del roster, no "se ven cerca" sino intersección de área > 0) sobre 113 elementos: **0 solapes**. `.factionCardMain`/`.rosterMini` ya usan `flex-wrap`, así que las estadísticas y las etiquetas de jugador simplemente pasan a la siguiente línea en vez de superponerse — con 100 jugadores la tarjeta sale más alta (muchas líneas de etiquetas), no rota. El panel entero (`.sidePanel`) ya tenía `overflow-y:auto`, así que una tarjeta muy alta no rompe nada, solo hace más largo el scroll.
+
+## 17. Icono de acción junto al nombre, y el esqueleto entra-se para-sale por el mismo lado
+
+**Icono de acción** (`ACTION_ICONS` en `public/mapRenderer.js`): se pinta pegado al nombre de cada caminante, reutilizando el MISMO mecanismo de visibilidad que ya tenía el nombre (`WALKER_NAME_MIN_SCALE`) — así no añade ruido nuevo al ver el mapa entero, solo aparece donde ya se leían nombres. Un icono por `walker.action` (el mismo campo que ya decidía a dónde caminar, aquí solo se reutiliza para pintarlo): ⚔️ ataque, 🛡️ defensa, ⚒️ industria, 🚩 expansión (bandera a propósito, no un arco — expansión es "ganar terreno", no un ataque a distancia). Sin orden, sin icono.
+
+**El esqueleto ya no cruza toda la pantalla**: antes iba de lado a lado en línea recta durante todo el paron; ahora entra por la izquierda, avanza solo **1/5 de todo el recorrido posible** (lo justo para que se vea el cartel entero) y se queda ahí quieto la mayor parte del tiempo, para luego volver a salir por ese mismo lado — nunca llega a cruzar la pantalla. `animateTransitionSkeleton()` en `public/index.html` divide la animación en 3 tramos sobre la fracción de tiempo transcurrido (`frac`): entra (primer 15%), se queda quieto (70% del medio), sale (último 15%) — los porcentajes deciden el RITMO, la posición de parada (`stopAt`) sale de "1/5 del recorrido total" tal cual se pidió. También se ancla al borde real de ABAJO de la pantalla (`bottom:0` en vez de un margen), no al hueco que deja la barra de madera.
+
+Verificado con el rastro interno de la animación (no a ojo): entra desde fuera de pantalla, se mantiene exactamente en `stopAt` durante un tramo largo de `frac`, y vuelve a salir por el mismo lado sin pasar nunca de la mitad de la pantalla — y con un solo query bien cronometrado, la distancia real al borde inferior de la ventana da 0px.
+
+## 18. Tropas de IA: cada casilla genera una, siguen a su jugador, suman fuerza
+
+Cada casilla que controla una facción genera **1 tropa por ronda**, automático (nadie vota nada) — mismo momento que la industria dentro de `resolveRound()` en `gameEngine.js`. Nuevo archivo `server/rules/troops.js`:
+
+- **Reparto** (`distributeAiTroops()`): las tropas nuevas se reparten de una en una entre los jugadores VIVOS de la facción, dándole siempre la siguiente a quien tenga menos tropas ahora mismo (empate al azar). Con 2 jugadores y 2 territorios, 1 para cada uno; con 5 jugadores y 2 territorios, van a 2 de los 5 — y como siempre prioriza a quien tenga menos, si alguno ya tenía tropa le toca antes al que no tenía ninguna (tal cual se pidió). Verificado con el motor real: en una facción de 5 con solo 2 territorios/ronda, tras 2 rondas el reparto queda con diferencia de como mucho 1 tropa entre el que más tiene y el que menos.
+- **Fuerza en combate**: cada tropa suma **+0.1 FIJO** (no una tirada) a la fuerza de su jugador cuando ese jugador ataca o defiende — `AI_TROOP_COMBAT_BONUS` en `rules/shared.js`, sumado dentro de `sumRandomPower()` (la misma función que ya se adaptó para el bonus de los caballeros, ver sección 16: un jugador con caballero Y tropas suma las dos cosas). Verificado estadísticamente sobre 20.000 tiradas: la media sube exactamente 0.1 por tropa (3 tropas → +0.3 de media).
+- `player.aiTroops` viaja en `getPublicState()`, igual que `unitType`.
+
+**En el mapa, cada tropa es un acompañante que sigue SIEMPRE a su jugador** — mismo mecanismo que el acompañante de la vaca (sección 15: sigue el RASTRO real del caminante, no su posición actual, para no cortar camino por sitios por los que su "general" no ha pasado). Cada caminante ahora guarda su propio `trail` (se apunta un punto cada `TROOP_TRAIL_SAMPLE_MS`, **siempre**, se mueva o no, así una tropa nunca se queda "flotando" cuando su jugador para) y `trailPositionAt(trail, lagMs, now)` es la función compartida que busca el punto de hace `lagMs`. Con más de una tropa, cada una va a un retraso mayor (`TROOP_FOLLOWER_LAG_MS + i * TROOP_FOLLOWER_LAG_STEP_MS`), formando una fila india detrás del jugador — verificado visualmente con una partida real (un jugador con 6 tropas tras varias rondas): las 6 siguen en fila el camino curvo real del jugador, no una línea recta hacia él.
+
+**Sincronizar entre pantallas no hizo falta programarlo aparte**: el servidor solo manda un número (`aiTroops`) por jugador, y cada navegador calcula el rastro y las posiciones de las tropas por su cuenta a partir de eso — exactamente el mismo principio que ya usa todo el resto del mapa (caminantes, vaca), donde la posición exacta es decoración local, no estado de partida.
+
+**Sustituir el placeholder**: `public/sprites/troop.png` (14×22, fondo transparente, sin variante de sentido — igual que el acompañante de la vaca, no se pidió). Generado por `tools/bakeSpritePlaceholders.js`.

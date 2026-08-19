@@ -114,6 +114,9 @@ Por eso la probeta del panel de facciones es comparable entre facciones de tama�
 3. **3 caballeros más** — igual que la mejora 1 pero con 3 soldados a la vez, elegidos al azar entre los que **todavía no** son caballeros (nunca repite a quien ya ascendió con la mejora 1).
 4. **Tregua** — durante la ronda **siguiente** a desbloquearse, ningún ataque de ninguna otra facción le hace nada a esta: es como si tuviera una alianza automática con todo el mundo esa ronda, sin que nadie tenga que votarla ni depender de que las alianzas estén activadas en la partida.
 
+### Tropas de IA
+Cada casilla que controla una facción genera **1 tropa de IA por ronda**, automático — se reparte entre los jugadores vivos de la facción dándole siempre la siguiente al que menos tropas tenga (así, con más jugadores que territorios, primero les toca a los que todavía no tienen ninguna). Cada tropa sigue siempre en el mapa al jugador que la lleva (su "general"), formando una fila detrás de él, y le suma **+0.1 fijo** de fuerza cuando ese jugador escribe `!ataque` o `!defender` — no es una tirada, es un plus por cada tropa que lleve encima.
+
 ### Combate
 Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa).
 
