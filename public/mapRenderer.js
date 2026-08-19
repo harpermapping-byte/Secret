@@ -857,6 +857,18 @@
   // dos casos por igual.
   const KNIGHT_SPEED_MULTIPLIER = 1.6;
 
+  // Tropas de IA (ver docs/ACCIONES.md sección 18, server/rules/troops.js):
+  // cada una es un acompañante que sigue SIEMPRE al jugador que la lleva,
+  // mismo mecanismo que el acompañante de la vaca (sección 15) — sigue el
+  // RASTRO real del caminante, no su posición actual, para no cortar camino
+  // por sitios por los que su "general" no ha pasado. Con más de una tropa,
+  // cada una va a un retraso mayor sobre ese mismo rastro (fila india).
+  const troopImg = loadSprite('troop');
+  const TROOP_SPRITE_WORLD_W = 12;
+  const TROOP_TRAIL_SAMPLE_MS = 110;
+  const TROOP_FOLLOWER_LAG_MS = 450;
+  const TROOP_FOLLOWER_LAG_STEP_MS = 220;
+
   // ===========================================================================
   // Caminantes: el marcador de cada jugador vivo, que se mueve por el mapa.
   //
@@ -1075,6 +1087,9 @@
               path: [], // tramos pendientes de la ruta actual, ver setRoute()
               action: null, actionTarget: null,
               dir: 'right', // que sprite le toca (soldier-left/right), ver stepWalkers()
+              aiTroops: 0,
+              trail: [], // rastro de posiciones para las tropas que le sigan, ver stepWalkers()
+              lastTrailSampleAt: 0,
             };
             walkers.set(p.userId, walker);
           }
@@ -1082,6 +1097,7 @@
           walker.username = p.username;
           walker.factionNumber = factionNumber;
           walker.unitType = p.unitType; // 'soldier' | 'knight' — ver drawWalkers()/stepWalkers()
+          walker.aiTroops = p.aiTroops || 0; // cuantos acompañantes le siguen, ver drawWalkers()
 
           // Solo se recalcula el destino si la orden ha cambiado; si no, se
           // deja que termine de andar hacia donde ya iba (si no, cada `state:*`
@@ -1627,6 +1643,18 @@
     function stepWalkers(dt, now) {
       if (!walkerWorld) return;
       walkers.forEach((w) => {
+        // Rastro para las tropas que le sigan (ver drawWalkers()) — se
+        // apunta SIEMPRE, se mueva o no, para que un caminante parado
+        // tambien deje "sitio donde esperar" a sus tropas. Va antes de los
+        // `return` de mas abajo a proposito, para que nunca se salte.
+        if (now - w.lastTrailSampleAt >= TROOP_TRAIL_SAMPLE_MS) {
+          w.trail.push({ x: w.x, y: w.y, t: now });
+          w.lastTrailSampleAt = now;
+          const maxLagNeeded = TROOP_FOLLOWER_LAG_MS + Math.max(0, w.aiTroops - 1) * TROOP_FOLLOWER_LAG_STEP_MS;
+          const cutoff = now - maxLagNeeded - 500;
+          while (w.trail.length > 2 && w.trail[0].t < cutoff) w.trail.shift();
+        }
+
         const dx = w.tx - w.x;
         const dy = w.ty - w.y;
         const dist = Math.hypot(dx, dy);
@@ -1662,6 +1690,18 @@
         if (dx > WALKER_DIR_THRESHOLD) w.dir = 'right';
         else if (dx < -WALKER_DIR_THRESHOLD) w.dir = 'left';
       });
+    }
+
+    /** Punto del rastro de hace `lagMs` — mismo truco que el acompañante de la vaca (ver stepCow()). */
+    function trailPositionAt(trail, lagMs, now) {
+      if (!trail.length) return null;
+      const targetT = now - lagMs;
+      let point = trail[0];
+      for (const p of trail) {
+        if (p.t > targetT) break;
+        point = p;
+      }
+      return point;
     }
 
     /**
@@ -1715,6 +1755,22 @@
 
         const sx = walker.x * scale + vx;
         const sy = (walker.y - hop) * scale + vy;
+
+        // Tropas de IA: se dibujan ANTES que al jugador, para que quede
+        // claro que van detras/debajo de su "general" — siguen el rastro
+        // real, no la posicion actual (ver trailPositionAt()).
+        if (walker.aiTroops > 0 && troopImg.complete && troopImg.naturalWidth) {
+          const tw = TROOP_SPRITE_WORLD_W * scale;
+          const th = tw * (troopImg.naturalHeight / troopImg.naturalWidth);
+          const nowMs = t * 1000;
+          for (let i = 0; i < walker.aiTroops; i++) {
+            const lag = TROOP_FOLLOWER_LAG_MS + i * TROOP_FOLLOWER_LAG_STEP_MS;
+            const pos = trailPositionAt(walker.trail, lag, nowMs) || { x: walker.x, y: walker.y };
+            const tsx = pos.x * scale + vx;
+            const tsy = pos.y * scale + vy;
+            ctx.drawImage(troopImg, tsx - tw / 2, tsy - th, tw, th);
+          }
+        }
 
         // Anclado por la base (abajo-centro), como el resto de sprites del mapa.
         drawTintedSprite(img, sx - drawW / 2, sy - drawH, drawW, drawH, walker.color, 0.65);

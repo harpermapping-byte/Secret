@@ -16,6 +16,7 @@ const { resolveAlliances } = require('./rules/alliances');
 const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
 const { resolveIndustry, resolveIndustryImmunity, industryThresholdsFor } = require('./rules/industry');
+const { resolveAiTroops } = require('./rules/troops');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
@@ -202,6 +203,7 @@ function joinFaction(userId, username, factionNumber) {
     alive: true,
     unitType: existing ? existing.unitType : 'soldier',
     participation: existing ? existing.participation : 0,
+    aiTroops: existing ? existing.aiTroops : 0,
     diedOnRound: null,
   });
   notifyStateChange();
@@ -317,6 +319,7 @@ function resolveRound() {
   context.allInactiveUserIds = new Set([...context.inactiveUserIds, ...context.forceInactive]);
   resolveCombat(match, context);
   resolveIndustry(match, context);
+  resolveAiTroops(match);
   resolveExpansion(match, context);
 
   match.summaryBlocks = buildRoundSummary(context);
@@ -556,6 +559,10 @@ function getPublicState() {
         factionNumber: p.factionNumber,
         alive: p.alive,
         unitType: p.unitType,
+        // Tropas de IA que lleva este jugador (ver rules/troops.js) — el
+        // cliente pinta un acompañante por cada una, siguiendo su rastro en
+        // el mapa (ver public/mapRenderer.js).
+        aiTroops: p.aiTroops || 0,
         action: action ? action.type : null,
         actionTargetFactionNumber: action ? action.targetFactionNumber ?? null : null,
       };

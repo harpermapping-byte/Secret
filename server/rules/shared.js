@@ -20,17 +20,24 @@ function rollUnitPower(unitType) {
   return min + Math.random() * (max - min);
 }
 
+// Cada tropa de IA que lleva un jugador (ver rules/troops.js) le suma esto
+// de fuerza FIJA cuando ese jugador ataca o defiende — no es una tirada, es
+// un bonus llano por unidad, igual de grande gane o pierda el dado ese turno.
+const AI_TROOP_COMBAT_BONUS = 0.1;
+
 /**
  * Suma una tirada por cada userId de `userIds`, cada una en el rango que le
  * toque segun `player.unitType` (soldado o caballero) — por eso hace falta
  * `match` aqui y no solo un recuento de votos como antes: la fuerza ya no
- * depende solo de CUANTOS votan, sino de QUIENES.
+ * depende solo de CUANTOS votan, sino de QUIENES. Encima de la tirada, se
+ * suma el bonus fijo de las tropas de IA que lleve cada uno.
  */
 function sumRandomPower(match, userIds) {
   let total = 0;
   for (const userId of userIds) {
     const player = match.players.get(userId);
     total += rollUnitPower(player ? player.unitType : 'soldier');
+    total += AI_TROOP_COMBAT_BONUS * (player?.aiTroops || 0);
   }
   return total;
 }

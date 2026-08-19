@@ -262,6 +262,15 @@ const SPRITES = {
     c.rect(3, 2, 12, 26, [140, 108, 70], 2, [46, 32, 18]);
   },
 
+  // TROPA DE IA (ver docs/ACCIONES.md seccion 18, rules/troops.js): sigue
+  // siempre al jugador que la lleva, como el acompañante de la vaca — mismo
+  // mecanismo, otro sprite, sin variante de sentido tampoco. Mas pequeño que
+  // el soldado (que es a quien sigue). 14x22.
+  troop: (c) => {
+    c.rect(4, 2, 6, 6, [176, 196, 168], 1);   // cabeza
+    c.rect(2, 8, 10, 13, [176, 196, 168], 1); // cuerpo
+  },
+
   // NUBES DEL CIELO (decorativo, ver docs/ACCIONES.md seccion 15): 3 tamaños
   // para que no se vean todas iguales al agruparse. Blancas y opacas aqui a
   // proposito — la transparencia final ("muy transparentes" segun se pidio)
@@ -295,6 +304,7 @@ const SIZES = {
   logo: [320, 140],
   industry: [36, 28],
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
+  troop: [14, 22],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };
 
