@@ -490,13 +490,25 @@ function getPublicState() {
       neutral: t.neutral,
       industryCount: t.industryCount,
     })),
-    players: [...match.players.values()].map((p) => ({
-      userId: p.userId,
-      username: p.username,
-      factionNumber: p.factionNumber,
-      alive: p.alive,
-      unitType: p.unitType,
-    })),
+    players: [...match.players.values()].map((p) => {
+      // Que esta haciendo este jugador AHORA MISMO, para que el mapa pueda
+      // animar su marcador segun el comando que haya escrito (irse a la
+      // frontera si ataca, a un castillo si defiende, etc. — ver la capa de
+      // caminantes en public/mapRenderer.js). Solo tiene sentido durante la
+      // fase de accion: fuera de ella los votos son los de la ronda pasada
+      // (todavia sin limpiar) y el marcador debe volver a pasear, asi que se
+      // manda `null` y el cliente lo interpreta como "sin orden".
+      const action = match.phase === PHASE_ACTION ? match.roundActions.get(p.userId) : null;
+      return {
+        userId: p.userId,
+        username: p.username,
+        factionNumber: p.factionNumber,
+        alive: p.alive,
+        unitType: p.unitType,
+        action: action ? action.type : null,
+        actionTargetFactionNumber: action ? action.targetFactionNumber ?? null : null,
+      };
+    }),
     summaryBlocks: match.phase === PHASE_SUMMARY ? match.summaryBlocks : [],
     winnerFactionNumber: match.winnerFactionNumber,
     timerEndsAt: match.timer?.endsAt ?? null,
