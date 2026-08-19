@@ -18,6 +18,9 @@ const ACTION_ALLIANCE = 'ALLIANCE';
 const ACTION_LEVAS = 'LEVAS';
 const ACTION_ARQUEROS = 'ARQUEROS';
 const ACTION_CABALLEROS = 'CABALLEROS';
+// Ataca a una estructura neutral (castillo/aldea/puerto) al azar dentro de TU
+// territorio, ver rules/structures.js y docs/ACCIONES.md seccion 20.
+const ACTION_CONQUISTA = 'CONQUISTA';
 
 // En que fase es valido cada tipo de accion.
 const VALID_PHASE_BY_ACTION = {
@@ -31,6 +34,7 @@ const VALID_PHASE_BY_ACTION = {
   [ACTION_LEVAS]: PHASE_ACTION,
   [ACTION_ARQUEROS]: PHASE_ACTION,
   [ACTION_CABALLEROS]: PHASE_ACTION,
+  [ACTION_CONQUISTA]: PHASE_ACTION,
 };
 
 const JOIN_RE = /^!faccion(\d+)$/i;
@@ -43,6 +47,7 @@ const ALLIANCE_RE = /^!alianza\s+(\d+)$/i;
 const LEVAS_RE = /^!levas$/i;
 const ARQUEROS_RE = /^!arqueros$/i;
 const CABALLEROS_RE = /^!caballeros$/i;
+const CONQUISTA_RE = /^!conquista$/i;
 
 /**
  * Convierte un mensaje de chat en { type, targetFactionNumber } o null si no es un comando reconocido.
@@ -74,6 +79,8 @@ function parseCommand(rawText) {
 
   if (CABALLEROS_RE.test(text)) return { type: ACTION_CABALLEROS, targetFactionNumber: null };
 
+  if (CONQUISTA_RE.test(text)) return { type: ACTION_CONQUISTA, targetFactionNumber: null };
+
   return null;
 }
 
@@ -88,6 +95,7 @@ module.exports = {
   ACTION_LEVAS,
   ACTION_ARQUEROS,
   ACTION_CABALLEROS,
+  ACTION_CONQUISTA,
   VALID_PHASE_BY_ACTION,
   parseCommand,
 };

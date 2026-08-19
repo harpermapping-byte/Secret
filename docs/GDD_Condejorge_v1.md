@@ -73,6 +73,7 @@ Una vez pulsado "Iniciar partida", **nada de esto se puede volver a tocar**: no 
 | `!levas` | Fase de Acción | Levantas una barraca en un terreno al azar de tu facción (igual que `!industria`) y te lleva de inmediato +5 soldados de IA que te siguen por el mapa, +1 por ronda a partir de la siguiente por cada barraca en pie. |
 | `!arqueros` | Fase de Acción | Igual que `!levas` pero con un campo de arquería: +5 arqueros de IA al momento, especialistas de ataque (+0.2 fijo atacando, 0 defendiendo). |
 | `!caballeros` | Fase de Acción | Igual que `!levas` pero con una caballeriza: +5 caballeros de IA al momento, especialistas de defensa (+0.2 fijo defendiendo, 0 atacando). No confundir con el caballero de la mejora de industria (ese es un jugador con sprite propio, no un acompañante). |
+| `!conquista` | Fase de Acción | Ataca a una estructura neutral (castillo, aldea o puerto) elegida al azar entre las que están dentro de tu propio territorio y todavía tienen guarnición. Si ganáis, la estructura empieza a producir para tu facción para siempre; si perdéis, los votantes sufren bajas. |
 
 Solo cuenta el **último comando** que escribas antes de que cierre la Fase de Acción — puedes cambiar de opinión mientras dure.
 
@@ -124,6 +125,11 @@ Cada casilla que controla una facción genera **1 tropa de IA por ronda**, autom
 Además de la generación pasiva de arriba, cada jugador puede votar uno de estos 3 comandos (misma mecánica que `!industria`: un voto, un edificio, en una casilla al azar de tu facción) para levantar una barraca, un campo de arquería o una caballeriza. El edificio le da a **quien lo construyó** un bono inmediato de +5 tropas del tipo correspondiente, y a partir de la ronda siguiente sigue produciendo +1 por ronda mientras siga en pie — ese +1 ya no va necesariamente a quien lo construyó, sino que se reparte por la facción con la misma prioridad de siempre (al que menos tenga). Si el terreno donde está el edificio cambia de dueño, la producción pasa a la nueva facción sin más, igual que con una industria.
 
 Los soldados de barraca son iguales que los de la generación pasiva (+0.1 fijo, ataque y defensa). Los arqueros y los caballeros de IA son **especialistas**: el arquero solo suma atacando (+0.2), el caballero de IA solo defendiendo (+0.2) — ninguno de los dos aporta nada del otro lado. (No confundir al caballero de IA, un acompañante que sigue al jugador, con el caballero de la mejora de industria nivel 1/3, que es un jugador que cambia de sprite y de unidad.)
+
+### Estructuras neutrales conquistables: `!conquista`
+Los castillos, aldeas y puertos que decoran el mapa empiezan sin dueño, con una guarnición de tropas de IA al azar (distinta cada partida): el castillo trae 5-10 levas + 0-2 arqueros + 0-2 caballeros de IA, la aldea 3-15 levas, y el puerto 6-12 levas + 0-5 arqueros. Sobre cada una se ve un marcador con su guarnición y su fuerza de ataque/defensa, para saber si conviene intentarlo.
+
+Votando `!conquista` atacas, junto con el resto de tu facción que también lo vote esa ronda, a UNA estructura elegida al azar entre las que estén dentro de tu propio territorio y todavía tengan guarnición — no se puede elegir cuál. Tu fuerza de ataque se calcula igual que en un `!ataque` normal (tirada + tus propias tropas); la guarnición no tira dado, solo suma su fuerza fija. Si ganáis, la estructura queda conquistada para siempre y empieza a producir para tu facción: castillo +1 caballero de IA/ronda, aldea +2 levas/ronda, puerto +1 de industria/ronda — y si más adelante pierdes ese terreno, la producción se la lleva quien te lo conquiste a ti, igual que con cualquier otro edificio. Si perdéis el asalto, los que votaron sufren bajas según lo grande que fuera la diferencia de fuerza.
 
 ### Combate
 Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa).
