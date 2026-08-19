@@ -164,12 +164,98 @@ const SPRITES = {
     c.rect(26, 36, 8, 8, ink, 0);   // palo
     c.rect(26, 46, 8, 8, ink, 0);   // punto
   },
+
+  // MARCADOR DE JUGADOR (soldado): antes era un triangulo dibujado a mano en
+  // public/mapRenderer.js (drawWalkers), ahora es un sprite de verdad para
+  // poder sustituirlo — rectangulo vertical, como pidio el streamer, en vez
+  // de triangulo. Dos variantes, izquierda/derecha, que el juego cambia sola
+  // segun hacia donde se mueve el marcador (ver stepWalkers()/drawWalkers()
+  // en mapRenderer.js) — el "escalon" de abajo marca el pie que va delante,
+  // para que se note el cambio de sentido incluso en el placeholder. El
+  // juego tiñe este sprite con el color de la faccion en tiempo real (no
+  // hace falta un PNG por facción), asi que se hornea en gris neutro. 24x40.
+  'soldier-right': (c) => {
+    const body = [222, 222, 222];
+    c.rect(6, 4, 12, 12, body, 2);   // cabeza
+    c.rect(4, 16, 16, 18, body, 2);  // torso
+    c.rect(10, 34, 7, 6, body, 2);   // pie de atras
+    c.rect(15, 30, 7, 8, body, 2);   // pie de delante (mas adelantado y mas abajo -> zancada a la derecha)
+  },
+  'soldier-left': (c) => {
+    const body = [222, 222, 222];
+    c.rect(6, 4, 12, 12, body, 2);
+    c.rect(4, 16, 16, 18, body, 2);
+    c.rect(7, 34, 7, 6, body, 2);    // pie de atras
+    c.rect(2, 30, 7, 8, body, 2);    // pie de delante -> zancada a la izquierda
+  },
+
+  // EDIFICIO DE INDUSTRIA: antes un cuadrado amarillo semitransparente
+  // dibujado a mano (paintIndustryMarkers), ahora sprite sustituible. Mas
+  // pequeño que `village` en el mapa (ver INDUSTRY_SPRITE_WORLD_WIDTH en
+  // mapRenderer.js, menor que el worldWidth de village en DECOR_SPRITES).
+  // Tejadillo simple color trigo/ambar. 36x28.
+  industry: (c) => {
+    c.rect(3, 10, 30, 16, [214, 181, 64], 2, [90, 66, 8]); // cuerpo
+    c.rect(0, 2, 36, 10, [176, 132, 46], 2, [90, 66, 8]);  // tejadillo
+  },
+
+  // VACA (easter egg, unica en el mapa, ver docs/ACCIONES.md seccion 15):
+  // "un rectangulo blanco" tal cual se pidio. Dos variantes izquierda/derecha
+  // que alternan solas segun hacia donde vaga, igual que el soldado. 40x24.
+  'cow-right': (c) => {
+    const body = [245, 245, 245];
+    c.rect(2, 4, 30, 16, body, 2);   // cuerpo
+    c.rect(28, 0, 10, 10, body, 2);  // cabeza, hacia la derecha
+    c.rect(6, 20, 6, 4, body, 2);    // pata trasera
+    c.rect(24, 20, 6, 4, body, 2);   // pata delantera
+  },
+  'cow-left': (c) => {
+    const body = [245, 245, 245];
+    c.rect(8, 4, 30, 16, body, 2);
+    c.rect(2, 0, 10, 10, body, 2);   // cabeza, hacia la izquierda
+    c.rect(10, 20, 6, 4, body, 2);
+    c.rect(28, 20, 6, 4, body, 2);
+  },
+
+  // ACOMPAÑANTE DE LA VACA (easter egg): un unico sprite, sin variante de
+  // direccion (no se pidio) — rectangulo vertical que la sigue siempre a
+  // poca distancia (ver stepCow() en mapRenderer.js). 18x30.
+  'cow-follower': (c) => {
+    c.rect(3, 2, 12, 26, [140, 108, 70], 2, [46, 32, 18]);
+  },
+
+  // NUBES DEL CIELO (decorativo, ver docs/ACCIONES.md seccion 15): 3 tamaños
+  // para que no se vean todas iguales al agruparse. Blancas y opacas aqui a
+  // proposito — la transparencia final ("muy transparentes" segun se pidio)
+  // se aplica en el codigo (CLOUD_ALPHA en mapRenderer.js), no horneada en el
+  // PNG, para poder ajustarla sin regenerar nada.
+  'cloud-1': (c) => { // pequeña, 46x20
+    c.rect(8, 8, 30, 10, [255, 255, 255], 0);
+    c.rect(16, 2, 16, 10, [255, 255, 255], 0);
+    c.rect(0, 10, 14, 8, [255, 255, 255], 0);
+  },
+  'cloud-2': (c) => { // mediana, 68x28
+    c.rect(10, 12, 48, 14, [255, 255, 255], 0);
+    c.rect(22, 4, 26, 14, [255, 255, 255], 0);
+    c.rect(0, 14, 20, 12, [255, 255, 255], 0);
+    c.rect(50, 12, 18, 12, [255, 255, 255], 0);
+  },
+  'cloud-3': (c) => { // grande, 96x38
+    c.rect(14, 16, 70, 18, [255, 255, 255], 0);
+    c.rect(30, 4, 40, 18, [255, 255, 255], 0);
+    c.rect(0, 18, 28, 16, [255, 255, 255], 0);
+    c.rect(70, 16, 26, 16, [255, 255, 255], 0);
+  },
 };
 
 const SIZES = {
   castle: [48, 48], port: [40, 40], village: [32, 32], tree: [22, 40],
   'ship-small': [30, 22], 'ship-big': [46, 28], whale: [48, 18], kraken: [96, 96],
   cursor: [32, 32], skeleton: [64, 110], 'help-icon': [64, 64],
+  'soldier-right': [24, 40], 'soldier-left': [24, 40],
+  industry: [36, 28],
+  'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
+  'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };
 
 if (require.main === module) {
