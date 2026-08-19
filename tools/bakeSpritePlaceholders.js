@@ -130,12 +130,46 @@ const SPRITES = {
   cursor: (c) => {          // triangulo blanco con borde oscuro, 32x32
     c.triangle(1, 1, 1, 27, 20, 20, [245, 245, 245], [26, 22, 18]);
   },
+
+  // ESQUELETO DEL CARTEL DE CAMBIO DE RONDA (fuera del mapa, fondo
+  // transparente: lo usa #transitionBanner en public/index.html, ver
+  // docs/ACCIONES.md seccion 13). Postura de paseo con un brazo en alto
+  // sujetando un cartel en blanco — el texto del cartel NO va horneado aqui,
+  // se dibuja por encima con HTML/CSS (transitionMessage() en index.html)
+  // para poder cambiarlo segun la fase sin regenerar la imagen. 64x110.
+  skeleton: (c) => {
+    const bone = [222, 214, 194];
+    const boneBorder = [42, 36, 28];
+    c.rect(20, 4, 22, 20, bone, 2, boneBorder);   // calavera
+    c.rect(16, 24, 30, 32, bone, 2, boneBorder);  // caja toracica
+    c.rect(18, 56, 26, 13, bone, 2, boneBorder);  // pelvis
+    c.rect(10, 28, 6, 24, bone, 2, boneBorder);   // brazo caido
+    c.rect(46, 8, 6, 28, bone, 2, boneBorder);    // brazo en alto (sujeta el cartel)
+    c.rect(19, 68, 8, 30, bone, 2, boneBorder);   // pierna trasera
+    c.rect(33, 68, 8, 26, bone, 2, boneBorder);   // pierna delantera (zancada)
+    c.rect(42, 0, 22, 16, [214, 196, 150], 2, [90, 66, 30]); // cartel en blanco
+  },
+
+  // ICONO DEL BOTON DE AYUDA (fuera del mapa, fondo transparente: lo usa
+  // #helpButton en public/index.html, ver docs/ACCIONES.md seccion 14).
+  // Medallon dorado con una interrogacion en bloques, a juego con las chapas
+  // de laton del resto de botones pero suelto (sin border-image), para poder
+  // sustituirlo por un icono cualquiera sin tocar CSS. 64x64.
+  'help-icon': (c) => {
+    c.rect(4, 4, 56, 56, [201, 158, 72], 3, [74, 52, 20]); // medallon
+    const ink = [51, 35, 15];
+    c.rect(22, 14, 20, 8, ink, 0);  // interrogacion, en bloques: arco superior
+    c.rect(34, 20, 8, 10, ink, 0);  // lado derecho del arco
+    c.rect(26, 28, 16, 8, ink, 0);  // codo hacia el palo
+    c.rect(26, 36, 8, 8, ink, 0);   // palo
+    c.rect(26, 46, 8, 8, ink, 0);   // punto
+  },
 };
 
 const SIZES = {
   castle: [48, 48], port: [40, 40], village: [32, 32], tree: [22, 40],
   'ship-small': [30, 22], 'ship-big': [46, 28], whale: [48, 18], kraken: [96, 96],
-  cursor: [32, 32],
+  cursor: [32, 32], skeleton: [64, 110], 'help-icon': [64, 64],
 };
 
 if (require.main === module) {

@@ -79,17 +79,14 @@
   const KIND_LAND = 3;
 
   // Layout de los marcadores de jugador alrededor del centroide de su
-  // facción: hasta PLAYERS_PER_RING por anillo, cada anillo un poco mas lejos
-  // del centro — ver computePlayerMarkers(). Valores en PIXELES DE PANTALLA
-  // (a escala 1, como MARKER_SIZE) — computePlayerMarkers() los divide entre
-  // BLOCK_PX antes de sumarlos al centroide (que esta en espacio de rejilla,
-  // no de pantalla) para que el radio visual del anillo se mantenga
-  // constante sin importar de que resolucion venga `layout.cols/rows` esa
-  // partida (ver TERRAIN_DOWNSAMPLE en server/mapTemplates.js).
+  // facción al repartirlos por primera vez: hasta PLAYERS_PER_RING por
+  // anillo, cada anillo un poco mas lejos del centro. A partir de ahi cada
+  // marcador se mueve por su cuenta (ver la capa de caminantes en
+  // createObjectLayer), asi que esto solo decide de donde SALE cada uno.
+  // Valores en pixeles de MUNDO.
   const PLAYERS_PER_RING = 8;
-  const MARKER_RING_BASE_RADIUS_PX = 26;
-  const MARKER_RING_STEP_PX = 24;
-  const MARKER_SIZE = 7; // "radio" del triangulo del marcador, ya en px de pantalla
+  const MARKER_RING_BASE_RADIUS = 26;
+  const MARKER_RING_STEP = 24;
 
   // Placeholder de edificio de industria (ver paintIndustryMarkers): cuadrado
   // amarillo semitransparente, a sustituir mas adelante por un PNG de campo de
@@ -132,7 +129,6 @@
     let lastFactions = null; // llega despues de un `state:public`/`state:admin` (el orden de los
     let lastPlayers = null; // mensajes WS no esta garantizado en todos los casos — ver docs/ACCIONES.md seccion 5).
     let lastRasterFingerprint = null; // ver paint(): evita repintar el raster si la propiedad de las casillas no cambio
-    let lastMarkerPositions = new Map(); // userId -> {x,y,color,username}, cacheado para focusOnPlayer()
     let overlayRepaintPending = false; // ver scheduleOverlayRepaint()
 
     // --- capa de objetos (arboles/rocas/etc.), ver createObjectLayer() mas abajo ---
@@ -369,12 +365,18 @@
      * del proyecto pasan siempre `markersEl`.
      */
     function paintOverlay(tiles, factions, players) {
+      // Los marcadores de jugador YA NO se pintan en `markersEl`: se movieron
+      // a la capa de objetos (canvas del tamaño del VIEWPORT) porque ahora se
+      // animan a 60fps, y `markersEl` es del tamaño del mundo entero —
+      // limpiarlo y repintarlo en cada frame seria carisimo. Aqui solo se le
+      // pasa a esa capa el estado nuevo para que recalcule a donde va cada uno.
+      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX });
+
       if (!markersEl) return;
       const ctx = markersEl.getContext('2d');
       ctx.clearRect(0, 0, markersEl.width, markersEl.height);
       if (showLabels) paintTileLabels(ctx, tiles);
       paintIndustryMarkers(ctx, tiles);
-      paintPlayerMarkers(ctx, tiles, factions, players);
       paintCombatBadges(ctx, tiles, factions);
     }
 
@@ -482,44 +484,6 @@
     }
 
     /**
-     * Un triangulo del color de su facción por jugador vivo, agrupado
-     * alrededor del centroide del territorio de su facción (ver
-     * computePlayerMarkers()), con su nombre encima en texto pequeño — solo
-     * se lee bien haciendo zoom, a proposito, para no saturar el mapa a
-     * vista general. Esqueleto v1: la posicion es estatica mientras el
-     * jugador siga vivo en la misma facción; las animaciones de movimiento
-     * por ataque/defensa/industria son trabajo futuro (ver docs/ACCIONES.md).
-     * Si el jugador muere (`alive: false`) su marcador deja de dibujarse.
-     */
-    function paintPlayerMarkers(ctx, tiles, factions, players) {
-      const markers = computePlayerMarkers(players, factions, tiles);
-      lastMarkerPositions = markers;
-      markers.forEach((m) => {
-        const cx = m.x * BLOCK_PX;
-        const cy = m.y * BLOCK_PX;
-        drawTriangleMarker(ctx, cx, cy, m.color);
-        ctx.font = '9px system-ui, sans-serif';
-        ctx.fillStyle = '#f5fbff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(m.username, cx, cy - MARKER_SIZE - 2);
-      });
-    }
-
-    function drawTriangleMarker(ctx, cx, cy, color) {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - MARKER_SIZE);
-      ctx.lineTo(cx - MARKER_SIZE * 0.87, cy + MARKER_SIZE * 0.5);
-      ctx.lineTo(cx + MARKER_SIZE * 0.87, cy + MARKER_SIZE * 0.5);
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = '#04141c';
-      ctx.stroke();
-    }
-
-    /**
      * Posicion (en coordenadas de raster) del "territorio ancla" de una
      * facción: el centroide de UNA sola de sus casillas (la de id mas bajo,
      * para que sea determinista), no la media de todas. Promediar los
@@ -531,57 +495,14 @@
      * en una sola casilla real, los marcadores siempre caen dentro de
      * territorio propio. Se mueve solo si esa casilla concreta cambia de
      * dueño (conquista) — única fuente de "donde esta" una facción en el
-     * mapa, la usan tanto `computePlayerMarkers()` como cualquier futuro
-     * codigo que necesite "el centro" de una facción.
+     * mapa: la usan las chapitas de combate (escudo/espada) y el reparto
+     * inicial de los caminantes (`spawnPosition()` en la capa de objetos).
      */
     function computeFactionCentroid(tiles, factionNumber) {
       const owned = tiles.filter((t) => !t.neutral && t.ownerFactionNumber === factionNumber);
       if (owned.length === 0) return null;
       const anchorTile = owned.reduce((a, b) => (a.id <= b.id ? a : b));
       return layout.centroids[anchorTile.id] || null;
-    }
-
-    /**
-     * Posicion de marcador (coordenadas de raster) por jugador vivo, en un
-     * Map<userId, {x,y,color,username}> — unica funcion del proyecto que
-     * calcula esto, la usan tanto el pintado (paintPlayerMarkers) como la
-     * busqueda (focusOnPlayer) para no tener dos fuentes de verdad distintas
-     * sobre "donde esta" el marcador de un jugador.
-     */
-    function computePlayerMarkers(players, factions, tiles) {
-      const markers = new Map();
-      const aliveByFaction = new Map();
-      (players || []).forEach((p) => {
-        if (!p.alive) return; // sin marcador si el jugador ha muerto
-        if (!aliveByFaction.has(p.factionNumber)) aliveByFaction.set(p.factionNumber, []);
-        aliveByFaction.get(p.factionNumber).push(p);
-      });
-
-      aliveByFaction.forEach((roster, factionNumber) => {
-        const centroid = computeFactionCentroid(tiles, factionNumber);
-        if (!centroid) return; // facción sin territorio (no deberia pasar, pero por si acaso)
-        const faction = (factions || []).find((f) => f.number === factionNumber);
-        const color = faction ? faction.color : NEUTRAL_COLOR;
-        roster.forEach((p, i) => {
-          const ring = Math.floor(i / PLAYERS_PER_RING);
-          const posInRing = i % PLAYERS_PER_RING;
-          const countInRing = Math.min(PLAYERS_PER_RING, roster.length - ring * PLAYERS_PER_RING);
-          const angle = (2 * Math.PI * posInRing) / countInRing;
-          // centroid.x/y esta en espacio de rejilla (layout.cols/rows), no de
-          // pantalla — se pasa el radio (en px de pantalla) a ese mismo
-          // espacio dividiendo por BLOCK_PX antes de sumarlo, ver comentario
-          // de MARKER_RING_BASE_RADIUS_PX mas arriba.
-          const radius = (MARKER_RING_BASE_RADIUS_PX + ring * MARKER_RING_STEP_PX) / BLOCK_PX;
-          markers.set(p.userId, {
-            x: centroid.x + radius * Math.cos(angle),
-            y: centroid.y + radius * Math.sin(angle),
-            color,
-            username: p.username,
-          });
-        });
-      });
-
-      return markers;
     }
 
     /**
@@ -592,19 +513,24 @@
      * vivo con ese nombre (con marcador dibujado).
      */
     function focusOnPlayer(username) {
-      if (!layout || !username) return false;
+      if (!layout || !username || !objectLayer) return false;
       const needle = username.trim().toLowerCase();
       if (!needle) return false;
 
+      // Las posiciones las lleva ahora la capa de caminantes, que es quien las
+      // mueve — se le piden en el momento de buscar (y no se cachean aqui)
+      // para saltar a donde esta el jugador AHORA, no a donde estaba en el
+      // ultimo cambio de estado.
+      const positions = objectLayer.getMarkerPositions();
       let target = null;
-      for (const [, m] of lastMarkerPositions) {
+      for (const [, m] of positions) {
         if (m.username.toLowerCase() === needle) {
           target = m;
           break;
         }
       }
       if (!target) {
-        for (const [, m] of lastMarkerPositions) {
+        for (const [, m] of positions) {
           if (m.username.toLowerCase().includes(needle)) {
             target = m;
             break;
@@ -613,8 +539,9 @@
       }
       if (!target) return false;
 
-      const cx = target.x * BLOCK_PX;
-      const cy = target.y * BLOCK_PX;
+      // Ya vienen en pixeles de mundo, no en celdas de rejilla.
+      const cx = target.x;
+      const cy = target.y;
       const viewportCx = viewportEl.clientWidth / 2;
       const viewportCy = viewportEl.clientHeight / 2;
       setView(FOCUS_SCALE, viewportCx - cx * FOCUS_SCALE, viewportCy - cy * FOCUS_SCALE);
@@ -717,8 +644,20 @@
       return true;
     }
 
-    function zoom(factor) {
-      setView(mapView.scale * factor, mapView.x, mapView.y);
+    /**
+     * Cambia la escala manteniendo fijo un punto de la pantalla (por defecto
+     * el centro del viewport; la rueda del raton pasa la posicion del
+     * cursor). Sin esto, setView() conserva mapView.x/y tal cual y todo el
+     * mapa crece/encoge desde su esquina superior izquierda, que es lo que
+     * se veia como "el mapa se va hacia arriba-izquierda" al hacer zoom.
+     */
+    function zoom(factor, anchor) {
+      const ax = anchor ? anchor.x : viewportEl.clientWidth / 2;
+      const ay = anchor ? anchor.y : viewportEl.clientHeight / 2;
+      const worldX = (ax - mapView.x) / mapView.scale;
+      const worldY = (ay - mapView.y) / mapView.scale;
+      const nextScale = mapView.scale * factor;
+      setView(nextScale, ax - worldX * nextScale, ay - worldY * nextScale);
     }
 
     function setupInteraction() {
@@ -739,7 +678,8 @@
         'wheel',
         (e) => {
           e.preventDefault();
-          zoom(e.deltaY < 0 ? 1.1 : 0.9);
+          const rect = viewportEl.getBoundingClientRect();
+          zoom(e.deltaY < 0 ? 1.1 : 0.9, { x: e.clientX - rect.left, y: e.clientY - rect.top });
         },
         { passive: false }
       );
@@ -754,7 +694,21 @@
     }
 
     setupInteraction();
-    return { setLayout, setTiles, zoom, reset, focusOnPlayer };
+    return {
+      setLayout,
+      setTiles,
+      zoom,
+      reset,
+      focusOnPlayer,
+      /**
+       * Posicion actual de cada marcador de jugador, en pixeles de mundo:
+       * Map<userId, {x, y, color, username}>. La usa `focusOnPlayer()` por
+       * dentro y se expone tambien aqui para que cualquier otra parte de la
+       * interfaz (o una prueba) pueda saber donde esta cada uno sin duplicar
+       * la logica de movimiento.
+       */
+      getPlayerPositions: () => (objectLayer ? objectLayer.getMarkerPositions() : new Map()),
+    };
   }
 
   // ===========================================================================
@@ -857,6 +811,53 @@
     return images;
   })();
 
+  // ===========================================================================
+  // Caminantes: el marcador de cada jugador vivo, que se mueve por el mapa.
+  //
+  // Toda la animacion es LOCAL de cada navegador. El servidor no manda
+  // posiciones — mandarlas a 60fps por WebSocket para decenas de jugadores no
+  // seria viable — sino solo QUE esta haciendo cada uno (`player.action`, ver
+  // getPublicState() en server/gameEngine.js). Con eso, cada cliente decide a
+  // donde tiene que ir ese marcador y lo mueve por su cuenta. Que dos
+  // espectadores vean al mismo aldeano dos pasos desplazado da igual: es
+  // decoracion, no estado de juego.
+  //
+  // Segun el comando escrito en el chat, el destino cambia:
+  //   sin comando / fuera de la fase de accion -> pasea por su territorio
+  //   !ataque N   -> se va a la frontera con la faccion N
+  //   !defender   -> se va al castillo/aldea mas cercano de su territorio
+  //   !expansion  -> se va a la frontera con el territorio neutral
+  //   !industria  -> se va a una casilla suya que tenga industria
+  // Al resolverse la ronda, el servidor deja de mandar accion y los
+  // supervivientes vuelven solos a pasear.
+  // ===========================================================================
+
+  // Dos velocidades, en pixeles de MUNDO por segundo. Pasear es un paseo; ir
+  // a cumplir una orden es una marcha, y bastante mas rapida: el territorio de
+  // una faccion puede medir varios miles de pixeles de mundo, y a paso de
+  // paseo no daba tiempo a llegar a la frontera dentro de la fase de accion
+  // (medido: ~1.100px hasta un castillo, que a 70px/s son 16 segundos). Que
+  // ademas se note el cambio de ritmo al dar una orden es justo lo que hace
+  // legible de un vistazo quien esta yendo a algun sitio y quien no.
+  const WALK_SPEED_WANDER = 55;
+  const WALK_SPEED_MARCH = 300;
+  const WALK_ARRIVE_DIST = 6;     // a que distancia se considera que ya llego
+  const WANDER_RADIUS = 130;      // como de lejos puede irse el siguiente paseo
+  const WANDER_PAUSE_MS = 900;    // descanso al llegar antes de elegir otro sitio
+  const HOP_HEIGHT = 9;           // altura del brinquito, en pixeles de mundo
+  const HOP_SPEED = 7.5;          // brincos por segundo
+  // "Radio" del triangulo, en pixeles de MUNDO: escala con el zoom como el
+  // resto del terreno (es un personaje sobre el suelo, no un icono de
+  // interfaz). Se elige algo menor que un arbol — `tree` mide 55 de ancho en
+  // DECOR_SPRITES — para que un aldeano no parezca mas grande que un pino.
+  const WALKER_SIZE = 20;
+  // El NOMBRE, en cambio, va a tamaño de pantalla fijo: escalarlo con el mundo
+  // lo hace ilegible de lejos y gigante de cerca.
+  const WALKER_NAME_PX = 11;
+  // Por debajo de esta escala no se escriben los nombres: a vista de planeta
+  // se solapan todos y dibujar texto es, de largo, lo mas caro de esta capa.
+  const WALKER_NAME_MIN_SCALE = 0.5;
+
   /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */
   function hash01(x, y, salt) {
     let h = (x * 374761393 + y * 668265263 + salt * 2654435761) | 0;
@@ -880,6 +881,15 @@
     // dibujadas a mano con radio en pixeles de mundo).
     let decorations = [];
     let decorBlockPx = 1;
+    // Caminantes: un marcador animado por jugador vivo. Ver la seccion
+    // "Caminantes" de mas arriba para el porque de animarlos aqui y no en el
+    // servidor. `walkerWorld` es la ultima foto del estado (casillas, quien
+    // manda en cada una, que ha escrito cada jugador) sobre la que se deciden
+    // los destinos.
+    const walkers = new Map(); // userId -> { x, y, tx, ty, color, username, ... }
+    let walkerWorld = null;
+    let walkerLoopRunning = false;
+    let lastFrameAt = 0;
 
     const ctx = objectsEl.getContext('2d');
 
@@ -953,6 +963,506 @@
       scheduleRedraw();
     }
 
+    // -----------------------------------------------------------------------
+    // Caminantes (marcadores de jugador animados)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Recibe la foto de estado nueva y actualiza los caminantes: da de alta a
+     * los que acaban de unirse, de baja a los que han muerto o se han ido, y
+     * recalcula el destino de cada uno segun el comando que tenga escrito.
+     * Se llama en cada `state:*`, no en cada frame.
+     */
+    function setWalkerWorld({ tiles, factions, players, layout, blockPx }) {
+      if (!layout) return;
+      walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1 };
+
+      const alive = new Set();
+      const byFaction = new Map();
+      for (const p of players || []) {
+        if (!p.alive) continue; // los muertos dejan de tener marcador, como antes
+        alive.add(p.userId);
+        if (!byFaction.has(p.factionNumber)) byFaction.set(p.factionNumber, []);
+        byFaction.get(p.factionNumber).push(p);
+      }
+
+      // Baja de los que ya no estan (muertos o partida nueva)
+      for (const userId of [...walkers.keys()]) {
+        if (!alive.has(userId)) walkers.delete(userId);
+      }
+
+      byFaction.forEach((roster, factionNumber) => {
+        const faction = walkerWorld.factions.find((f) => f.number === factionNumber);
+        const color = faction ? faction.color : NEUTRAL_COLOR;
+
+        roster.forEach((p, index) => {
+          let walker = walkers.get(p.userId);
+          if (!walker) {
+            // Alta: se reparte alrededor del ancla de su faccion para que no
+            // salgan todos apilados en el mismo pixel el primer frame.
+            const start = spawnPosition(factionNumber, index, roster.length);
+            if (!start) return; // faccion sin territorio todavia: se intentara en el proximo estado
+            walker = {
+              x: start.x, y: start.y, tx: start.x, ty: start.y,
+              hopSeed: Math.random() * Math.PI * 2,
+              pauseUntil: 0,
+              path: [], // tramos pendientes de la ruta actual, ver setRoute()
+              action: null, actionTarget: null,
+            };
+            walkers.set(p.userId, walker);
+          }
+          walker.color = color;
+          walker.username = p.username;
+          walker.factionNumber = factionNumber;
+
+          // Solo se recalcula el destino si la orden ha cambiado; si no, se
+          // deja que termine de andar hacia donde ya iba (si no, cada `state:*`
+          // — que llegan a menudo — le reiniciaria el paseo).
+          const actionChanged = walker.action !== p.action || walker.actionTarget !== p.actionTargetFactionNumber;
+          walker.action = p.action;
+          walker.actionTarget = p.actionTargetFactionNumber;
+          if (actionChanged) {
+            const dest = destinationFor(walker);
+            if (dest) setRoute(walker, dest);
+          }
+        });
+      });
+
+      startWalkerLoop();
+    }
+
+    /** Casillas que controla una faccion, en la ultima foto de estado. */
+    function ownedTilesOf(factionNumber) {
+      if (!walkerWorld) return [];
+      return walkerWorld.tiles.filter((t) => !t.neutral && t.ownerFactionNumber === factionNumber);
+    }
+
+    /** Centro de una casilla, en pixeles de mundo. */
+    function tileCenter(tileId) {
+      const c = walkerWorld.layout.centroids[tileId];
+      return c ? { x: c.x * walkerWorld.blockPx, y: c.y * walkerWorld.blockPx } : null;
+    }
+
+    function randomOf(list) {
+      return list.length ? list[Math.floor(Math.random() * list.length)] : null;
+    }
+
+    /**
+     * Posicion inicial: alrededor del ancla de su faccion, en anillos, para
+     * que no salgan todos apilados en el mismo pixel. Si el sitio del anillo
+     * cae fuera del territorio (el ancla puede estar pegada a la costa), se
+     * usa el centro de la casilla, que siempre es tierra propia.
+     */
+    function spawnPosition(factionNumber, index, rosterSize) {
+      const owned = ownedTilesOf(factionNumber);
+      if (!owned.length) return null;
+      const anchor = owned.reduce((a, b) => (a.id <= b.id ? a : b));
+      const center = tileCenter(anchor.id);
+      if (!center) return null;
+
+      const ring = Math.floor(index / PLAYERS_PER_RING);
+      const posInRing = index % PLAYERS_PER_RING;
+      const countInRing = Math.min(PLAYERS_PER_RING, rosterSize - ring * PLAYERS_PER_RING);
+      const angle = (2 * Math.PI * posInRing) / countInRing;
+      const radius = MARKER_RING_BASE_RADIUS + ring * MARKER_RING_STEP;
+      const spot = { x: center.x + radius * Math.cos(angle), y: center.y + radius * Math.sin(angle) };
+
+      const ownedIds = new Set(owned.map((t) => t.id));
+      return ownedIds.has(tileIdAtWorld(spot.x, spot.y)) ? spot : center;
+    }
+
+    /**
+     * A donde tiene que ir este caminante segun el comando que haya escrito.
+     * Todo se calcula a nivel de CASILLA (unas pocas decenas), no de celda del
+     * raster (cientos de miles), asi que sale practicamente gratis. Si el
+     * destino que toca no existe (defiende pero no hay castillos suyos, ataca
+     * a alguien con quien no tiene frontera...), devuelve null y el caminante
+     * se queda paseando, que siempre es un destino valido.
+     */
+    function destinationFor(walker) {
+      switch (walker.action) {
+        case 'ATTACK': return borderPointWith(walker.factionNumber, walker.actionTarget) || wanderTarget(walker);
+        case 'EXPAND': return neutralBorderPoint(walker.factionNumber) || wanderTarget(walker);
+        case 'DEFEND': return strongholdPoint(walker.factionNumber) || wanderTarget(walker);
+        case 'INDUSTRY': return industryPoint(walker.factionNumber) || wanderTarget(walker);
+        default: return wanderTarget(walker);
+      }
+    }
+
+    /** Punto medio entre una casilla propia y una vecina de la faccion objetivo: "la frontera". */
+    /**
+     * A donde va un atacante. Lo normal es la frontera de tierra con la
+     * faccion atacada, pero en este mapa (el mundo real) es MUY habitual que
+     * dos facciones no se toquen por tierra: estan en continentes distintos y
+     * la adyacencia del juego solo existe entre casillas que se tocan pixel a
+     * pixel. En ese caso se manda al caminante al borde de su territorio que
+     * MIRA hacia el enemigo — se lee como "juntandose en la costa para
+     * embarcar", que es lo que se quiere ver, en vez de dejarlo paseando como
+     * si no hubiera dado ninguna orden.
+     */
+    function borderPointWith(factionNumber, targetFactionNumber) {
+      if (!targetFactionNumber) return null;
+      const shared = frontLinePoint(
+        factionNumber,
+        (neighbor) => !neighbor.neutral && neighbor.ownerFactionNumber === targetFactionNumber
+      );
+      if (shared) return shared;
+      return coastFacing(factionNumber, targetFactionNumber);
+    }
+
+    /** Punto del territorio propio mas cercano al de la faccion objetivo, mirando hacia ella. */
+    function coastFacing(factionNumber, targetFactionNumber) {
+      const owned = ownedTilesOf(factionNumber);
+      const targets = ownedTilesOf(targetFactionNumber);
+      if (!owned.length || !targets.length) return null;
+
+      let best = null;
+      for (const mine of owned) {
+        const a = tileCenter(mine.id);
+        if (!a) continue;
+        for (const theirs of targets) {
+          const b = tileCenter(theirs.id);
+          if (!b) continue;
+          const d = Math.hypot(a.x - b.x, a.y - b.y);
+          if (!best || d < best.d) best = { d, a, b, tileId: mine.id };
+        }
+      }
+      if (!best) return null;
+
+      // Se avanza hacia el enemigo lo que se pueda sin dejar tierra propia:
+      // acaba justo en la costa que da hacia el.
+      const ownedIds = new Set(owned.map((t) => t.id));
+      let point = best.a;
+      for (const bias of [0.45, 0.35, 0.25, 0.15, 0.07]) {
+        const p = {
+          x: best.a.x + (best.b.x - best.a.x) * bias + (Math.random() - 0.5) * 24,
+          y: best.a.y + (best.b.y - best.a.y) * bias + (Math.random() - 0.5) * 24,
+        };
+        if (ownedIds.has(tileIdAtWorld(p.x, p.y))) { point = p; break; }
+      }
+      return point;
+    }
+
+    /** Igual, pero contra territorio neutral (para `!expansion`). */
+    function neutralBorderPoint(factionNumber) {
+      return frontLinePoint(factionNumber, (neighbor) => neighbor.neutral);
+    }
+
+    /**
+     * Elige al azar una pareja "casilla propia / casilla vecina que cumple
+     * `matches`" y devuelve un punto en esa frontera. Comun a `!ataque` (el
+     * vecino es de la faccion atacada) y a `!expansion` (el vecino es
+     * neutral). Si no hay ninguna frontera asi, devuelve null y quien llama
+     * deja al caminante paseando.
+     */
+    function frontLinePoint(factionNumber, matches) {
+      const owned = ownedTilesOf(factionNumber);
+      const ownedIds = new Set(owned.map((t) => t.id));
+      const byId = new Map(walkerWorld.tiles.map((t) => [t.id, t]));
+      const pairs = [];
+      for (const tile of owned) {
+        for (const nid of tile.neighborIds || []) {
+          const neighbor = byId.get(nid);
+          if (neighbor && matches(neighbor)) pairs.push([tile.id, nid]);
+        }
+      }
+      const pick = randomOf(pairs);
+      return pick ? midpointOfTiles(pick[0], pick[1], ownedIds) : null;
+    }
+
+    /**
+     * Punto de "primera linea": sobre la recta que une el centro de una
+     * casilla propia con el de la casilla vecina, pero SIN llegar a la mitad,
+     * para que el caminante se plante mirando a la frontera y no dentro del
+     * territorio de enfrente.
+     *
+     * Se prueban varios avances de mas a menos y se coge el primero que
+     * todavia caiga en tierra PROPIA: dos centros de casilla vecinos pueden
+     * tener mar en medio (islas, penínsulas, un estrecho), y sin esta
+     * comprobacion los atacantes acababan plantados en el agua.
+     */
+    function midpointOfTiles(ownTileId, otherTileId, ownedIds) {
+      const a = tileCenter(ownTileId);
+      const b = tileCenter(otherTileId);
+      if (!a || !b) return null;
+
+      const jitter = () => (Math.random() - 0.5) * 26; // que no se apilen todos en el mismo punto
+      for (const bias of [0.38, 0.3, 0.22, 0.15, 0.08]) {
+        const p = {
+          x: a.x + (b.x - a.x) * bias + jitter(),
+          y: a.y + (b.y - a.y) * bias + jitter(),
+        };
+        if (ownedIds.has(tileIdAtWorld(p.x, p.y))) return p;
+      }
+      return a; // ni acercandose: se queda en el centro de su casilla fronteriza
+    }
+
+    /** Castillo o aldea dentro del territorio de la faccion (para `!defender`). */
+    function strongholdPoint(factionNumber) {
+      const owned = new Set(ownedTilesOf(factionNumber).map((t) => t.id));
+      if (!owned.size) return null;
+      const candidates = decorations.filter(
+        (d) => (d.type === 'castle' || d.type === 'village') && owned.has(tileIdAtWorld(d.wx, d.wy))
+      );
+      const pick = randomOf(candidates);
+      if (!pick) return null;
+      // Se plantan alrededor del castillo, no todos clavados en el mismo
+      // pixel — pero sin salirse de tierra propia (un castillo costero tiene
+      // agua a un lado).
+      return scatterOnOwnLand(pick.wx, pick.wy, 30, 22, owned);
+    }
+
+    /** Punto cerca de (x,y) que siga en tierra de la faccion; si no lo hay, el propio (x,y). */
+    function scatterOnOwnLand(x, y, spreadX, spreadY, ownedIds) {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const p = { x: x + (Math.random() - 0.5) * spreadX, y: y + (Math.random() - 0.5) * spreadY };
+        if (ownedIds.has(tileIdAtWorld(p.x, p.y))) return p;
+      }
+      return { x, y };
+    }
+
+    /** Casilla propia con industria levantada (para `!industria`). */
+    function industryPoint(factionNumber) {
+      const owned = ownedTilesOf(factionNumber);
+      const withIndustry = owned.filter((t) => (t.industryCount || 0) > 0);
+      const tile = randomOf(withIndustry);
+      if (!tile) return null;
+      const c = tileCenter(tile.id);
+      if (!c) return null;
+      return scatterOnOwnLand(c.x, c.y, 40, 30, new Set(owned.map((t) => t.id)));
+    }
+
+    /** Que casilla hay en un punto del mundo (o -1 si es oceano). */
+    function tileIdAtWorld(wx, wy) {
+      const { layout, blockPx } = walkerWorld;
+      const gx = Math.floor(wx / blockPx);
+      const gy = Math.floor(wy / blockPx);
+      if (gx < 0 || gy < 0 || gx >= layout.cols || gy >= layout.rows) return -1;
+      return layout.cellTileIds[gy * layout.cols + gx];
+    }
+
+    /**
+     * ¿Se puede ir en linea recta de (x0,y0) a (x1,y1) sin salirse del
+     * territorio propio? Comprueba varios puntos a lo largo del trayecto, no
+     * solo el destino: los caminantes andan en linea recta, asi que validar
+     * unicamente el punto final los hacia cruzar bahias y brazos de mar
+     * andando sobre el agua cuando el origen y el destino estaban en dos
+     * peninsulas distintas.
+     */
+    function pathStaysInside(x0, y0, x1, y1, ownedIds) {
+      const SAMPLES = 6;
+      for (let i = 1; i <= SAMPLES; i++) {
+        const t = i / SAMPLES;
+        if (!ownedIds.has(tileIdAtWorld(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))) return false;
+      }
+      return true;
+    }
+
+    /**
+     * Siguiente paso del paseo: un punto cercano al que se pueda llegar sin
+     * salir del territorio de su faccion (se prueban unas cuantas direcciones
+     * al azar y, si ninguna vale, se queda donde esta — asi nunca se ponen a
+     * pasear por el mar ni por tierra ajena).
+     */
+    function wanderTarget(walker) {
+      const owned = ownedTilesOf(walker.factionNumber);
+      if (!owned.length) return null;
+      const ownedIds = new Set(owned.map((t) => t.id));
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = WANDER_RADIUS * (0.3 + Math.random() * 0.7);
+        const x = walker.x + Math.cos(angle) * dist;
+        const y = walker.y + Math.sin(angle) * dist;
+        if (pathStaysInside(walker.x, walker.y, x, y, ownedIds)) return { x, y };
+      }
+      // Sin sitio al que ir sin mojarse (islote de una sola casilla, esquina
+      // muy estrecha...): se queda quieto hasta el proximo intento.
+      return null;
+    }
+
+    /**
+     * Fija el destino de un caminante como una RUTA POR TIERRA, no como una
+     * linea recta: se busca el camino entre casillas vecinas (que por
+     * definicion se tocan por tierra) y se va pasando por el centro de cada
+     * una. Sin esto, un soldado que marcha a la frontera puede cruzar una
+     * bahia andando sobre el agua, porque el destino era valido pero la recta
+     * hasta el no.
+     *
+     * Si no hay camino por territorio propio (dos islas de la misma faccion),
+     * se va en linea recta: es preferible a quedarse plantado.
+     */
+    function setRoute(walker, dest) {
+      walker.path = routeTo(walker, dest);
+      const next = walker.path.shift();
+      walker.tx = next.x;
+      walker.ty = next.y;
+      walker.pauseUntil = 0;
+    }
+
+    function routeTo(walker, dest) {
+      const from = tileIdAtWorld(walker.x, walker.y);
+      const to = tileIdAtWorld(dest.x, dest.y);
+      if (from < 0 || to < 0 || from === to) return [dest];
+
+      const tiles = tilePathBetween(from, to, walker.factionNumber);
+      if (!tiles) return [dest];
+      // El primer elemento es la casilla donde ya esta: se salta.
+      const points = tiles.slice(1).map((id) => tileCenter(id)).filter(Boolean);
+      points.push(dest);
+      return points;
+    }
+
+    /**
+     * Camino mas corto (en numero de casillas) entre dos casillas, pasando
+     * SOLO por territorio de esa faccion — no se atraviesa tierra ajena para
+     * llegar a un castillo propio. Busqueda en anchura sobre el grafo de
+     * casillas, que tiene unas pocas decenas de nodos: cuesta nada.
+     */
+    function tilePathBetween(fromTileId, toTileId, factionNumber) {
+      const allowed = new Set(ownedTilesOf(factionNumber).map((t) => t.id));
+      if (!allowed.has(fromTileId) || !allowed.has(toTileId)) return null;
+
+      const byId = new Map(walkerWorld.tiles.map((t) => [t.id, t]));
+      const cameFrom = new Map([[fromTileId, null]]);
+      const queue = [fromTileId];
+
+      while (queue.length) {
+        const current = queue.shift();
+        if (current === toTileId) {
+          const path = [];
+          for (let at = current; at !== null; at = cameFrom.get(at)) path.unshift(at);
+          return path;
+        }
+        for (const nid of byId.get(current)?.neighborIds || []) {
+          if (!allowed.has(nid) || cameFrom.has(nid)) continue;
+          cameFrom.set(nid, current);
+          queue.push(nid);
+        }
+      }
+      return null; // territorio partido en trozos sin conexion por tierra
+    }
+
+    /** Avanza todos los caminantes `dt` segundos hacia su destino. */
+    function stepWalkers(dt, now) {
+      if (!walkerWorld) return;
+      walkers.forEach((w) => {
+        const dx = w.tx - w.x;
+        const dy = w.ty - w.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist <= WALK_ARRIVE_DIST) {
+          // ¿Quedan tramos de la ruta? (ver setRoute: las marchas largas van
+          // por el centro de cada casilla del camino, no en linea recta).
+          if (w.path && w.path.length) {
+            const next = w.path.shift();
+            w.tx = next.x;
+            w.ty = next.y;
+            return;
+          }
+          // Ha llegado del todo. Los que estan paseando descansan un poco y
+          // siguen a otro sitio; los que fueron a una posicion concreta
+          // (frontera, castillo...) se quedan ahi hasta que cambie la orden.
+          if (!w.action && now >= w.pauseUntil) {
+            const next = wanderTarget(w);
+            if (next) { w.tx = next.x; w.ty = next.y; }
+            w.pauseUntil = now + WANDER_PAUSE_MS * (0.5 + Math.random());
+          }
+          return;
+        }
+
+        const speed = w.action ? WALK_SPEED_MARCH : WALK_SPEED_WANDER;
+        const step = Math.min(dist, speed * dt);
+        w.x += (dx / dist) * step;
+        w.y += (dy / dist) * step;
+      });
+    }
+
+    /** Dibuja los caminantes visibles, con su brinquito y su nombre. */
+    function drawWalkers(w, h) {
+      if (!walkers.size || !walkerWorld) return;
+      const { x: vx, y: vy, scale } = currentView;
+      const margin = OBJ_VIEWPORT_MARGIN_PX / scale;
+      const wx0 = (0 - vx) / scale - margin, wx1 = (w - vx) / scale + margin;
+      const wy0 = (0 - vy) / scale - margin, wy1 = (h - vy) / scale + margin;
+
+      const size = WALKER_SIZE * scale;
+      const showNames = scale >= WALKER_NAME_MIN_SCALE;
+      const t = performance.now() / 1000;
+
+      if (showNames) {
+        ctx.font = `${WALKER_NAME_PX}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+      }
+      ctx.lineWidth = Math.max(1, size * 0.09);
+
+      walkers.forEach((walker) => {
+        if (walker.x < wx0 || walker.x > wx1 || walker.y < wy0 || walker.y > wy1) return;
+
+        // Brinquito: solo mientras se mueve de verdad, para que los que estan
+        // parados en la frontera o en un castillo se queden quietos.
+        const moving = Math.hypot(walker.tx - walker.x, walker.ty - walker.y) > WALK_ARRIVE_DIST;
+        const hop = moving ? Math.abs(Math.sin(t * HOP_SPEED + walker.hopSeed)) * HOP_HEIGHT : 0;
+
+        const sx = walker.x * scale + vx;
+        const sy = (walker.y - hop) * scale + vy;
+
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - size);
+        ctx.lineTo(sx - size * 0.87, sy + size * 0.5);
+        ctx.lineTo(sx + size * 0.87, sy + size * 0.5);
+        ctx.closePath();
+        ctx.fillStyle = walker.color;
+        ctx.fill();
+        ctx.strokeStyle = '#04141c';
+        ctx.stroke();
+
+        if (showNames) {
+          // Sombra fina detras del nombre: sobre terreno claro (desierto,
+          // nieve) el texto blanco solo se perdia del todo.
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(6,18,26,.85)';
+          ctx.strokeText(walker.username, sx, sy - size - 3);
+          ctx.fillStyle = '#f5fbff';
+          ctx.fillText(walker.username, sx, sy - size - 3);
+          ctx.lineWidth = Math.max(1, size * 0.09);
+        }
+      });
+    }
+
+    /**
+     * Posiciones actuales, en pixeles de MUNDO — las usa el buscador de
+     * jugadores del panel (`focusOnPlayer`) para saltar a donde esta cada uno
+     * ahora mismo.
+     */
+    function getMarkerPositions() {
+      const out = new Map();
+      walkers.forEach((w, userId) => out.set(userId, { x: w.x, y: w.y, color: w.color, username: w.username }));
+      return out;
+    }
+
+    /**
+     * Bucle de animacion. Solo corre mientras haya caminantes: sin jugadores
+     * (antes de que empiece la partida, o si mueren todos) la capa vuelve a
+     * repintarse solo cuando hace falta, sin gastar un frame cada 16ms.
+     */
+    function startWalkerLoop() {
+      if (walkerLoopRunning || !walkers.size) return;
+      walkerLoopRunning = true;
+      lastFrameAt = performance.now();
+      const tick = () => {
+        if (!walkers.size) { walkerLoopRunning = false; drawObjectLayer(); return; }
+        const now = performance.now();
+        const dt = Math.min(0.1, (now - lastFrameAt) / 1000); // techo por si la pestaña estuvo en segundo plano
+        lastFrameAt = now;
+        stepWalkers(dt, now);
+        drawObjectLayer();
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+
     /**
      * Guarda la decoracion de esta partida (llega en `map:layout`) pasando ya
      * sus coordenadas de celdas de rejilla a pixeles de MUNDO, que es en lo
@@ -1021,10 +1531,17 @@
       if (!objectsEl.width || !objectsEl.height) resizeCanvas();
       ctx.clearRect(0, 0, w, h);
 
-      // La decoracion de la partida se dibuja SIEMPRE que haya (no depende de
-      // `objects.bin`, que es otro dataset distinto y puede no estar).
+      // Orden de capas dentro de este canvas, de atras hacia delante:
+      // decoracion del mapa -> objetos de terreno -> caminantes. Los
+      // caminantes van los ULTIMOS para que nunca se los coma un arbol ni un
+      // castillo: son lo que hay que poder seguir con la vista.
       drawDecorations(w, h);
+      drawTerrainObjects(w, h);
+      drawWalkers(w, h);
+    }
 
+    /** Arboles/rocas/etc. de `objects.bin` (si ese asset llego a generarse). */
+    function drawTerrainObjects(w, h) {
       if (!ready || !objs || !objs.count) return;
 
       const { x: vx, y: vy, scale } = currentView;
@@ -1200,7 +1717,7 @@
       }
     }
 
-    return { onLayout, onViewChanged, onResize, setDecorations };
+    return { onLayout, onViewChanged, onResize, setDecorations, setWalkerWorld, getMarkerPositions };
   }
 
   window.CondejorgeMap = { createMapController };

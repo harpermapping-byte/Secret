@@ -86,6 +86,46 @@
   table.leaderboard th { color:var(--ink); font-weight:700; font-size:11px; text-transform:uppercase;
                          font-family:var(--font-title); letter-spacing:.05em; }
   table.leaderboard td:first-child, table.leaderboard th:first-child { text-align:left; }
+
+  /* Paron decorativo entre fases (el esqueleto con el cartel, ver
+     docs/ACCIONES.md sección 13): franja fija en el 1/5 inferior de la
+     PANTALLA (no del mapa), por encima de la barra de madera de abajo.
+     pointer-events:none en todo — es puramente decorativo, nunca bloquea el
+     mapa ni los botones que tape visualmente mientras dura. La ronda de
+     verdad SÍ está parada en el servidor durante este rato (ver
+     enterTransition() en server/gameEngine.js) — esto solo dibuja ese
+     paron, no lo decide. */
+  #transitionBanner { position:fixed; left:0; right:0; bottom:0; height:20vh; z-index:21;
+                       pointer-events:none; overflow:hidden; display:none; }
+  #transitionBanner.visible { display:block; }
+  #transitionSkeleton { position:absolute; bottom:8%; height:78%; width:auto;
+                        image-rendering:pixelated; }
+  #transitionSign { position:absolute; white-space:nowrap; transform:translateX(-50%);
+                    padding:6px 14px; font-family:var(--font-title); font-size:15px;
+                    color:var(--ink); background-image:url('/ui/parchment.png');
+                    background-size:160px 160px; border:2px solid #4a331c; border-radius:3px;
+                    box-shadow:0 6px 16px rgba(0,0,0,.5); }
+
+  /* Botón de ayuda: abajo a la derecha, el doble de grande que un botón de
+     cabecera normal (esos rondan los 30px de alto con su chapa; aquí 64px),
+     con fondo transparente a propósito (ver docs/ACCIONES.md sección 14) —
+     no lleva la chapa de latón de .headerBtn, es un icono suelto para poder
+     sustituirlo por cualquier otro sin tocar CSS. 1er click -> bocadillo,
+     2º click -> mini-tutorial (ver handleHelpClick() más abajo). */
+  #helpButton { position:fixed; right:18px; bottom:calc(var(--map-margin-y) + 18px); z-index:20;
+                width:64px; height:64px; padding:0; border:none; background:none; cursor:pointer; }
+  #helpButton img { width:100%; height:100%; image-rendering:pixelated;
+                    filter:drop-shadow(0 3px 6px rgba(0,0,0,.6)); transition:filter .12s ease; }
+  #helpButton:hover img { filter:drop-shadow(0 3px 6px rgba(0,0,0,.6)) brightness(1.15); }
+  #helpButton:active img { filter:drop-shadow(0 3px 6px rgba(0,0,0,.6)) brightness(.9); }
+
+  #helpBubble { position:fixed; right:20px; bottom:calc(var(--map-margin-y) + 92px); z-index:20;
+                max-width:220px; padding:9px 13px; font-family:var(--font-serif); font-size:13px;
+                color:var(--ink); background-image:url('/ui/parchment.png'); background-size:150px 150px;
+                border:2px solid #4a331c; border-radius:6px; box-shadow:0 6px 16px rgba(0,0,0,.5); }
+  #helpBubble.hidden { display:none; }
+  #helpBubble::after { content:''; position:absolute; right:26px; bottom:-9px; width:0; height:0;
+                       border:9px solid transparent; border-top-color:#4a331c; }
 </style>
 </head>
 <body>
@@ -139,6 +179,31 @@
   </div>
 
   <div id="winner"></div>
+
+  <div id="transitionBanner">
+    <img id="transitionSkeleton" src="/sprites/skeleton.png" alt="" />
+    <div id="transitionSign"></div>
+  </div>
+
+  <button id="helpButton" onclick="handleHelpClick()" title="Ayuda">
+    <img src="/sprites/help-icon.png" alt="Ayuda" />
+  </button>
+  <div id="helpBubble" class="hidden">¿Primera vez por aquí? Vuelve a pulsar para ver cómo se juega 👆</div>
+
+  <div id="helpModal" class="modalOverlay hidden">
+    <div class="modalBox">
+      <button class="modalClose" onclick="closeHelpModal()">✕</button>
+      <h2>¿Cómo se juega?</h2>
+      <div class="modalSubtitle">Mini-tutorial — las fases de la partida, una a una</div>
+      <div class="summarySection">
+        <div class="summaryLine"><strong>1. Reclutamiento</strong> — escribe <strong>!faccion1</strong>, <strong>!faccion2</strong>... en el chat para unirte a una facción. Solo se puede una vez por partida.</div>
+        <div class="summaryLine"><strong>2. Acción</strong> — cada ronda decides qué hace tu personaje: <strong>!ataque N</strong> (atacar a la facción N, solo si tenéis frontera), <strong>!defender</strong>, <strong>!industria</strong> (montas una fábrica) o <strong>!expansion</strong> (ocupas terreno neutral). Mira el botón "❓ Comandos" para el detalle de cada uno.</div>
+        <div class="summaryLine"><strong>3. Resumen</strong> — se cuenta qué pasó esa ronda: combates, conquistas, industria producida y bajas.</div>
+        <div class="summaryLine">Entre fase y fase, un esqueleto cruza la pantalla con un cartel avisando del cambio — es solo la señal de que ha empezado la siguiente.</div>
+        <div class="summaryLine">Esto se repite ronda tras ronda hasta que solo quede una facción con territorio: esa gana la partida.</div>
+      </div>
+    </div>
+  </div>
 
   <div id="matchEndModal" class="modalOverlay hidden">
     <div class="modalBox">
@@ -211,6 +276,75 @@
 
     renderEndBanner(state);
     handleMatchEndModal(state);
+    handleTransitionBanner(state);
+  }
+
+  // ---------------------------------------------------------------------
+  // Paron decorativo entre fases: el esqueleto camina de izquierda a
+  // derecha por el 1/5 inferior de la pantalla con un cartel anunciando el
+  // cambio (ver server/gameEngine.js `enterTransition()` — la ronda de
+  // verdad está parada en el servidor mientras `state.transition` no es
+  // null, esto solo lo anima). El recorrido dura lo que quede del timer
+  // real (`state.timerEndsAt`), así que si el admin fuerza el avance de
+  // fase el cartel desaparece en el acto en vez de quedarse a medias.
+  // ---------------------------------------------------------------------
+  let transitionActive = false;
+  let transitionRAF = null;
+
+  function transitionMessage(t) {
+    if (t.kind === 'first-action') return `¡Comienza la partida! Ronda ${t.round} — Fase de Acción`;
+    if (t.kind === 'summary') return `Fin de la ronda ${t.round} — Resumen`;
+    return `Ronda ${t.round} — Fase de Acción`;
+  }
+
+  function handleTransitionBanner(state) {
+    const bannerEl = document.getElementById('transitionBanner');
+    const t = state.transition;
+    if (!t) {
+      if (transitionActive) {
+        transitionActive = false;
+        bannerEl.classList.remove('visible');
+        if (transitionRAF) cancelAnimationFrame(transitionRAF);
+      }
+      return;
+    }
+
+    document.getElementById('transitionSign').textContent = transitionMessage(t);
+    bannerEl.classList.add('visible');
+    if (!transitionActive) {
+      transitionActive = true;
+      animateTransitionSkeleton(state);
+    }
+  }
+
+  function animateTransitionSkeleton(state) {
+    const skelEl = document.getElementById('transitionSkeleton');
+    const signEl = document.getElementById('transitionSign');
+    const startedAt = Date.now();
+    const endsAt = state.timerEndsAt || startedAt + 12000;
+    const totalMs = Math.max(1, endsAt - startedAt);
+
+    function frame() {
+      if (!transitionActive) return;
+      const frac = Math.min(1, (Date.now() - startedAt) / totalMs);
+      const skelWidth = skelEl.offsetWidth || 46;
+      const left = -skelWidth + frac * (window.innerWidth + skelWidth * 2);
+      skelEl.style.left = `${left}px`;
+      // El cartel se ancla al esqueleto pero sin salirse nunca de la
+      // pantalla (si no, el texto queda cortado por el borde cuando el
+      // esqueleto entra/sale por los lados) — se recorta al ancho visible.
+      const signWidth = signEl.offsetWidth || 0;
+      const desiredSignLeft = left + skelWidth * 0.85;
+      const margin = 10;
+      const signLeft = Math.min(
+        Math.max(desiredSignLeft, signWidth / 2 + margin),
+        window.innerWidth - signWidth / 2 - margin
+      );
+      signEl.style.left = `${signLeft}px`;
+      signEl.style.bottom = `${skelEl.offsetHeight * 0.82 + 8}px`;
+      if (frac < 1) transitionRAF = requestAnimationFrame(frame);
+    }
+    frame();
   }
 
   /**
@@ -511,6 +645,28 @@
 
   function closeCommands() {
     document.getElementById('commandsModal').classList.add('hidden');
+  }
+
+  // ---------------------------------------------------------------------
+  // Botón de ayuda: 1er click enseña un bocadillo con una frase corta,
+  // 2º click (con el bocadillo ya abierto) lo cierra y abre el mini-tutorial.
+  // Cerrar el tutorial reinicia la secuencia para la próxima vez.
+  // ---------------------------------------------------------------------
+  let helpBubbleShown = false;
+
+  function handleHelpClick() {
+    if (!helpBubbleShown) {
+      helpBubbleShown = true;
+      document.getElementById('helpBubble').classList.remove('hidden');
+    } else {
+      document.getElementById('helpBubble').classList.add('hidden');
+      document.getElementById('helpModal').classList.remove('hidden');
+    }
+  }
+
+  function closeHelpModal() {
+    document.getElementById('helpModal').classList.add('hidden');
+    helpBubbleShown = false;
   }
 
   function renderRoster(state) {

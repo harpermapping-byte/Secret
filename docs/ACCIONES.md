@@ -15,6 +15,7 @@ Convención: identificadores de código en inglés (estándar de programación),
 | `PHASE_ACTION` | `"action"` | Fase de Acción |
 | `PHASE_RESOLUTION` | `"resolution"` | Fase de Desarrollo/Combate |
 | `PHASE_SUMMARY` | `"summary"` | Fase de Resumen |
+| `PHASE_TRANSITION` | `"transition"` | Paron decorativo del esqueleto entre fases — ver sección 13 |
 | `PHASE_END` | `"end"` | Fin de partida |
 
 Solo `gameEngine.js` puede cambiar la fase actual. Ningún otro módulo la modifica directamente.
@@ -27,7 +28,7 @@ Solo `gameEngine.js` puede cambiar la fase actual. Ningún otro módulo la modif
 |---|---|---|
 | `!faccion<N>` | `ACTION_JOIN_FACTION` | `PHASE_RECRUITMENT` |
 | `!industria` | `ACTION_INDUSTRY` | `PHASE_ACTION` |
-| `!ataque <N>` | `ACTION_ATTACK` | `PHASE_ACTION` |
+| `!ataque <N>` | `ACTION_ATTACK` | `PHASE_ACTION`, y solo si la facción tiene alguna casilla que toque a la facción N (`factionsAreAdjacent()` en `server/rules/territory.js`) — si no hay frontera compartida se rechaza igual que un comando inválido cualquiera, ver sección 12 |
 | `!defender` | `ACTION_DEFEND` | `PHASE_ACTION` |
 | `!expansion` | `ACTION_EXPAND` | `PHASE_ACTION` (sin efecto si el mapa es de reparto total) |
 | `!especial` | `ACTION_SPECIAL` | `PHASE_ACTION` |
@@ -377,14 +378,43 @@ Detalles que costaron un par de vueltas y conviene no deshacer:
 - **Rutas por tierra, no líneas rectas** (`setRoute()` / `tilePathBetween()`): marchar en línea recta hacía que los soldados cruzaran bahías andando sobre el agua, porque el destino era válido pero el trayecto no. Ahora se busca el camino entre casillas vecinas (que por definición se tocan por tierra) y se va pasando por el centro de cada una, sin atravesar territorio ajeno. Es una búsqueda en anchura sobre unas pocas decenas de casillas: cuesta nada.
 - **El paseo también valida el trayecto** (`pathStaysInside()`), no solo el punto de destino, por lo mismo.
 - **Dos velocidades** (`WALK_SPEED_WANDER` 55 / `WALK_SPEED_MARCH` 300 px de mundo por segundo): a paso de paseo no daba tiempo a llegar a la frontera dentro de la fase de acción (medido: ~1.100px hasta un castillo, 16 segundos a la velocidad de paseo). Que además se note el cambio de ritmo al dar una orden es lo que hace legible de un vistazo quién va a algún sitio y quién no.
-- **Frontera "de mentira" cuando no hay frontera real** (`coastFacing()`): en el mapa del mundo es muy habitual que dos facciones no se toquen por tierra (están en continentes distintos y la adyacencia del juego solo existe entre casillas que se tocan píxel a píxel). En ese caso el atacante va al borde de su territorio que **mira** hacia el enemigo, que se lee como "juntándose en la costa para embarcar", en vez de quedarse paseando como si no hubiera dado ninguna orden. Ver la nota sobre continentes en la sección de pendientes.
+- **`coastFacing()` (código defensivo, ya no se puede disparar en la práctica)**: `borderPointWith()` cae aquí si no encuentra frontera real entre las dos facciones. Desde que `!ataque <N>` exige frontera compartida para ser aceptado (sección 12), el servidor nunca manda `action: 'ATTACK'` con una facción no adyacente — así que este camino se queda sin usar en un cliente normal. Se deja tal cual (no estorba, y es la red de seguridad si algún día se permitiera ordenar un ataque sin frontera por otra vía) en vez de borrarlo.
 - **El triángulo escala con el mundo** (es un personaje sobre el suelo, como los árboles) pero **el nombre va a tamaño de pantalla fijo**, y solo se dibuja por encima de cierto zoom: escalarlo con el mundo lo hace ilegible de lejos y gigante de cerca, y dibujar texto es de largo lo más caro de esta capa.
 - `mapCtrl.getPlayerPositions()` devuelve dónde está cada marcador ahora mismo (píxeles de mundo). Lo usa el buscador de jugadores del panel para saltar a donde está uno **en ese momento**, no a donde estaba en el último cambio de estado.
 
-## 12. Pendiente de documentar aquí cuando se implemente
+## 12. Atacar exige frontera compartida (`factionsAreAdjacent()`)
 
-- Eventos aleatorios (v2, no en el alcance de v1).
-- Plantillas de mapa reales con arte (v1 usa un anillo generado, ver `mapTemplates.js`).
-- Efectos del marcador de jugador más allá del movimiento (algo al hacer industria, algo al morir) — el **movimiento** según el comando ya está hecho, ver sección 11 "Caminantes".
-- **Facciones en continentes distintos**: la adyacencia del juego solo existe entre casillas que se tocan por tierra, así que en el mapa del mundo real es habitual que dos facciones no compartan **ninguna** frontera (medido en varias partidas de prueba: 0 pares de casillas vecinas entre dos facciones, incluso en modo de reparto total, donde las bandas caen en América / África-Europa / Asia). Consecuencia: pueden atacarse (el combate se resuelve y causa bajas) pero **nunca conquistarse territorio**, porque `pickBorderTileToConquer()` no encuentra casilla fronteriza. La partida no se queda bloqueada del todo — una facción puede seguir siendo eliminada por bajas —, pero la conquista entre continentes es imposible. Pendiente de decidir con el usuario: opciones serían permitir ataques por mar (adyacencia entre casillas costeras cercanas aunque no se toquen), repartir las facciones dentro de un mismo continente, o dejarlo así a propósito y que la expansión por territorio neutral sea el camino para encontrarse.
+Decisión tomada para el problema de "facciones en continentes distintos" que estaba pendiente aquí: **no** hay ataques por mar. `!ataque <N>` solo es válido si la facción de quien escribe tiene alguna casilla que toque (por tierra, casilla-con-casilla) a alguna casilla de la facción N — se comprueba en `castAction()` (`server/gameEngine.js`) con `factionsAreAdjacent(match, factionNumberA, factionNumberB)` (`server/rules/territory.js`, ya existía y se reutiliza tal cual). Si no hay frontera, el comando se rechaza exactamente igual que cualquier otro comando inválido (mismo `pushChatLog` con `ok:false`, no hay caso especial ni aviso distinto en el chat): es como si el jugador no hubiera escrito nada esa ronda.
+
+Consecuencia directa para el diseño: **`!expansion` es el único camino** para que dos facciones sin frontera lleguen a poder atacarse — conquistando territorio neutral hasta que sus fronteras se toquen. Esto también simplifica el lado del cliente: como el servidor nunca acepta ni difunde un `ATTACK` hacia una facción no adyacente, el marcador de un jugador nunca recibe esa orden en un caso así (ver la nota sobre `coastFacing()` en la sección 11, que queda como código defensivo sin usarse en la práctica).
+
+## 13. Paron decorativo entre fases: el esqueleto con el cartel
+
+Entre cada cambio de fase importante hay una pausa de verdad de 10-15s (`TRANSITION_MS` = 12000ms en `server/gameEngine.js`) en la que un esqueleto cruza la pantalla de izquierda a derecha con un cartel anunciando el cambio. **No es solo un adorno del cliente**: la ronda deja de avanzar en el servidor mientras dura, así que ningún comando de chat tiene efecto durante ese rato.
+
+**Cómo se para la ronda de verdad (`PHASE_TRANSITION`, sección 1):** `enterTransition(kind, round, onDone)` en `server/gameEngine.js` es el único sitio que entra en esta fase. Pone `match.phase = PHASE_TRANSITION`, guarda `match.transition = { kind, round }` y arranca el timer genérico de siempre (`startTimer`/`clearTimer`/`forceAdvancePhase`, el mismo mecanismo que ya usaban el resto de fases) apuntando a `onDone`, que es quien hace el cambio de fase de verdad cuando expira. Como ninguna acción de chat tiene `PHASE_TRANSITION` como fase requerida (`VALID_PHASE_BY_ACTION` en `server/commands.js`), el rechazo de comandos durante el paron sale gratis del mecanismo que ya existía — no hizo falta ningún caso especial. Se usa en los tres puntos que pidió el streamer:
+
+| Disparador | `kind` | Cartel que enseña |
+|---|---|---|
+| Cierra Reclutamiento → antes de la Ronda 1 de Acción | `'first-action'` | "¡Comienza la partida! Ronda 1 — Fase de Acción" |
+| Se resuelve el combate → antes de enseñar el Resumen | `'summary'` | "Fin de la ronda N — Resumen" |
+| Termina el Resumen → antes de la siguiente ronda de Acción | `'next-round'` | "Ronda N — Fase de Acción" |
+
+`forceAdvancePhase()` (el botón de saltar fase del admin) funciona igual que siempre: como llama a lo que sea que esté armado en `match.timer.onExpire`, si se usa durante el paron simplemente lo corta ahí (el esqueleto desaparece en el acto) y entra en la fase real; si se usa otra vez desde esa fase real, entra en el siguiente paron. No hace falta ningún caso especial para el admin.
+
+**Cliente** (`public/index.html`): `state.transition` viaja dentro de `getPublicState()` (`null` cuando no hay paron en curso). `handleTransitionBanner()` muestra/oculta `#transitionBanner` según ese campo y `transitionMessage()` decide el texto según `kind`/`round` — **el texto NO está horneado en el PNG**, se dibuja en HTML/CSS encima, para poder tener los 3 mensajes con una sola imagen. `animateTransitionSkeleton()` anima el recorrido usando `state.timerEndsAt` (el mismo campo genérico que ya usa la cuenta atrás de cualquier fase) para que el paseo dure exactamente lo que quede de verdad del paron — si el admin lo corta antes, el cartel desaparece en vez de quedarse a medias. El cartel se recoloca cada frame pegado al esqueleto pero **recortado para no salirse nunca de la pantalla** (si no, el texto queda cortado por el borde cuando el esqueleto entra o sale por los lados).
+
+Franja fija en el **1/5 inferior de la pantalla** (`height:20vh`), por encima de todo lo demás pero con `pointer-events:none` en toda la franja: es decorativo, nunca bloquea clics en lo que tape visualmente (mapa, botones de zoom) mientras dura.
+
+**Sustituir el placeholder**: `public/sprites/skeleton.png` (64×110, fondo transparente), generado por `tools/bakeSpritePlaceholders.js` igual que el resto de sprites — sobrescribe el archivo y recarga, no hace falta tocar código. Si el arte nuevo tiene otra proporción, el punto donde se ancla el cartel (`skelWidth * 0.85` en `animateTransitionSkeleton()`, `public/index.html`) puede necesitar un ajuste fino.
+
+## 14. Botón de ayuda / mini-tutorial
+
+Abajo a la derecha, `#helpButton` en `public/index.html`: un icono suelto de 64×64 (el doble que un botón de cabecera normal), con fondo transparente **a propósito** — no lleva la chapa de latón de `.headerBtn` porque es un icono independiente pensado para poder sustituirse por cualquier otro sin tocar CSS.
+
+Secuencia de dos clics (`handleHelpClick()`):
+1. Primer clic → aparece un bocadillo corto (`#helpBubble`, con su "pico" apuntando al botón) invitando a pulsar otra vez.
+2. Segundo clic → se cierra el bocadillo y se abre `#helpModal`, un popup de pergamino (mismo estilo que el resto de popups del proyecto) con un mini-tutorial de las 3 fases de la partida (Reclutamiento / Acción / Resumen) y la mención al esqueleto de la sección 13. Cerrar el modal reinicia la secuencia: la próxima vez que se pulse el botón, vuelve a enseñar primero el bocadillo.
+
+**Sustituir el placeholder**: `public/sprites/help-icon.png` (64×64, fondo transparente, medallón dorado con una interrogación en bloques), generado por `tools/bakeSpritePlaceholders.js`. Sobrescribe el archivo y recarga.
 - "Opción A" del mapa: en vez de mandar `cellTileIds` empaquetado (sección 6, "opción B", la que sí está implementada), el servidor renderizaría el mapa como una imagen (PNG, con un codificador escrito a mano sobre el `zlib` nativo de Node, sin dependencias nuevas) y los clientes cargarían esa imagen por HTTP en vez de recibir datos crudos por el WebSocket — comprimiría mucho más que el empaquetado actual (aprovecha las zonas de color plano) y movería el coste de "pintar" del navegador de cada espectador al servidor, una sola vez. Discutido con el usuario, pendiente de decidir si se implementa tras probar la opción B. **Actualización:** el codificador PNG hecho a mano de esta idea ya existe y se usa (`tools/pngEncoder.js`, ver sección 8), pero de momento solo para el terreno horneado — no se ha aplicado todavía a `cellTileIds` en tiempo real.
