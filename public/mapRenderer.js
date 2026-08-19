@@ -903,6 +903,12 @@
   // Por debajo de esta escala no se escriben los nombres: a vista de planeta
   // se solapan todos y dibujar texto es, de largo, lo mas caro de esta capa.
   const WALKER_NAME_MIN_SCALE = 0.5;
+  // Icono junto al nombre segun la orden que tenga puesta esa ronda (ver
+  // walker.action, que ya se usaba para decidir a donde caminar — aqui solo
+  // se reutiliza para pintarlo). Sin entrada = sin icono (paseando, sin
+  // orden). Se pidio expresamente que expansion NO fuera un arco: al ser
+  // "ganar terreno" se usa una banderita, no un icono de ataque a distancia.
+  const ACTION_ICONS = { ATTACK: ' ⚔️', DEFEND: ' 🛡️', INDUSTRY: ' ⚒️', EXPAND: ' 🚩' };
 
   /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */
   function hash01(x, y, salt) {
@@ -1716,11 +1722,12 @@
         if (showNames) {
           // Sombra fina detras del nombre: sobre terreno claro (desierto,
           // nieve) el texto blanco solo se perdia del todo.
+          const label = walker.username + (ACTION_ICONS[walker.action] || '');
           ctx.lineWidth = 3;
           ctx.strokeStyle = 'rgba(6,18,26,.85)';
-          ctx.strokeText(walker.username, sx, sy - drawH - 3);
+          ctx.strokeText(label, sx, sy - drawH - 3);
           ctx.fillStyle = '#f5fbff';
-          ctx.fillText(walker.username, sx, sy - drawH - 3);
+          ctx.fillText(label, sx, sy - drawH - 3);
         }
       });
     }
