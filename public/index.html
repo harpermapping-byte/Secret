@@ -98,7 +98,7 @@
   #transitionBanner { position:fixed; left:0; right:0; bottom:0; height:20vh; z-index:21;
                        pointer-events:none; overflow:hidden; display:none; }
   #transitionBanner.visible { display:block; }
-  #transitionSkeleton { position:absolute; bottom:8%; height:60%; width:auto;
+  #transitionSkeleton { position:absolute; bottom:0; height:60%; width:auto;
                         image-rendering:pixelated; }
   #transitionSign { position:absolute; white-space:nowrap; transform:translateX(-50%);
                     padding:6px 14px; font-family:var(--font-title); font-size:15px;
@@ -338,11 +338,30 @@
     const endsAt = state.timerEndsAt || startedAt + 12000;
     const totalMs = Math.max(1, endsAt - startedAt);
 
+    // Entra por la izquierda, avanza solo 1/5 de todo el recorrido posible
+    // (lo justo para que se vea el cartel entero) y se queda ahí quieto la
+    // mayor parte del paron — luego vuelve a salir por ese mismo lado, no
+    // sigue hacia la derecha. Ver docs/ACCIONES.md sección 17.
+    const ENTER_FRACTION = 0.15;
+    const EXIT_FRACTION = 0.15;
+
     function frame() {
       if (!transitionActive) return;
       const frac = Math.min(1, (Date.now() - startedAt) / totalMs);
       const skelWidth = skelEl.offsetWidth || 46;
-      const left = -skelWidth + frac * (window.innerWidth + skelWidth * 2);
+      const totalTravel = window.innerWidth + skelWidth * 2;
+      const offscreenLeft = -skelWidth;
+      const stopAt = offscreenLeft + totalTravel * 0.2; // "entorno a 1/5 de todo el recorrido"
+
+      let left;
+      if (frac < ENTER_FRACTION) {
+        left = offscreenLeft + (frac / ENTER_FRACTION) * (stopAt - offscreenLeft);
+      } else if (frac < 1 - EXIT_FRACTION) {
+        left = stopAt;
+      } else {
+        const t = (frac - (1 - EXIT_FRACTION)) / EXIT_FRACTION;
+        left = stopAt + t * (offscreenLeft - stopAt);
+      }
       skelEl.style.left = `${left}px`;
       // El cartel se ancla al esqueleto pero sin salirse nunca de la
       // pantalla (si no, el texto queda cortado por el borde cuando el
