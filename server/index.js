@@ -184,6 +184,6 @@ wsApp.onConnect((client) => {
 });
 
 wsApp.server.listen(PORT, () => {
-  console.log(`Condejorge Wars escuchando en http://localhost:${PORT}`);
+  console.log(`Age of Conde escuchando en http://localhost:${PORT}`);
   console.log(`Panel admin: http://localhost:${PORT}/admin (contraseña: ${ADMIN_PASSWORD})`);
 });
