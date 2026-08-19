@@ -58,6 +58,15 @@ function notifyStateChange() {
 // ---------------------------------------------------------------------------
 
 function createMatch(config) {
+  // Matar el timer de la partida ANTERIOR antes de reemplazarla. Sin esto, el
+  // timer pendiente de la partida vieja (p.ej. el de la fase de resumen) sigue
+  // corriendo, salta cuando ya existe la partida nueva y revienta contra su
+  // `assertPhase` — y como salta dentro de un setTimeout, la excepcion no la
+  // recoge nadie y se lleva el proceso del servidor por delante. Se dispara
+  // con el flujo normal de "🔄 Nueva partida" del panel de admin.
+  // `clearTimer()` lee `match`, asi que tiene que ir antes de reasignarlo.
+  clearTimer();
+
   const normalizedConfig = normalizeConfig(config);
   const factions = normalizedConfig.factions.map((f, index) => ({
     id: index + 1,
@@ -116,7 +125,9 @@ function normalizeConfig(config) {
     map: { tileCount: config.map?.tileCount ?? 20, mode: config.map?.mode ?? 'neutral' },
     alliancesEnabled: !!config.alliancesEnabled,
     thresholds: {
-      expandPercent: config.thresholds?.expandPercent ?? 25,
+      // `!expansion` ya NO tiene umbral de porcentaje: lo que decide cuantas
+      // casillas se ganan es el numero de votantes (ver rules/expansion.js,
+      // tilesWonByVotes). Alianza y especial si siguen siendo por porcentaje.
       alliancePercent: config.thresholds?.alliancePercent ?? 50,
       specialPercent: config.thresholds?.specialPercent ?? 75,
     },
@@ -433,6 +444,7 @@ function getPublicState() {
       timerPaused: false,
     };
   }
+  const liveCounts = countLiveActions();
   return {
     phase: match.phase,
     round: match.round,
@@ -445,8 +457,19 @@ function getPublicState() {
       territoryCount: f.territoryIds.length,
       killsCaused: f.killsCaused,
       wondersCount: 0, // reservado para v2 (maravillas), ver docs/GDD "Alcance de v1 vs futuro"
+      // Recuento EN VIVO de la fase de accion en curso (ver countLiveActions):
+      // cuanta gente de esta faccion esta defendiendo, y cuantos atacantes
+      // tiene encima ahora mismo. El mapa los pinta como escudo verde / espada
+      // roja sobre el territorio de la faccion — ver public/mapRenderer.js.
+      defendersThisRound: liveCounts.defendersByFaction.get(f.number) || 0,
+      incomingAttackersThisRound: liveCounts.incomingAttackersByFaction.get(f.number) || 0,
     })),
-    tiles: match.tiles.map((t) => ({ id: t.id, ownerFactionNumber: t.ownerFactionNumber, neutral: t.neutral })),
+    tiles: match.tiles.map((t) => ({
+      id: t.id,
+      ownerFactionNumber: t.ownerFactionNumber,
+      neutral: t.neutral,
+      industryCount: t.industryCount,
+    })),
     players: [...match.players.values()].map((p) => ({
       userId: p.userId,
       username: p.username,
@@ -465,6 +488,39 @@ function getPublicState() {
     // `public/matchTimer.js` y docs/ACCIONES.md.
     timerPaused: !!match.timer?.paused,
   };
+}
+
+/**
+ * Recuento EN VIVO de los votos de ataque/defensa de la fase de accion que
+ * este ahora mismo abierta, para que el mapa pueda enseñar el escudo de
+ * defensores y la espada de atacantes MIENTRAS la gente escribe en el chat
+ * (no al resolver la ronda). Solo cuenta jugadores vivos, y solo durante
+ * `PHASE_ACTION`: fuera de esa fase los votos ya no significan nada (o son
+ * los de la ronda pasada, sin limpiar todavia), asi que se devuelve vacio y
+ * los iconos desaparecen del mapa.
+ *
+ * No reutiliza `tallyActions()` a proposito: aquella construye el contexto
+ * completo de resolucion (buckets por tipo, inactivos, eventos de ronda) y
+ * ademas suma `participation` a cada jugador — llamarla desde aqui, que se
+ * ejecuta en CADA envio de estado, corromperia esas cuentas.
+ */
+function countLiveActions() {
+  const defendersByFaction = new Map();
+  const incomingAttackersByFaction = new Map();
+  if (!match || match.phase !== PHASE_ACTION) return { defendersByFaction, incomingAttackersByFaction };
+
+  for (const [userId, action] of match.roundActions) {
+    const player = match.players.get(userId);
+    if (!player || !player.alive) continue;
+
+    if (action.type === ACTION_DEFEND) {
+      defendersByFaction.set(player.factionNumber, (defendersByFaction.get(player.factionNumber) || 0) + 1);
+    } else if (action.type === ACTION_ATTACK && action.targetFactionNumber != null) {
+      const target = action.targetFactionNumber;
+      incomingAttackersByFaction.set(target, (incomingAttackersByFaction.get(target) || 0) + 1);
+    }
+  }
+  return { defendersByFaction, incomingAttackersByFaction };
 }
 
 function getAdminState() {

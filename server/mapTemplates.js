@@ -22,7 +22,7 @@
  * (sentinel `OCEAN`). La adyacencia real sale de recorrer el raster una vez y
  * anotar qué territorios de tierra quedan pegados pixel con pixel.
  *
- * Forma de una Tile: { id, neighborIds: [id...], ownerFactionNumber: number|null, neutral: bool }
+ * Forma de una Tile: { id, neighborIds: [id...], ownerFactionNumber: number|null, neutral: bool, industryCount: number }
  * Forma de mapLayout (estático, no cambia durante la partida, se manda al cliente
  * una única vez para poder dibujar el mapa): { cols, rows, cellTileIds: [tileId por celda del raster, o OCEAN], centroids: [{x,y} por tile] }
  *
@@ -125,6 +125,12 @@ function generateMap({ tileCount, factionCount, mode }) {
       neighborIds: [...neighborSets[i]],
       ownerFactionNumber: owner,
       neutral: owner === null,
+      // Edificios de industria levantados sobre esta casilla (uno por cada
+      // `!industria` que haya salido aqui, ver rules/industry.js). Vive en la
+      // CASILLA y no en la faccion a proposito: asi, cuando la casilla se
+      // conquista, su industria se va con ella al nuevo dueño sin codigo
+      // extra — ver docs/GDD seccion 6 "Industria".
+      industryCount: 0,
     });
   }
 

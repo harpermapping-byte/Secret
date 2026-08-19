@@ -91,6 +91,27 @@
   const MARKER_RING_STEP_PX = 24;
   const MARKER_SIZE = 7; // "radio" del triangulo del marcador, ya en px de pantalla
 
+  // Placeholder de edificio de industria (ver paintIndustryMarkers): cuadrado
+  // amarillo semitransparente, a sustituir mas adelante por un PNG de campo de
+  // trigo/herreria. INDUSTRY_SIZE va en px de pantalla; INDUSTRY_STEP en
+  // celdas de la rejilla del mapa (como los centroides), porque es una
+  // separacion sobre el mapa, no sobre la pantalla.
+  const INDUSTRY_SIZE = 9;
+  const INDUSTRY_STEP = 13;
+  const INDUSTRY_PER_ROW = 4;
+  const INDUSTRY_FILL = 'rgba(240, 206, 62, .62)';
+  const INDUSTRY_STROKE = 'rgba(90, 66, 8, .85)';
+
+  // Chapitas de combate en vivo (escudo de defensores / espada de atacantes,
+  // ver paintCombatBadges). BADGE_OFFSET_Y va en celdas de rejilla: cuanto se
+  // suben respecto al centro de la faccion para no taparse con la nube de
+  // marcadores de jugador.
+  const BADGE_W = 34;
+  const BADGE_H = 16;
+  const BADGE_OFFSET_Y = 46;
+  const BADGE_DEFEND_BG = 'rgba(46, 138, 62, .92)';
+  const BADGE_ATTACK_BG = 'rgba(178, 44, 34, .92)';
+
   // Transparencia (0-255) de cada tipo de celda al pintar el raster de
   // territorios sobre el terreno horneado (`terrainBgEl`) — ver comentario
   // de cabecera. El océano se deja del todo transparente (el terreno ya
@@ -112,6 +133,7 @@
     let lastPlayers = null; // mensajes WS no esta garantizado en todos los casos — ver docs/ACCIONES.md seccion 5).
     let lastRasterFingerprint = null; // ver paint(): evita repintar el raster si la propiedad de las casillas no cambio
     let lastMarkerPositions = new Map(); // userId -> {x,y,color,username}, cacheado para focusOnPlayer()
+    let overlayRepaintPending = false; // ver scheduleOverlayRepaint()
 
     // --- capa de objetos (arboles/rocas/etc.), ver createObjectLayer() mas abajo ---
     const objectLayer = objectsEl ? createObjectLayer(objectsEl, viewportEl) : null;
@@ -343,7 +365,100 @@
       const ctx = markersEl.getContext('2d');
       ctx.clearRect(0, 0, markersEl.width, markersEl.height);
       if (showLabels) paintTileLabels(ctx, tiles);
+      paintIndustryMarkers(ctx, tiles);
       paintPlayerMarkers(ctx, tiles, factions, players);
+      paintCombatBadges(ctx, tiles, factions);
+    }
+
+    /**
+     * Un cuadrado amarillo semitransparente por edificio de industria en pie
+     * sobre cada casilla (`tile.industryCount`, ver server/rules/industry.js).
+     * Placeholder a proposito: ya sustituira un PNG de campo de trigo/herreria.
+     * Se dibujan en cuadricula alrededor del centroide de SU casilla (no del
+     * centro de la faccion) porque la industria pertenece a la casilla: si la
+     * casilla se conquista, el cuadrado se queda donde esta y pasa a contar
+     * para el nuevo dueño, que es justo lo que hace el motor.
+     */
+    function paintIndustryMarkers(ctx, tiles) {
+      const size = screenPx(INDUSTRY_SIZE);
+      const step = screenPx(INDUSTRY_STEP);
+      const half = size / 2;
+      ctx.lineWidth = screenPx(1);
+      tiles.forEach((t) => {
+        const count = t.industryCount || 0;
+        if (count <= 0) return;
+        const c = layout.centroids[t.id];
+        if (!c) return;
+        for (let i = 0; i < count; i++) {
+          // Cuadricula compacta centrada en el centroide: primero se llena una
+          // fila de INDUSTRY_PER_ROW y se va bajando, para que 10 industrias
+          // en una casilla no se solapen en el mismo pixel.
+          const col = i % INDUSTRY_PER_ROW;
+          const row = Math.floor(i / INDUSTRY_PER_ROW);
+          const cx = c.x * BLOCK_PX + (col - (INDUSTRY_PER_ROW - 1) / 2) * step;
+          const cy = c.y * BLOCK_PX + (row + 1) * step;
+          ctx.fillStyle = INDUSTRY_FILL;
+          ctx.fillRect(cx - half, cy - half, size, size);
+          ctx.strokeStyle = INDUSTRY_STROKE;
+          ctx.strokeRect(cx - half, cy - half, size, size);
+        }
+      });
+    }
+
+    /**
+     * Escudo verde con el numero de defensores y espada roja con el numero de
+     * atacantes que tiene encima cada faccion, EN VIVO durante la fase de
+     * accion (el servidor los recalcula en cada comando de chat, ver
+     * countLiveActions() en server/gameEngine.js). Se dibujan sobre el
+     * territorio ancla de la faccion, encima de sus marcadores de jugador, y
+     * desaparecen solos al salir de la fase de accion porque el servidor manda
+     * los contadores a 0.
+     */
+    function paintCombatBadges(ctx, tiles, factions) {
+      (factions || []).forEach((f) => {
+        const defenders = f.defendersThisRound || 0;
+        const attackers = f.incomingAttackersThisRound || 0;
+        if (defenders <= 0 && attackers <= 0) return;
+
+        const centroid = computeFactionCentroid(tiles, f.number);
+        if (!centroid) return;
+
+        // Los dos van en fila sobre el centro de la faccion, por encima de la
+        // nube de marcadores de jugador (de ahi el desplazamiento hacia
+        // arriba) — si solo hay uno de los dos, queda centrado el solo.
+        const both = defenders > 0 && attackers > 0;
+        const baseX = centroid.x * BLOCK_PX;
+        const baseY = centroid.y * BLOCK_PX - screenPx(BADGE_OFFSET_Y);
+        const gap = screenPx(BADGE_W) * 0.72;
+
+        if (defenders > 0) drawBadge(ctx, both ? baseX - gap : baseX, baseY, '🛡', defenders, BADGE_DEFEND_BG);
+        if (attackers > 0) drawBadge(ctx, both ? baseX + gap : baseX, baseY, '⚔', attackers, BADGE_ATTACK_BG);
+      });
+    }
+
+    /** Chapita redondeada con un icono y un numero — usada por paintCombatBadges. */
+    function drawBadge(ctx, cx, cy, icon, count, bg) {
+      const w = screenPx(BADGE_W), h = screenPx(BADGE_H), r = screenPx(3);
+      const x = cx - w / 2, y = cy - h / 2;
+
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+      ctx.fillStyle = bg;
+      ctx.fill();
+      ctx.lineWidth = screenPx(1);
+      ctx.strokeStyle = 'rgba(4,20,28,.85)';
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.font = `${h * 0.62}px system-ui, sans-serif`;
+      ctx.fillText(`${icon}${count}`, cx, cy);
     }
 
     function paintTileLabels(ctx, tiles) {
@@ -515,6 +630,43 @@
       // tamaño del viewport que se redibuja el mismo con la vista actual, ver
       // createObjectLayer()/drawObjectLayer() mas abajo.
       if (objectLayer) objectLayer.onViewChanged(mapView);
+      // Los indicadores de la capa de marcadores (escudo/espada e industrias)
+      // se dibujan a tamaño de PANTALLA constante, o sea compensando el zoom
+      // — al cambiar la escala hay que volver a dibujarlos con el nuevo
+      // factor, si no se quedarian con el tamaño del zoom anterior. Ver
+      // screenPx() y scheduleOverlayRepaint().
+      scheduleOverlayRepaint();
+    }
+
+    /**
+     * Convierte un tamaño en PIXELES DE PANTALLA al tamaño que hay que dibujar
+     * en la capa de marcadores para que se vea asi de grande en pantalla.
+     *
+     * `markersEl` lleva el mismo `transform: scale()` que el mapa, asi que
+     * todo lo que se pinta en el se encoge/agranda con el zoom. Para el mapa
+     * (territorios, terreno) eso es lo que queremos; para los indicadores de
+     * "de un vistazo" (escudo de defensores, espada de atacantes, cuadros de
+     * industria) NO: al alejar el zoom quedaban de 4px y no se leian, que es
+     * justo lo contrario de para lo que estan. Dividiendo por la escala actual
+     * se quedan del mismo tamaño en pantalla a cualquier zoom, como los pines
+     * de un mapa de verdad.
+     */
+    function screenPx(px) {
+      return px / (mapView.scale || 1);
+    }
+
+    /**
+     * Repinta solo la capa de marcadores (barata: proporcional a jugadores y
+     * casillas, no a celdas del raster) como mucho una vez por frame. La capa
+     * cara del raster de territorios no se toca aqui.
+     */
+    function scheduleOverlayRepaint() {
+      if (!markersEl || !layout || !lastTiles || overlayRepaintPending) return;
+      overlayRepaintPending = true;
+      requestAnimationFrame(() => {
+        overlayRepaintPending = false;
+        if (layout && lastTiles) paintOverlay(lastTiles, lastFactions, lastPlayers);
+      });
     }
 
     /**

@@ -4,8 +4,14 @@ const { ACTION_INDUSTRY } = require('../commands');
 const { applyCasualties, shuffle } = require('./shared');
 const { factionsAreAdjacent, factionByNumber, checkFactionElimination } = require('./territory');
 
-// Valores de ejemplo, pendientes de afinar (ver docs/GDD seccion 11).
-const PASSIVE_INDUSTRY_PER_TERRITORY = 0.2;
+// Cada casilla controlada rinde esto por ronda por el mero hecho de tenerla.
+const PASSIVE_INDUSTRY_PER_TERRITORY = 0.1;
+// Cada EDIFICIO de industria (uno por cada `!industria` votado, ver
+// buildIndustries()) suma esto por ronda, ademas del rendimiento pasivo de su
+// casilla. Como el edificio vive en la casilla (tile.industryCount, ver
+// mapTemplates.js), conquistar una casilla con 1 industria le pasa al nuevo
+// dueño los 0.1 + 0.5 = 0.6 completos.
+const INDUSTRY_PER_BUILDING = 0.5;
 const BOMBARDEO_DAMAGE = 3;
 const OPESPECIAL_DAMAGE = 3;
 
@@ -18,17 +24,25 @@ const INDUSTRY_TIERS = [
 ];
 
 /**
- * Suma la industria de la ronda por faccion y desbloquea, en orden, las
- * mejoras cuyo umbral se alcance. Cada mejora se aplica una unica vez
- * (ver docs/GDD seccion 6 "Industria y las 4 mejoras").
+ * Levanta los edificios de industria votados esta ronda, suma la produccion
+ * de cada faccion y desbloquea, en orden, las mejoras cuyo umbral se alcance.
+ * Cada mejora se aplica una unica vez (ver docs/GDD seccion 6 "Industria y
+ * las 4 mejoras").
+ *
+ * Produccion de una faccion = (casillas x PASSIVE_INDUSTRY_PER_TERRITORY) +
+ * (edificios de industria en sus casillas x INDUSTRY_PER_BUILDING). Los
+ * edificios construidos esta misma ronda ya cuentan para esta ronda.
  */
 function resolveIndustry(match, context) {
   for (const faction of match.factions) {
     if (faction.territoryIds.length === 0) continue;
 
     const votes = context.votesByFactionAndType.get(faction.number)[ACTION_INDUSTRY].length;
+    buildIndustries(match, context, faction, votes);
+
     const passive = faction.territoryIds.length * PASSIVE_INDUSTRY_PER_TERRITORY;
-    const gained = faction.industryPenaltyActive ? 0 : votes + passive;
+    const fromBuildings = countFactionIndustries(match, faction) * INDUSTRY_PER_BUILDING;
+    const gained = faction.industryPenaltyActive ? 0 : passive + fromBuildings;
     faction.industryPenaltyActive = false;
 
     faction.industry += gained;
@@ -42,6 +56,29 @@ function resolveIndustry(match, context) {
       faction.industryTierIndex++;
     }
   }
+}
+
+/**
+ * Levanta un edificio de industria por cada `!industria` votado, cada uno en
+ * una casilla AL AZAR de las que la faccion controla ahora mismo (varios
+ * votos pueden caer en la misma casilla, igual que se pueden amontonar varias
+ * fabricas en una misma region). Se llama con el reparto de territorio ya
+ * resuelto de esta ronda, asi que nunca construye en una casilla que la
+ * faccion acaba de perder.
+ */
+function buildIndustries(match, context, faction, count) {
+  if (count <= 0) return;
+  for (let i = 0; i < count; i++) {
+    const tileId = faction.territoryIds[Math.floor(Math.random() * faction.territoryIds.length)];
+    match.tiles[tileId].industryCount += 1;
+  }
+}
+
+/** Edificios de industria en pie sobre las casillas que la faccion controla ahora mismo. */
+function countFactionIndustries(match, faction) {
+  let total = 0;
+  for (const tileId of faction.territoryIds) total += match.tiles[tileId].industryCount;
+  return total;
 }
 
 function applyIndustryTier(match, context, faction, tierKey) {
@@ -95,4 +132,4 @@ function applyOperacionEspecial(match, context, faction) {
   checkFactionElimination(match, context, target.number, faction.number);
 }
 
-module.exports = { resolveIndustry, INDUSTRY_TIERS };
+module.exports = { resolveIndustry, INDUSTRY_TIERS, PASSIVE_INDUSTRY_PER_TERRITORY, INDUSTRY_PER_BUILDING };

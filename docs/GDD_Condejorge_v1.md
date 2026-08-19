@@ -65,7 +65,7 @@ Una vez pulsado "Iniciar partida", **nada de esto se puede volver a tocar**: no 
 | Comando | Cuándo | Qué hace |
 |---|---|---|
 | `!faccion1`, `!faccion2`... | Solo durante la Fase de Reclutamiento | Te une a esa facción. Puedes cambiar de facción mientras dure el reclutamiento (cuenta tu último comando); al cerrarse esa fase, el roster queda fijo para el resto de la partida. |
-| `!industria` | Fase de Acción | Aportas a la producción de recursos de tu facción. |
+| `!industria` | Fase de Acción | Levantas una industria en un terreno al azar de tu facción: +0.5 de producción por ronda, para siempre (y se pierde si te conquistan ese terreno). |
 | `!ataque <nº facción>` | Fase de Acción | P.ej. `!ataque 2`. Mismo formato que `!alianza`: solo el número de la facción objetivo. Atacas a esa facción; el sistema dirige el golpe automáticamente al punto fronterizo más débil. Inválido si hay una alianza activa esa ronda entre tu facción y la atacada. |
 | `!defender` | Fase de Acción | Refuerzas la defensa de tu facción esa ronda. |
 | `!expansion` | Fase de Acción | Intentas conquistar territorio neutral (bárbaros) fronterizo. Sin efecto si la partida se configuró con reparto total (sin terreno gris). |
@@ -94,10 +94,16 @@ No hay comandos por botón en la web para el público: los botones/paneles inter
 Varias plantillas prediseñadas por tamaño (varias variantes de 20 casillas, varias de 50, etc.), cada una con su cuadrícula de adyacencias ya definida. El admin elige tamaño y variante en la Fase 0.
 
 ### Territorio neutral ("bárbaros")
-En el modo de zonas pequeñas, las casillas sin dueño tienen una guarnición fija (no se defiende con chat). Se conquistan cuando el % configurado de usuarios activos de una facción vota `!expansion` en la misma ronda; el sistema elige automáticamente la casilla neutral fronteriza a conquistar.
+En el modo de zonas pequeñas, las casillas sin dueño se ocupan con `!expansion`, y el coste es **2 votantes por cada casilla nueva**, con un mínimo de 1 casilla si vota alguien: 1 o 2 votos dan 1 casilla, 4 votos dan 2, 6 dan 3, y así. No hay umbral de porcentaje. El sistema elige automáticamente, al azar, entre las casillas neutrales que tocan la frontera de esa facción, recalculando la frontera tras cada conquista (así se puede avanzar en cadena hacia dentro del territorio neutral, no solo repartirse por el borde inicial).
 
 ### Industria y las 4 mejoras (progresión fija)
-Cada `!industria` único suma recursos a la facción (más un pequeño extra pasivo por territorio controlado). Al alcanzar 4 umbrales sucesivos (valores exactos por definir), se desbloquean, en este orden y de forma automática y permanente:
+Cada `!industria` levanta un **edificio de industria** en una casilla al azar de las que controla la facción — en el mapa aparece como un cuadro amarillo (placeholder, a sustituir por arte de campo de trigo / herrería). La producción de una facción por ronda es:
+
+```
+casillas × 0.1  +  edificios de industria × 0.5
+```
+
+El edificio pertenece a la **casilla**, no a la facción: si te conquistan un terreno que tiene una industria, el nuevo dueño se queda con los `0.1 + 0.5 = 0.6` completos. Al alcanzar 4 umbrales sucesivos (valores exactos por definir), se desbloquean, en este orden y de forma automática y permanente:
 
 1. **Mejora de unidad** — 1 usuario al azar de la facción pasa de soldado a Tanque; mejoran sus stats de ataque y defensa.
 2. **Bombardeo** — se dispara **una sola vez**, en el instante en que se desbloquea: bombardea automáticamente a la facción que atacó a esta en la ronda anterior, causando daño y bajas (prioridad de bajas: primero quien no puso comando en esa ronda anterior). Si nadie atacó a esta facción la ronda anterior, la mejora se desbloquea pero no tiene a quién golpear esa vez.
@@ -105,7 +111,15 @@ Cada `!industria` único suma recursos a la facción (más un pequeño extra pas
 4. **Operación especial** — se dispara **una sola vez**, en el instante en que se desbloquea: una animación de comando especial golpea un objetivo aleatorio entre las facciones que tengan frontera con esta, causando daño, **incluso si hay una alianza activa** con esa facción (esta mejora ignora alianzas).
 
 ### Combate
-Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa). La defensa reduce el ataque entrante; lo que sobra causa bajas reales, repartidas en este orden de prioridad: **inactivos → usuarios en `!industria` → atacantes propios → defensores** (los defensores son los últimos en caer, ya que su rol es bloquear). Hay un componente de azar en el daño (rango a afinar, ejemplo de partida 0.5-1.5 por unidad) para que no sea matemática pura. El territorio conquistado se asigna automáticamente al punto fronterizo más débil implicado en el combate ganador. Visualmente, los atacantes se mueven hacia la casilla de destino y los defensores se reparten entre los distintos frentes activos de su facción.
+Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa).
+
+**Cada usuario aporta una tirada propia**, no un valor fijo: quien escribe `!ataque` suma entre **0.7 y 1.3** de ataque (al azar, incluidos los extremos), y quien escribe `!defender` suma entre **0.7 y 1.3** de defensa. La fuerza de cada bando es la suma de sus tiradas, así que dos combates con el mismo número de gente no salen iguales — un 1 contra 1 lo puede ganar cualquiera de los dos.
+
+**El territorio no se defiende solo.** Una facción a la que nadie defiende esa ronda entra al combate con **0 de defensa**, por muchas casillas que tenga: toda la defensa sale de los `!defender` de esa ronda.
+
+La defensa reduce el ataque entrante; lo que sobra causa bajas reales, repartidas en este orden de prioridad: **inactivos → usuarios en `!industria` → atacantes propios → defensores** (los defensores son los últimos en caer, ya que su rol es bloquear). El territorio conquistado se elige al azar entre las casillas fronterizas del perdedor que tocan al ganador. Visualmente, los atacantes se mueven hacia la casilla de destino y los defensores se reparten entre los distintos frentes activos de su facción.
+
+Durante la Fase de Acción, el mapa muestra en vivo, sobre cada facción, un **escudo verde 🛡 con el número de defensores** que lleva acumulados y una **espada roja ⚔ con el número de atacantes** que tiene encima, actualizados según la gente va escribiendo en el chat.
 
 ### Maravillas
 Casillas fijas y concretas de cada plantilla de mapa con un monumento real (ilustración original, no fotos con derechos), que dan un extra de industria por ronda a quien las controle. Lista corta reutilizable (6-8 maravillas) repartida de forma distinta según la plantilla.
