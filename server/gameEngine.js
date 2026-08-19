@@ -15,7 +15,7 @@ const { generateMap } = require('./mapTemplates');
 const { resolveAlliances } = require('./rules/alliances');
 const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
-const { resolveIndustry, industryThresholdsFor } = require('./rules/industry');
+const { resolveIndustry, resolveIndustryImmunity, industryThresholdsFor } = require('./rules/industry');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
@@ -80,6 +80,8 @@ function createMatch(config) {
     industryTierIndex: 0,
     industryPenaltyNextRound: false, // armado por Sabotaje esta ronda, se activa en la siguiente
     industryPenaltyActive: false, // Sabotaje activo ESTA ronda (armado la ronda anterior)
+    attackImmuneNextRound: false, // armado por la mejora de industria nivel 4 (tregua), se activa en la siguiente
+    attackImmuneActive: false, // tregua activa ESTA ronda (armada la ronda anterior) — ver resolveIndustryImmunity()
     specialEnabled: !!f.specialEnabled,
     specialAbility: f.specialAbility || null,
     specialUsed: false,
@@ -295,12 +297,22 @@ function resolveRound() {
   // "activa" aqui lo que quedo armado la ronda anterior, y solo despues se
   // deja que resolveSpecialAbilities() pueda armar un sabotaje nuevo para la
   // ronda que viene.
+  // Misma logica para la tregua de la mejora de industria nivel 4: se arma
+  // en la ronda que se desbloquea (attackImmuneNextRound) y se activa aqui,
+  // al empezar a resolver la ronda SIGUIENTE — ver 'tregua' en
+  // rules/industry.js y resolveIndustryImmunity() mas abajo.
   for (const faction of match.factions) {
     faction.industryPenaltyActive = faction.industryPenaltyNextRound;
     faction.industryPenaltyNextRound = false;
+    faction.attackImmuneActive = faction.attackImmuneNextRound;
+    faction.attackImmuneNextRound = false;
   }
 
   resolveAlliances(match, context);
+  // Anula los ataques contra cualquier faccion con la tregua activa esta
+  // ronda — independiente de resolveAlliances() (esa depende de
+  // `alliancesEnabled`; la tregua es automatica y no).
+  resolveIndustryImmunity(match, context);
   resolveSpecialAbilities(match, context);
   context.allInactiveUserIds = new Set([...context.inactiveUserIds, ...context.forceInactive]);
   resolveCombat(match, context);

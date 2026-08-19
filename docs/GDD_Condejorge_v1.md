@@ -97,7 +97,7 @@ Varias plantillas prediseñadas por tamaño (varias variantes de 20 casillas, va
 En el modo de zonas pequeñas, las casillas sin dueño se ocupan con `!expansion`, y el coste es **2 votantes por cada casilla nueva**, con un mínimo de 1 casilla si vota alguien: 1 o 2 votos dan 1 casilla, 4 votos dan 2, 6 dan 3, y así. No hay umbral de porcentaje. El sistema elige automáticamente, al azar, entre las casillas neutrales que tocan la frontera de esa facción, recalculando la frontera tras cada conquista (así se puede avanzar en cadena hacia dentro del territorio neutral, no solo repartirse por el borde inicial).
 
 ### Industria y las 4 mejoras (progresión fija)
-Cada `!industria` levanta un **edificio de industria** en una casilla al azar de las que controla la facción — en el mapa aparece como un cuadro amarillo (placeholder, a sustituir por arte de campo de trigo / herrería). La producción de una facción por ronda es:
+Cada `!industria` levanta un **edificio de industria** en una casilla al azar de las que controla la facción — en el mapa aparece como un sprite (placeholder, a sustituir por arte de campo de trigo / herrería). La producción de una facción por ronda es:
 
 ```
 casillas × 0.1  +  edificios de industria × 0.5
@@ -109,15 +109,15 @@ Los 4 umbrales de mejora **escalan con el tamaño de la facción** (3, 8, 15 y 2
 
 Por eso la probeta del panel de facciones es comparable entre facciones de tamaños distintos: mide "cómo de bien coopera mi gente", no "cuánta gente tengo". Al alcanzar cada marca se desbloquea, en este orden y de forma automática y permanente:
 
-1. **Mejora de unidad** — 1 usuario al azar de la facción pasa de soldado a Tanque; mejoran sus stats de ataque y defensa.
-2. **Bombardeo** — se dispara **una sola vez**, en el instante en que se desbloquea: bombardea automáticamente a la facción que atacó a esta en la ronda anterior, causando daño y bajas (prioridad de bajas: primero quien no puso comando en esa ronda anterior). Si nadie atacó a esta facción la ronda anterior, la mejora se desbloquea pero no tiene a quién golpear esa vez.
-3. **Mejora de 2 unidades** — 2 usuarios más pasan a Tanque, igual que la Mejora 1, pero la selección prioriza a quien más ha participado en rondas anteriores de la partida (con preferencia por quienes usaron `!ataque`/`!defender` sobre solo `!industria`); si no hay historial (se desbloquea en la primera ronda), se elige al azar entre todos los de la facción.
-4. **Operación especial** — se dispara **una sola vez**, en el instante en que se desbloquea: una animación de comando especial golpea un objetivo aleatorio entre las facciones que tengan frontera con esta, causando daño, **incluso si hay una alianza activa** con esa facción (esta mejora ignora alianzas).
+1. **Caballero** — 1 soldado al azar de la facción pasa a **caballero**: tira su fuerza de combate en 0.9–1.4 en vez de 0.7–1.3, se mueve más rápido en el mapa ("simula un caballo") y tiene su propio sprite, algo más grande que el de un soldado normal. Por lo demás se comporta exactamente igual que cualquier jugador (mismos comandos, mismos destinos al atacar/defender/expandir).
+2. **Industria extra** — se levantan **3 edificios de industria** de golpe en casillas al azar de la facción, como si 3 usuarios más hubieran votado `!industria` esa ronda.
+3. **3 caballeros más** — igual que la mejora 1 pero con 3 soldados a la vez, elegidos al azar entre los que **todavía no** son caballeros (nunca repite a quien ya ascendió con la mejora 1).
+4. **Tregua** — durante la ronda **siguiente** a desbloquearse, ningún ataque de ninguna otra facción le hace nada a esta: es como si tuviera una alianza automática con todo el mundo esa ronda, sin que nadie tenga que votarla ni depender de que las alianzas estén activadas en la partida.
 
 ### Combate
 Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa).
 
-**Cada usuario aporta una tirada propia**, no un valor fijo: quien escribe `!ataque` suma entre **0.7 y 1.3** de ataque (al azar, incluidos los extremos), y quien escribe `!defender` suma entre **0.7 y 1.3** de defensa. La fuerza de cada bando es la suma de sus tiradas, así que dos combates con el mismo número de gente no salen iguales — un 1 contra 1 lo puede ganar cualquiera de los dos.
+**Cada usuario aporta una tirada propia**, no un valor fijo: quien escribe `!ataque` suma entre **0.7 y 1.3** de ataque (al azar, incluidos los extremos), y quien escribe `!defender` suma entre **0.7 y 1.3** de defensa — un **caballero** (mejora de industria 1/3, ver arriba) tira entre **0.9 y 1.4** en los dos casos. La fuerza de cada bando es la suma de sus tiradas, así que dos combates con el mismo número de gente no salen iguales — un 1 contra 1 lo puede ganar cualquiera de los dos.
 
 **El territorio no se defiende solo.** Una facción a la que nadie defiende esa ronda entra al combate con **0 de defensa**, por muchas casillas que tenga: toda la defensa sale de los `!defender` de esa ronda.
 

@@ -22,11 +22,14 @@ function resolveCombat(match, context) {
     const defenderFaction = factionByNumber(match, defenderNumber);
     if (!defenderFaction || defenderFaction.territoryIds.length === 0) continue;
 
-    const totalAttackers = attackers.reduce((sum, a) => sum + a.userIds.length, 0);
-    const defenderVotes = context.votesByFactionAndType.get(defenderNumber)[ACTION_DEFEND].length;
+    const attackerUserIds = attackers.flatMap((a) => a.userIds);
+    const totalAttackers = attackerUserIds.length;
+    const defenderUserIds = context.votesByFactionAndType.get(defenderNumber)[ACTION_DEFEND];
 
-    const attackPower = sumRandomPower(totalAttackers) * combatModifier(match, defenderNumber, 'attack');
-    const defensePower = sumRandomPower(defenderVotes) * combatModifier(match, defenderNumber, 'defense');
+    // Cada tirada depende de QUIEN vota (soldado o caballero, ver rules/shared.js),
+    // no solo de cuantos son.
+    const attackPower = sumRandomPower(match, attackerUserIds) * combatModifier(match, defenderNumber, 'attack');
+    const defensePower = sumRandomPower(match, defenderUserIds) * combatModifier(match, defenderNumber, 'defense');
 
     if (attackPower > defensePower) {
       // Gana el ataque: baja la faccion defensora y conquista territorio.

@@ -73,10 +73,25 @@ function connectToChannels(channelNames, onCommand) {
   });
 
   socket.addEventListener('message', (event) => {
+    // Twitch manda VARIAS lineas IRC en un unico frame de WebSocket cuando el
+    // chat va rapido (cada linea es un mensaje/comando distinto). Antes, si
+    // UNA linea de la tanda hacia saltar una excepcion en cualquier punto de
+    // handleLine() (parseo raro, o mas abajo en el motor/broadcast), el
+    // `forEach` entero se paraba ahi y TODAS las lineas siguientes de esa
+    // misma tanda se perdian sin mas — incluidos comandos de chat validos, o
+    // incluso el PONG de un PING que llegara despues en la misma tanda (lo
+    // que a la larga puede hacer que Twitch cierre la conexion). Try/catch
+    // por linea: una linea rara solo se pierde a ella misma.
     String(event.data)
       .split('\r\n')
       .filter(Boolean)
-      .forEach(handleLine);
+      .forEach((line) => {
+        try {
+          handleLine(line);
+        } catch (err) {
+          console.error('[twitchBot] error procesando una linea de chat, se ignora solo esa linea:', err, '| linea:', line);
+        }
+      });
   });
 
   socket.addEventListener('close', () => {

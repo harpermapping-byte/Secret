@@ -1,8 +1,7 @@
 'use strict';
 
-const { ACTION_INDUSTRY } = require('../commands');
-const { applyCasualties, shuffle } = require('./shared');
-const { factionsAreAdjacent, factionByNumber, checkFactionElimination } = require('./territory');
+const { ACTION_INDUSTRY, ACTION_ATTACK } = require('../commands');
+const { shuffle } = require('./shared');
 
 // Cada casilla controlada rinde esto por ronda por el mero hecho de tenerla.
 const PASSIVE_INDUSTRY_PER_TERRITORY = 0.1;
@@ -12,8 +11,12 @@ const PASSIVE_INDUSTRY_PER_TERRITORY = 0.1;
 // mapTemplates.js), conquistar una casilla con 1 industria le pasa al nuevo
 // dueño los 0.1 + 0.5 = 0.6 completos.
 const INDUSTRY_PER_BUILDING = 0.5;
-const BOMBARDEO_DAMAGE = 3;
-const OPESPECIAL_DAMAGE = 3;
+// Nivel 2: cuantos edificios de industria se levantan solos al desbloquear
+// (como si otros tantos usuarios hubieran votado !industria esa ronda).
+const TIER2_AUTO_INDUSTRIES = 3;
+// Nivel 1 y nivel 3: cuantos soldados pasan a caballero de golpe.
+const TIER1_KNIGHT_COUNT = 1;
+const TIER3_KNIGHT_COUNT = 3;
 
 /**
  * Las 4 mejoras, en orden fijo. `perPlayer` = industria acumulada necesaria
@@ -38,12 +41,22 @@ const OPESPECIAL_DAMAGE = 3;
  * que cambiar estos numeros mueve las marcas solo. Y como el umbral depende
  * del tamaño de cada faccion, la probeta es comparable entre facciones
  * distintas: mide "como de bien coopera mi gente", no "cuanta gente tengo".
+ *
+ * Que hace cada nivel, TODO automatico (nadie vota nada para esto, se
+ * dispara solo al cruzar el umbral):
+ *   1 'caballero'        -> 1 soldado al azar de la faccion pasa a caballero
+ *   2 'industria_extra'  -> se levantan 3 edificios de industria de golpe
+ *   3 'caballeros_x3'    -> 3 soldados MAS pasan a caballero (nunca repite a
+ *                           quien ya lo sea, ver upgradeRandomSoldiers)
+ *   4 'tregua'           -> nadie puede atacar a esta faccion la RONDA
+ *                           SIGUIENTE (igual que una alianza automatica con
+ *                           todo el mundo, ver resolveIndustryImmunity)
  */
 const INDUSTRY_TIERS = [
-  { key: 'tanque', perPlayer: 3 },
-  { key: 'bombardeo', perPlayer: 8 },
-  { key: 'tanque_x2', perPlayer: 15 },
-  { key: 'operacion_especial', perPlayer: 24 },
+  { key: 'caballero', perPlayer: 3 },
+  { key: 'industria_extra', perPlayer: 8 },
+  { key: 'caballeros_x3', perPlayer: 15 },
+  { key: 'tregua', perPlayer: 24 },
 ];
 
 // Suelo de jugadores al calcular los umbrales. Sin el, una faccion a la que
@@ -125,56 +138,70 @@ function countFactionIndustries(match, faction) {
 function applyIndustryTier(match, context, faction, tierKey) {
   context.roundEvents.industryUnlocks.push({ factionNumber: faction.number, tierKey });
   switch (tierKey) {
-    case 'tanque':
-      return upgradeRandomSoldiers(match, faction, 1, { prioritizeParticipation: false });
-    case 'bombardeo':
-      return applyBombardeo(match, context, faction);
-    case 'tanque_x2':
-      return upgradeRandomSoldiers(match, faction, 2, { prioritizeParticipation: true });
-    case 'operacion_especial':
-      return applyOperacionEspecial(match, context, faction);
+    case 'caballero':
+      return upgradeRandomSoldiers(match, faction, TIER1_KNIGHT_COUNT);
+    case 'industria_extra':
+      return buildIndustries(match, context, faction, TIER2_AUTO_INDUSTRIES);
+    case 'caballeros_x3':
+      return upgradeRandomSoldiers(match, faction, TIER3_KNIGHT_COUNT);
+    case 'tregua':
+      // Se activa la RONDA SIGUIENTE, no esta — mismo patron que el Sabotaje
+      // (industryPenaltyNextRound): se arma aqui y gameEngine.js lo "activa"
+      // al principio de resolveRound() de la proxima ronda. Ver
+      // resolveIndustryImmunity() mas abajo, que es quien de verdad anula los
+      // ataques mientras dure.
+      faction.attackImmuneNextRound = true;
+      return;
     default:
       return;
   }
 }
 
-function upgradeRandomSoldiers(match, faction, count, { prioritizeParticipation }) {
+/**
+ * Sube a caballero `count` soldados al azar de la faccion — nunca a alguien
+ * que YA sea caballero (el filtro `unitType === 'soldier'` ya lo garantiza
+ * solo, asi que el nivel 3 nunca repite a quien ascendio el nivel 1). Si hay
+ * menos soldados vivos que `count` (faccion muy pequeña o diezmada), sube a
+ * todos los que haya.
+ */
+function upgradeRandomSoldiers(match, faction, count) {
   const soldiers = [...match.players.values()].filter(
     (p) => p.alive && p.factionNumber === faction.number && p.unitType === 'soldier'
   );
-  const ordered = prioritizeParticipation
-    ? soldiers.filter((p) => p.participation > 0).sort((a, b) => b.participation - a.participation)
-    : shuffle(soldiers);
-
-  const chosen = ordered.length >= count ? ordered.slice(0, count) : shuffle(soldiers).slice(0, count);
-  chosen.forEach((player) => {
-    player.unitType = 'tank';
-  });
+  shuffle(soldiers)
+    .slice(0, count)
+    .forEach((player) => {
+      player.unitType = 'knight';
+    });
 }
 
-function applyBombardeo(match, context, faction) {
-  // Simplificacion v1: usa la prioridad de bajas normal de esta ronda (inactivos primero)
-  // en vez de la actividad de la ronda anterior. Pendiente de afinar si hace falta mas precision.
-  const targetNumber = match.lastAttackerOf[faction.number];
-  if (!targetNumber) return;
-  const targetFaction = factionByNumber(match, targetNumber);
-  if (!targetFaction || targetFaction.territoryIds.length === 0) return;
-  applyCasualties(match, context, targetNumber, BOMBARDEO_DAMAGE, faction.number);
-  checkFactionElimination(match, context, targetNumber, faction.number);
-}
-
-function applyOperacionEspecial(match, context, faction) {
-  const adjacentEnemies = match.factions.filter(
-    (f) => f.number !== faction.number && f.territoryIds.length > 0 && factionsAreAdjacent(match, faction.number, f.number)
-  );
-  const target = shuffle(adjacentEnemies)[0];
-  if (!target) return;
-  applyCasualties(match, context, target.number, OPESPECIAL_DAMAGE, faction.number);
-  checkFactionElimination(match, context, target.number, faction.number);
+/**
+ * Anula los ataques que reciba una faccion con la tregua del nivel 4 activa
+ * ESTA ronda (ver 'tregua' en applyIndustryTier) — igual que hace
+ * resolveAlliances() con un par aliado, pero sin depender de
+ * `match.config.alliancesEnabled`: es una recompensa automatica de
+ * industria, no la mecanica de alianzas votadas, asi que funciona aunque el
+ * admin las tenga desactivadas en esta partida. Se llama desde
+ * gameEngine.js justo despues de resolveAlliances(), con el mismo `context`
+ * (los usuarios anulados aqui tambien cuentan como inactivos esta ronda).
+ */
+function resolveIndustryImmunity(match, context) {
+  for (const faction of match.factions) {
+    if (!faction.attackImmuneActive) continue;
+    for (const attackerFaction of match.factions) {
+      const attackVotes = context.votesByFactionAndType.get(attackerFaction.number)[ACTION_ATTACK];
+      const userIds = attackVotes.get(faction.number);
+      if (userIds && userIds.length) {
+        userIds.forEach((userId) => context.forceInactive.add(userId));
+        attackVotes.delete(faction.number);
+      }
+    }
+  }
 }
 
 module.exports = {
   resolveIndustry,
+  resolveIndustryImmunity,
   INDUSTRY_TIERS,
   industryThresholdsFor,
   MIN_PLAYERS_FOR_THRESHOLDS,
