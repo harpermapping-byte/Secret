@@ -3,10 +3,12 @@
 const { ACTION_INDUSTRY, ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
 const { factionByNumber } = require('./territory');
 
-// Rango de azar por unidad al calcular fuerza de combate. Valor de ejemplo,
-// pendiente de afinar (ver docs/GDD seccion 11 "Pendiente").
-const COMBAT_RANDOM_MIN = 0.5;
-const COMBAT_RANDOM_MAX = 1.5;
+// Rango de azar por unidad al calcular fuerza de combate: CADA usuario que
+// ataca (o que defiende) aporta una tirada suelta dentro de este rango, asi
+// que un combate de 3 contra 3 no siempre sale igual. Mismo rango para ataque
+// y para defensa — ver docs/GDD seccion 6 "Combate".
+const COMBAT_RANDOM_MIN = 0.7;
+const COMBAT_RANDOM_MAX = 1.3;
 
 /** Suma `count` tiradas aleatorias en [COMBAT_RANDOM_MIN, COMBAT_RANDOM_MAX]. */
 function sumRandomPower(count) {

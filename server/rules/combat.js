@@ -4,14 +4,16 @@ const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
 const { sumRandomPower, applyCasualties } = require('./shared');
 const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
 
-// Defensa pasiva minima por casilla controlada, para que nadie quede en 0 absoluto.
-// Valor de ejemplo, pendiente de afinar.
-const BASE_GARRISON_PER_TERRITORY = 0.3;
-
 /**
  * Resuelve todo el combate de la ronda a la vez: agrupa los ataques que recibe
  * cada faccion (venga de una o varias facciones atacantes) y los compara en un
  * unico combate contra su defensa total. Ver docs/GDD seccion 6 "Combate".
+ *
+ * El territorio NO tiene defensa pasiva: una faccion a la que nadie defiende
+ * con `!defender` esa ronda entra al combate con 0 de defensa, por muchas
+ * casillas que tenga. Toda la defensa sale de los usuarios que escriben
+ * `!defender` en la Fase de Accion, cada uno aportando su propia tirada
+ * (ver COMBAT_RANDOM_MIN/MAX en rules/shared.js).
  */
 function resolveCombat(match, context) {
   const incomingByDefender = groupIncomingAttacks(match, context);
@@ -23,10 +25,8 @@ function resolveCombat(match, context) {
     const totalAttackers = attackers.reduce((sum, a) => sum + a.userIds.length, 0);
     const defenderVotes = context.votesByFactionAndType.get(defenderNumber)[ACTION_DEFEND].length;
 
-    let attackPower = sumRandomPower(totalAttackers) * combatModifier(match, defenderNumber, 'attack');
-    let defensePower =
-      sumRandomPower(defenderVotes) * combatModifier(match, defenderNumber, 'defense') +
-      defenderFaction.territoryIds.length * BASE_GARRISON_PER_TERRITORY;
+    const attackPower = sumRandomPower(totalAttackers) * combatModifier(match, defenderNumber, 'attack');
+    const defensePower = sumRandomPower(defenderVotes) * combatModifier(match, defenderNumber, 'defense');
 
     if (attackPower > defensePower) {
       // Gana el ataque: baja la faccion defensora y conquista territorio.
@@ -101,4 +101,4 @@ function combatModifier(match, factionNumber, kind) {
   return 1;
 }
 
-module.exports = { resolveCombat, BASE_GARRISON_PER_TERRITORY };
+module.exports = { resolveCombat };
