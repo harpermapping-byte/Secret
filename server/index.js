@@ -100,7 +100,16 @@ wsApp.onMessage((client, rawText) => {
 function buildWireMapLayout(layout) {
   const tileCount = layout.centroids.length; // un centroide por tile, ver mapTemplates.js
   const cellTileIdsPacked = mapLayoutCodec.encodeCellTileIds(layout.cellTileIds, tileCount);
-  return { cols: layout.cols, rows: layout.rows, centroids: layout.centroids, cellTileIdsPacked };
+  // `decorations` (castillos, arboles, barcos... ver mapTemplates.js) va tal
+  // cual: son ~166 objetos de 3 campos, unos pocos KB, no hace falta
+  // empaquetarlos como la rejilla de celdas.
+  return {
+    cols: layout.cols,
+    rows: layout.rows,
+    centroids: layout.centroids,
+    cellTileIdsPacked,
+    decorations: layout.decorations || [],
+  };
 }
 
 function broadcastMapLayout() {

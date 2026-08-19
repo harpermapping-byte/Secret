@@ -134,8 +134,105 @@ function generateMap({ tileCount, factionCount, mode }) {
     });
   }
 
-  const mapLayout = { cols: RASTER_COLS, rows: RASTER_ROWS, cellTileIds, centroids };
+  const mapLayout = {
+    cols: RASTER_COLS,
+    rows: RASTER_ROWS,
+    cellTileIds,
+    centroids,
+    decorations: placeDecorations(),
+  };
   return { tiles, mode, mapLayout };
+}
+
+// ---------------------------------------------------------------------------
+// Decoracion del mapa (castillos, puertos, aldeas, arboles, barcos, ballenas,
+// kraken). Ver docs/ACCIONES.md seccion 11.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cuantos elementos de cada tipo se reparten por partida y donde puede caer
+ * cada uno. La clave es EXACTAMENTE el nombre del PNG en `public/sprites/`
+ * (ver tools/bakeSpritePlaceholders.js): el cliente monta la ruta a partir de
+ * ella, asi que añadir un tipo nuevo es añadir una fila aqui y su .png — sin
+ * tocar el codigo del cliente.
+ *
+ *   terrain: 'land'  -> cualquier celda de tierra
+ *            'coast' -> celda de tierra que toca el agua (para los puertos)
+ *            'water' -> cualquier celda de oceano
+ *   minGap: separacion minima entre elementos DEL MISMO TIPO, en celdas de la
+ *           rejilla, para que no salgan amontonados en un pegote.
+ */
+const DECORATION_KINDS = [
+  { type: 'castle', count: 10, terrain: 'land', minGap: 40 },
+  { type: 'port', count: 15, terrain: 'coast', minGap: 30 },
+  { type: 'village', count: 20, terrain: 'land', minGap: 22 },
+  { type: 'tree', count: 100, terrain: 'land', minGap: 8 },
+  { type: 'ship-small', count: 10, terrain: 'water', minGap: 40 },
+  { type: 'ship-big', count: 5, terrain: 'water', minGap: 60 },
+  { type: 'whale', count: 5, terrain: 'water', minGap: 60 },
+  { type: 'kraken', count: 1, terrain: 'water', minGap: 0 },
+];
+
+// Cuantos intentos como mucho por elemento antes de rendirse y colocarlo sin
+// respetar la separacion minima. Evita que un mapa con poca costa (o un
+// minGap demasiado exigente) deje el generador dando vueltas para siempre.
+const DECOR_MAX_TRIES = 400;
+
+function isLandCell(x, y) {
+  return landMask[y * RASTER_COLS + x] === 1;
+}
+
+/** Celda de tierra con al menos un vecino (4-conectado) de agua: la orilla. */
+function isCoastCell(x, y) {
+  if (!isLandCell(x, y)) return false;
+  return (
+    (x > 0 && !isLandCell(x - 1, y)) ||
+    (x < RASTER_COLS - 1 && !isLandCell(x + 1, y)) ||
+    (y > 0 && !isLandCell(x, y - 1)) ||
+    (y < RASTER_ROWS - 1 && !isLandCell(x, y + 1))
+  );
+}
+
+function matchesTerrain(kind, x, y) {
+  if (kind === 'land') return isLandCell(x, y);
+  if (kind === 'water') return !isLandCell(x, y);
+  return isCoastCell(x, y);
+}
+
+/**
+ * Reparte los elementos decorativos por el mapa, distinto en cada partida.
+ * Se generan EN EL SERVIDOR (no en cada navegador) para que el streamer y
+ * todos los espectadores vean exactamente la misma decoracion; viajan una
+ * unica vez dentro del mensaje `map:layout`, y son tan pocos (~166 objetos,
+ * unos pocos KB) que no se notan al lado de la rejilla del mapa.
+ *
+ * Coordenadas en celdas de la rejilla del mapa (las mismas que `centroids`),
+ * no en pixeles de pantalla: el cliente las escala con el zoom como el resto
+ * del terreno.
+ */
+function placeDecorations() {
+  const decorations = [];
+
+  for (const { type, count, terrain, minGap } of DECORATION_KINDS) {
+    const placed = [];
+    const minGapSq = minGap * minGap;
+
+    for (let n = 0; n < count; n++) {
+      let best = null;
+      for (let attempt = 0; attempt < DECOR_MAX_TRIES; attempt++) {
+        const x = Math.floor(Math.random() * RASTER_COLS);
+        const y = Math.floor(Math.random() * RASTER_ROWS);
+        if (!matchesTerrain(terrain, x, y)) continue;
+        best = { x, y }; // vale como plan B aunque quede pegado a otro
+        if (placed.every((p) => (p.x - x) ** 2 + (p.y - y) ** 2 >= minGapSq)) break;
+      }
+      if (!best) continue; // no hay sitio de ese terreno (mapa raro): se deja fuera
+      placed.push(best);
+      decorations.push({ type, x: best.x, y: best.y });
+    }
+  }
+
+  return decorations;
 }
 
 /**
