@@ -94,4 +94,48 @@ function encodePNG(width, height, rgb) {
   ]);
 }
 
-module.exports = { encodePNG };
+/**
+ * Igual que encodePNG() pero con canal alfa (RGBA, tipo de color 6) — hace
+ * falta para texturas de UI que no son un rectangulo solido (madera con
+ * borde irregular, chapa de metal con esquinas redondeadas) y necesitan que
+ * se vea lo que hay detras (la pagina, la madera) por los huecos
+ * transparentes. `encodePNG()` (RGB, sin alfa) se deja tal cual para quien
+ * no necesite transparencia (el terreno horneado, world.png, es opaco).
+ * @param {number} width
+ * @param {number} height
+ * @param {Uint8Array} rgba - width*height*4 bytes, RGBA por pixel, fila por fila
+ * @returns {Buffer}
+ */
+function encodePNGRGBA(width, height, rgba) {
+  if (rgba.length !== width * height * 4) {
+    throw new Error(`encodePNGRGBA: se esperaban ${width * height * 4} bytes (RGBA), llegaron ${rgba.length}`);
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;   // profundidad de bits por canal
+  ihdr[9] = 6;   // tipo de color 6 = RGBA
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  const stride = width * 4;
+  const raw = Buffer.alloc((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * (stride + 1);
+    raw[rowStart] = 0; // filtro None
+    raw.set(rgba.subarray(y * stride, y * stride + stride), rowStart + 1);
+  }
+
+  const idatData = zlib.deflateSync(raw, { level: 9 });
+
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    chunk('IHDR', ihdr),
+    chunk('IDAT', idatData),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+module.exports = { encodePNG, encodePNGRGBA };

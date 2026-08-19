@@ -7,57 +7,84 @@
 <link rel="stylesheet" href="/shared.css" />
 <style>
   /* Estilos propios de esta pagina; lo compartido con el admin (mapa a pantalla
-     completa, cabecera flotante, panel lateral) vive en shared.css. */
-  #phase { color:#8fd9f5; font-size:13px; }
-  #timer { font-variant-numeric: tabular-nums; font-size: 18px; }
+     completa, barras de madera, botones de chapa, panel lateral de pergamino)
+     vive en shared.css — incluidas las variables de tipografía y color
+     (--font-title/--font-serif/--gold/--ink) que se usan aquí abajo. */
+
+  /* Fase y reloj van sobre la madera de la barra superior, así que en dorado
+     tallado igual que el título (ver .overlayTopBar h1 en shared.css). */
+  #phase { color:var(--gold-dim); font-size:13px; font-family:var(--font-title); text-shadow:0 1px 0 #2a1608; }
+  #timer { font-variant-numeric: tabular-nums; font-size: 19px; font-family:var(--font-title);
+           color:var(--gold); text-shadow:0 1px 0 #2a1608, 0 -1px 0 rgba(255,225,170,.18); }
 
   /* Control de música de fondo (botón + barra), arriba a la izquierda —
      ver #bgMusic y toggleMusic()/setMusicVolume() más abajo. */
-  .volumeSlider { width:70px; accent-color:#8fd9f5; cursor:pointer; vertical-align:middle; }
+  .volumeSlider { width:70px; accent-color:#c99a3f; cursor:pointer; vertical-align:middle; }
 
+  /* Roster por facción, dentro del panel lateral de pergamino: tinta oscura
+     sobre papel, no las cajas oscuras del tema anterior. */
   #rosterColumns { display:flex; flex-direction:column; gap:10px; }
-  .roster-column { background:#0f1a22; border-radius:10px; padding:10px 12px; border-top: 4px solid #223140; }
-  .roster-column h3 { margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; }
-  .roster-empty { font-size:12px; opacity:.5; font-style: italic; }
-  .player { padding:5px 8px; border-radius:6px; background:#152029; font-size:13px; border:1px solid #223140; margin-bottom:6px; }
-  .player.dead { opacity:0.35; text-decoration: line-through; }
+  .roster-column { background:rgba(92,64,30,.1); border:1px solid var(--ink-line); border-radius:4px;
+                   padding:10px 12px; border-top: 4px solid #223140; }
+  .roster-column h3 { margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between;
+                      font-family:var(--font-title); color:var(--ink); }
+  .roster-empty { font-size:12px; color:var(--ink-soft); font-style: italic; }
+  .player { padding:5px 8px; border-radius:3px; background:rgba(92,64,30,.12); font-size:13px;
+            border:1px solid var(--ink-line); margin-bottom:6px; color:var(--ink); }
+  .player.dead { opacity:0.4; text-decoration: line-through; }
 
   /* Buscador de jugador (arriba del panel "👥 Jugadores"): escribir un nombre
      y confirmar mueve el zoom del mapa hasta su marcador — ver
      mapCtrl.focusOnPlayer() en public/mapRenderer.js. */
   .playerSearchRow { display:flex; gap:6px; margin-bottom:14px; }
-  #playerSearchInput { flex:1; padding:7px 8px; border-radius:6px; border:1px solid #223140; background:#152029; color:#eaf7ff; font-size:13px; box-sizing:border-box; }
-  #playerSearchFeedback { font-size:11px; color:#ffb4a2; margin:-8px 0 12px; min-height:14px; }
+  #playerSearchInput { flex:1; padding:7px 8px; border-radius:3px; border:1px solid #8a7350;
+                       background:rgba(255,250,235,.55); color:var(--ink); font-size:13px;
+                       font-family:var(--font-serif); box-sizing:border-box; }
+  #playerSearchInput::placeholder { color:var(--ink-soft); opacity:.75; }
+  #playerSearchFeedback { font-size:11px; color:#8c3a1e; margin:-8px 0 12px; min-height:14px; }
 
   /* Banner NO bloqueante: tras terminar la partida el mapa y las estadisticas
      siguen totalmente visibles e interactivos (zoom, clasificacion, roster)
      hasta que el admin cree una partida nueva — solo se avisa con esta franja
      flotante, sin tapar la pantalla. Abajo y centrado a propósito, lejos de la
-     cabecera y de la fila de facciones (que puede ocupar varias líneas). */
+     cabecera y de la fila de facciones (que puede ocupar varias líneas).
+     Es un pequeño pergamino, a juego con los popups. */
   #winner { position:fixed; bottom:calc(var(--map-margin-y) + 24px); left:50%; transform:translateX(-50%); z-index:25; display:none;
-            max-width:min(92vw, 640px); padding:12px 22px; border-radius:12px; font-size:16px; text-align:center;
-            background:#101c26ee; border:1px solid #223140; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+            max-width:min(92vw, 640px); padding:12px 22px; font-size:16px; text-align:center;
+            font-family:var(--font-title); color:var(--ink);
+            background-image:url('/ui/parchment.png'); background-size:220px 220px;
+            border:2px solid #4a331c; border-radius:3px; box-shadow:0 8px 24px rgba(0,0,0,.55); }
   #winner.visible { display:block; }
 
-  .modalOverlay { position:fixed; inset:0; background:rgba(4,10,15,.72); display:flex; align-items:center;
+  /* Popups = hoja de pergamino. El velo de fondo es marrón oscuro (no azul)
+     para que la hoja destaque como si estuviera sobre una mesa de madera. */
+  .modalOverlay { position:fixed; inset:0; background:rgba(20,12,4,.74); display:flex; align-items:center;
                   justify-content:center; z-index:100; padding:20px; }
   .modalOverlay.hidden { display:none; }
-  .modalBox { background:#101c26; border:1px solid #223140; border-radius:14px; max-width:560px; width:100%;
-              max-height:85vh; overflow-y:auto; padding:20px 22px; }
-  .modalBox h2 { margin:0 0 4px; font-size:18px; }
-  .modalBox .modalSubtitle { font-size:12px; color:#8fd9f5; margin-bottom:14px; }
-  .modalClose { float:right; background:none; border:none; color:#8fd9f5; font-size:20px; cursor:pointer; line-height:1; }
+  .modalBox { background-image:url('/ui/parchment.png'); background-size:260px 260px;
+              color:var(--ink); font-family:var(--font-serif);
+              border:2px solid #4a331c; border-radius:3px; max-width:560px; width:100%;
+              max-height:85vh; overflow-y:auto; padding:20px 22px;
+              box-shadow:0 14px 40px rgba(0,0,0,.6), 0 0 60px rgba(60,40,15,.35) inset; }
+  .modalBox h2 { margin:0 0 4px; font-size:20px; font-family:var(--font-title); color:var(--ink); letter-spacing:.03em; }
+  .modalBox .modalSubtitle { font-size:12px; color:var(--ink-soft); margin-bottom:14px; font-style:italic; }
+  .modalClose { float:right; background:none; border:none; color:var(--ink-soft); font-size:20px; cursor:pointer; line-height:1; }
+  .modalClose:hover { color:var(--ink); }
   .summarySection { margin-top:16px; }
-  .summarySection h3 { font-size:13px; color:#8fd9f5; margin:0 0 8px; text-transform:uppercase; letter-spacing:.03em; }
-  .summaryLine { font-size:13px; padding:6px 10px; background:#152029; border-radius:6px; margin-bottom:6px;
-                 border-left:3px solid #223140; }
-  .summaryEmpty { font-size:12px; opacity:.5; font-style:italic; }
-  .fchip { display:inline-flex; align-items:center; gap:5px; font-weight:600; }
+  .summarySection h3 { font-size:13px; color:var(--ink); margin:0 0 8px; letter-spacing:.06em;
+                       font-family:var(--font-title); text-transform:uppercase;
+                       border-bottom:1px solid var(--ink-line); padding-bottom:4px; }
+  .summaryLine { font-size:13px; padding:6px 10px; background:rgba(92,64,30,.1); border-radius:3px; margin-bottom:6px;
+                 border-left:3px solid var(--ink-line); color:var(--ink); }
+  .summaryEmpty { font-size:12px; color:var(--ink-soft); font-style:italic; }
+  .fchip { display:inline-flex; align-items:center; gap:5px; font-weight:700; }
   .fchip .dot { width:9px; height:9px; }
 
-  table.leaderboard { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
-  table.leaderboard th, table.leaderboard td { padding:7px 8px; text-align:center; border-bottom:1px solid #1c2b38; }
-  table.leaderboard th { color:#8fd9f5; font-weight:600; font-size:11px; text-transform:uppercase; }
+  table.leaderboard { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;
+                      font-family:var(--font-serif); color:var(--ink); }
+  table.leaderboard th, table.leaderboard td { padding:7px 8px; text-align:center; border-bottom:1px solid var(--ink-line); }
+  table.leaderboard th { color:var(--ink); font-weight:700; font-size:11px; text-transform:uppercase;
+                         font-family:var(--font-title); letter-spacing:.05em; }
   table.leaderboard td:first-child, table.leaderboard th:first-child { text-align:left; }
 </style>
 </head>
