@@ -75,8 +75,16 @@
                 stroke-width="${reached ? 2 : 1.4}" opacity="${reached ? 1 : 0.8}" />`;
     }).join('');
 
+    // Se ve como tooltip nativo del navegador (el <title> de dentro del SVG):
+    // aparece SOLO al poner el ratón encima de la probeta, tal y como se
+    // pidió, sin JS de hover aparte.
+    const nextMark = marks.find((value) => industry < value);
+    const nextTier = nextMark !== undefined ? marks.indexOf(nextMark) + 1 : null;
+    const title = nextTier
+      ? `Industria: ${industry.toFixed(1)} — faltan ${(nextMark - industry).toFixed(1)} para el nivel ${nextTier}`
+      : `Industria: ${industry.toFixed(1)} — las 4 mejoras ya están desbloqueadas`;
+
     const safeColor = escapeHtml(color);
-    const title = `Industria ${industry.toFixed(1)} de ${max} (marcas: ${marks.join(', ')})`;
 
     return `
       <svg class="industryFlask" viewBox="0 0 ${FLASK_W} ${FLASK_H}" width="${Math.round(FLASK_W * FLASK_RENDER_SCALE)}" height="${Math.round(FLASK_H * FLASK_RENDER_SCALE)}"
