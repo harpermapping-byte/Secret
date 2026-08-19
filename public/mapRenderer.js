@@ -95,7 +95,7 @@
   // (90 ahi) para que no parezca mas grande que una aldea de verdad.
   // INDUSTRY_STEP_WORLD tambien en pixeles de mundo: es la separacion entre
   // industrias de la misma casilla cuando hay varias.
-  const INDUSTRY_SPRITE_WORLD_WIDTH = 46;
+  const INDUSTRY_SPRITE_WORLD_WIDTH = 66;
   const INDUSTRY_STEP_WORLD = 30;
   const INDUSTRY_PER_ROW = 4;
   const industrySpriteImg = new Image();
