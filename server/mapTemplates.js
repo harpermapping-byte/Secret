@@ -430,6 +430,15 @@ function buildStructures(decorations, cellTileIds) {
 
     structures.push({
       tileId,
+      // Posicion EXACTA de este castillo/aldea/puerto (celdas de rejilla,
+      // igual que `centroids` — el cliente las multiplica por BLOCK_PX),
+      // no solo el tileId: varias estructuras pueden caer en la MISMA
+      // casilla (ver PROBABILISTIC_KINDS, sección 22 de docs/ACCIONES.md),
+      // así que el marcador de guarnición y sus tropas paseando tienen que
+      // anclarse a SU propio edificio, no al centroide medio de la casilla
+      // entera (que las apilaría todas en el mismo punto).
+      x: d.x,
+      y: d.y,
       type: d.type,
       aiTroops: randomInRange(ranges.aiTroops),
       archerTroops: randomInRange(ranges.archerTroops),

@@ -647,6 +647,13 @@ function getPublicState() {
       const conquered = s.aiTroops + s.archerTroops + s.cavalryTroops === 0;
       return {
         tileId: s.tileId,
+        // Posicion exacta del edificio dentro de su casilla (celdas de
+        // rejilla, igual que `centroids` en mapLayout) — varias
+        // estructuras pueden compartir tileId, así que el cliente ancla el
+        // marcador y sus tropas paseando aquí, no en el centroide medio de
+        // toda la casilla.
+        x: s.x,
+        y: s.y,
         type: s.type,
         conquered,
         aiTroops: s.aiTroops,
