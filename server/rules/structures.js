@@ -3,6 +3,7 @@
 const { ACTION_CONQUISTA } = require('../commands');
 const {
   sumRandomPower,
+  applyTroopCascadeDamage,
   killPlayer,
   shuffle,
   AI_TROOP_COMBAT_BONUS,
@@ -20,12 +21,15 @@ const {
  * la partida con conteos al azar por tipo). Misma mecánica de agrupación que
  * `!ataque`: todos los votantes de una facción se suman en UN solo ataque.
  *
- * A diferencia de un ataque normal, el defensor no es un jugador ni una
- * facción — es pura guarnición de tropas de IA, así que su fuerza es un
- * número FIJO (sin tirada, las tropas de IA no tiran dado, solo suman su
- * bonus llano — ver AI_TROOP_COMBAT_BONUS, ARCHER_* y CAVALRY_* en
- * rules/shared.js) en vez de una `sumRandomPower()`. El ataque SÍ tira dado
- * normal: son jugadores reales votando, con sus propias tropas encima.
+ * El asalto es un combate DE VERDAD en las dos direcciones, no una única
+ * comparación (ver docs/ACCIONES.md sección 23): tu ataque contra la
+ * defensa de la guarnición decide si conquistas, Y POR SEPARADO el ataque
+ * (fijo, sin tirada — las tropas de IA no tiran dado) de la guarnición
+ * contra tu propia defensa decide cuántas bajas os causa A VOSOTROS —
+ * "se enfrenta el ataque contra la defensa del otro, y su ataque contra mi
+ * defensa", tal y como se pidió. Esto pasa SIEMPRE, ganes o pierdas el
+ * asalto: puedes conquistar el edificio y aun así perder tropas en el
+ * mismo turno. Un empate en la conquista nunca la concede (`>` estricto).
  */
 function resolveConquista(match, context) {
   for (const faction of match.factions) {
@@ -36,18 +40,27 @@ function resolveConquista(match, context) {
     if (!target) continue; // no hay ninguna estructura con guarnición en su territorio ahora mismo: voto desperdiciado
 
     const attackPower = sumRandomPower(match, attackerUserIds, 'attack');
-    const defensePower = structureDefensePower(target);
+    const ourDefense = sumRandomPower(match, attackerUserIds, 'defense');
+    const garrisonAttack = structureAttackPower(target);
+    const garrisonDefense = structureDefensePower(target);
 
-    if (attackPower > defensePower) {
+    if (attackPower > garrisonDefense) {
       conquerStructure(match, target);
       context.roundEvents.structureConquests.push({
         tileId: target.tileId,
         structureType: target.type,
         factionNumber: faction.number,
       });
-    } else {
-      const casualties = Math.round(defensePower - attackPower);
-      applyStructureCasualties(match, attackerUserIds, casualties);
+    }
+
+    // Contraataque de la guarnición, se conquiste o no: primero cascada de
+    // tropas de IA de los votantes (caballero->arquero->leva, ver
+    // applyTroopCascadeDamage en rules/shared.js), solo lo que sobra mata
+    // jugadores de verdad.
+    const counterDamage = Math.round(garrisonAttack - ourDefense);
+    if (counterDamage > 0) {
+      const remaining = applyTroopCascadeDamage(match, attackerUserIds, counterDamage);
+      applyStructureCasualties(match, attackerUserIds, remaining);
     }
   }
 }
