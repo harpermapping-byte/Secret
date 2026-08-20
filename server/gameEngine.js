@@ -11,7 +11,7 @@ const {
 } = require('./phases');
 
 const commands = require('./commands');
-const { generateMap } = require('./mapTemplates');
+const { generateMap, DEFAULT_MAP_KEY } = require('./mapTemplates');
 const { resolveAlliances } = require('./rules/alliances');
 const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
@@ -104,6 +104,7 @@ function createMatch(config) {
     tileCount: normalizedConfig.map.tileCount,
     factionCount: factions.length,
     mode: normalizedConfig.map.mode,
+    mapKey: normalizedConfig.map.key,
   });
 
   for (const tile of tiles) {
@@ -142,11 +143,43 @@ function createMatch(config) {
   return getAdminState();
 }
 
+/** Entero saneado dentro de [min,max], o `fallback` si no es un numero valido. */
+function clampInt(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
 function normalizeConfig(config) {
   return {
     factions: config.factions,
     channels: config.channels || [],
-    map: { tileCount: config.map?.tileCount ?? 20, mode: config.map?.mode ?? 'neutral' },
+    map: {
+      tileCount: config.map?.tileCount ?? 20,
+      mode: config.map?.mode ?? 'neutral',
+      // Que mapa jugar ('world' | 'iberia', ver AVAILABLE_MAPS/DEFAULT_MAP_KEY
+      // en mapTemplates.js) — cambia el PNG de fondo y sobre que silueta de
+      // tierra real se reparten territorios/decoraciones.
+      key: config.map?.key || DEFAULT_MAP_KEY,
+    },
+    // Casillas futuras del panel de admin, sin efecto de juego todavia (ver
+    // docs/ACCIONES.md): el admin ya puede marcarlas para cuando se
+    // implementen, pero hoy no cambian nada en la partida.
+    futureFeatures: {
+      wonders: !!config.futureFeatures?.wonders,
+      dungeons: !!config.futureFeatures?.dungeons,
+      bosses: !!config.futureFeatures?.bosses,
+      weather: !!config.futureFeatures?.weather,
+      randomEvents: !!config.futureFeatures?.randomEvents,
+    },
+    // Limite de tropas de IA (aiTroops+archerTroops+cavalryTroops) que puede
+    // llevar CADA jugador — ver rules/troops.js/troopBuildings.js
+    // (distributeTroops) y docs/ACCIONES.md. 1-200, por defecto 50.
+    troopLimitPerPlayer: clampInt(config.troopLimitPerPlayer, 1, 200, 50),
+    // Cuantos jugadores como mucho puede aceptar cada facción durante el
+    // reclutamiento (!faccionN) — ver joinFaction(). 1-100, por defecto sin
+    // límite práctico (100).
+    maxPlayersPerFaction: clampInt(config.maxPlayersPerFaction, 1, 100, 100),
     alliancesEnabled: !!config.alliancesEnabled,
     thresholds: {
       // `!expansion` ya NO tiene umbral de porcentaje: lo que decide cuantas
@@ -208,6 +241,17 @@ function joinFaction(userId, username, factionNumber) {
   if (!faction) return false;
 
   const existing = match.players.get(userId);
+
+  // Limite de jugadores por facción (config.maxPlayersPerFaction, panel de
+  // admin): no cuenta contra el límite volver a escribir el mismo !facciónN
+  // (no suma un miembro nuevo) — solo unirse a esta facción por primera vez
+  // o cambiarse desde otra distinta.
+  if (!existing || existing.factionNumber !== factionNumber) {
+    let currentMembers = 0;
+    for (const p of match.players.values()) if (p.factionNumber === factionNumber) currentMembers++;
+    if (currentMembers >= match.config.maxPlayersPerFaction) return false;
+  }
+
   match.players.set(userId, {
     userId,
     username,

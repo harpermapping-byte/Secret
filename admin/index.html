@@ -96,6 +96,12 @@
     <label>Canales de Twitch a escuchar (uno por línea — vale el nombre solo, "condejorge", o el link completo, "https://twitch.tv/condejorge", como prefieras)</label>
     <textarea id="channels" rows="2">condejorge</textarea>
 
+    <label>Mapa</label>
+    <select id="mapKey">
+      <option value="world">Mundo</option>
+      <option value="iberia">España</option>
+    </select>
+
     <label>Tamaño del mapa (nº de casillas)</label>
     <input type="number" id="tileCount" value="18" min="6" />
 
@@ -106,6 +112,26 @@
     </select>
 
     <label><input type="checkbox" id="alliancesEnabled" style="width:auto" checked /> Alianzas activadas</label>
+
+    <div class="row">
+      <div style="flex:1">
+        <label title="Cuántas tropas de IA (soldados+arqueros+caballeros) puede llevar como mucho cada jugador. Al llegar al límite deja de recibir más — si toda la facción está al límite, esa producción se pierde.">Límite de tropas por jugador (1-200)</label>
+        <input type="number" id="troopLimitPerPlayer" value="50" min="1" max="200" />
+      </div>
+      <div style="flex:1">
+        <label title="Cuántos jugadores como mucho puede aceptar cada facción durante el reclutamiento.">Jugadores máx. por facción (1-100)</label>
+        <input type="number" id="maxPlayersPerFaction" value="100" min="1" max="100" />
+      </div>
+    </div>
+
+    <h3>Próximamente (sin efecto todavía)</h3>
+    <div class="row" style="flex-wrap:wrap; gap:4px 16px">
+      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffWonders" style="width:auto" /> Maravillas</label>
+      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffDungeons" style="width:auto" /> Dungeons</label>
+      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffBosses" style="width:auto" /> Bosses</label>
+      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffWeather" style="width:auto" /> Clima</label>
+      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffRandomEvents" style="width:auto" /> Eventos aleatorios</label>
+    </div>
 
     <!-- `!expansion` ya no tiene umbral de %: las casillas que gana una
          facción dependen de cuánta gente la vote (1 casilla por cada 2
@@ -249,8 +275,21 @@
     send('admin:createMatch', {
       factions,
       channels: document.getElementById('channels').value.split('\n').map((s) => s.trim()).filter(Boolean),
-      map: { tileCount: Number(document.getElementById('tileCount').value), mode: document.getElementById('mapMode').value },
+      map: {
+        tileCount: Number(document.getElementById('tileCount').value),
+        mode: document.getElementById('mapMode').value,
+        key: document.getElementById('mapKey').value,
+      },
       alliancesEnabled: document.getElementById('alliancesEnabled').checked,
+      troopLimitPerPlayer: Number(document.getElementById('troopLimitPerPlayer').value),
+      maxPlayersPerFaction: Number(document.getElementById('maxPlayersPerFaction').value),
+      futureFeatures: {
+        wonders: document.getElementById('ffWonders').checked,
+        dungeons: document.getElementById('ffDungeons').checked,
+        bosses: document.getElementById('ffBosses').checked,
+        weather: document.getElementById('ffWeather').checked,
+        randomEvents: document.getElementById('ffRandomEvents').checked,
+      },
       thresholds: {
         alliancePercent: Number(document.getElementById('alliancePercent').value),
         specialPercent: Number(document.getElementById('specialPercent').value),

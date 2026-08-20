@@ -44,18 +44,23 @@
  *     que se repinta siempre que llega un `state:*` nuevo, sin tocar el raster.
  */
 (function () {
-  // Tamaño en pixeles del terreno horneado (public/terrain/world.png, ver
-  // tools/bakeWorldTerrain.js) — MISMA resolucion que COLS x ROWS de
-  // server/worldLandMask.js. `layout.cols/rows` (lo que manda `map:layout`
+  // Tamaño en pixeles del terreno horneado (public/terrain/world.png o
+  // iberia.png, segun que mapa haya elegido el admin — ver
+  // tools/bakeWorldTerrain.js) — MISMA resolucion que COLS x ROWS del land
+  // mask de ESE mapa en el servidor (server/worldLandMask.js /
+  // server/iberiaLandMask.js). `layout.cols/rows` (lo que manda `map:layout`
   // por partida) es una rejilla mucho mas basta a proposito (ver
   // TERRAIN_DOWNSAMPLE en server/mapTemplates.js: genera el mapa mas rapido y
   // con un payload de red mucho menor) — BLOCK_PX es el factor que reescala
   // esa rejilla basta hasta este tamaño de pantalla al pintar, para que
   // `canvasEl` y `terrainBgEl` (el PNG, a este mismo tamaño) queden
-  // perfectamente alineados bajo el mismo transform de pan/zoom. Se
-  // recalcula en cada `setLayout()`, no es un valor fijo.
-  const TERRAIN_IMAGE_COLS = 8800;
-  const TERRAIN_IMAGE_ROWS = 4604;
+  // perfectamente alineados bajo el mismo transform de pan/zoom.
+  // `TERRAIN_IMAGE_COLS/ROWS` y el archivo a cargar ya NO son fijos: llegan
+  // en `newLayout.terrainImageCols/Rows/terrainFile` (ver setLayout() mas
+  // abajo) y se recalculan en cada `map:layout` — con un valor por defecto
+  // (mundo) para no romper si algun caller viejo no los manda.
+  let TERRAIN_IMAGE_COLS = 8800;
+  let TERRAIN_IMAGE_ROWS = 4604;
   let BLOCK_PX = 1;
   const NEUTRAL_COLOR = '#3a3f45';
   const BORDER_COLOR = '#050a10'; // borde entre dos territorios de tierra
@@ -182,6 +187,12 @@
       // docs/ACCIONES.md sección 6.
       const cellTileIds = decodeCellTileIds(newLayout.cellTileIdsPacked, newLayout.cols * newLayout.rows);
       layout = { cols: newLayout.cols, rows: newLayout.rows, centroids: newLayout.centroids, cellTileIds };
+      // Que mapa toca esta partida (mundo/España/...) — ver AVAILABLE_MAPS en
+      // server/mapTemplates.js. Con valor por defecto (mundo) por si algun
+      // `map:layout` viejo no los manda.
+      TERRAIN_IMAGE_COLS = newLayout.terrainImageCols || 8800;
+      TERRAIN_IMAGE_ROWS = newLayout.terrainImageRows || 4604;
+      const terrainFile = newLayout.terrainFile || '/terrain/world.png';
       offscreen = document.createElement('canvas');
       offscreen.width = layout.cols;
       offscreen.height = layout.rows;
@@ -212,7 +223,12 @@
       // evita cualquier desalineacion acumulada al hacer zoom, ya que ambas
       // capas reciben el MISMO transform de pan/zoom (ver applyTransform()).
       if (terrainBgEl) {
-        if (!terrainBgEl.src) terrainBgEl.src = '/terrain/world.png';
+        // Comparación por el PATH servido (no por `.src`, que el navegador
+        // normaliza a URL absoluta) — así una partida nueva con OTRO mapa
+        // recarga el PNG que toca, y una partida nueva con el MISMO mapa no
+        // repite la descarga (esto último ya pasaba antes con `!terrainBgEl.src`).
+        const currentPath = terrainBgEl.getAttribute('src');
+        if (currentPath !== terrainFile) terrainBgEl.setAttribute('src', terrainFile);
         terrainBgEl.width = canvasEl.width;
         terrainBgEl.height = canvasEl.height;
       }
@@ -2063,6 +2079,13 @@
     /** Arboles/rocas/etc. de `objects.bin` (si ese asset llego a generarse). */
     function drawTerrainObjects(w, h) {
       if (!ready || !objs || !objs.count) return;
+      // `objects.bin` esta horneado en el espacio de pixeles del MUNDO
+      // (8800x4604, ver tools/generateWorldObjects.js) — en cualquier otro
+      // mapa (España...) esas mismas coordenadas no significan nada (arboles
+      // aparecerian en sitios al azar, la mayoria fuera del lienzo mas
+      // pequeño), asi que esta capa solo se pinta cuando el mapa activo es
+      // el mundo.
+      if (TERRAIN_IMAGE_COLS !== 8800 || TERRAIN_IMAGE_ROWS !== 4604) return;
 
       const { x: vx, y: vy, scale } = currentView;
       updateLodTier(scale);

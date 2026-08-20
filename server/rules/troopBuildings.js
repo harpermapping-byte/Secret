@@ -84,12 +84,19 @@ function countFactionBuildings(match, faction, tileField) {
  */
 function buildFromVotes(match, faction, userIds, tileField, troopField) {
   if (!userIds || userIds.length === 0) return;
+  const limit = match.config.troopLimitPerPlayer;
   for (const userId of userIds) {
+    // El edificio se levanta pase lo que pase (efecto de la CASILLA, no del
+    // votante) — solo el bono personal respeta el límite de tropas del
+    // panel de admin, recortado al hueco que le quede al votante.
     const tileId = faction.territoryIds[Math.floor(Math.random() * faction.territoryIds.length)];
     match.tiles[tileId][tileField] += 1;
 
     const player = match.players.get(userId);
-    if (player) player[troopField] = (player[troopField] || 0) + BUILDING_INITIAL_BONUS;
+    if (!player) continue;
+    const current = (player.aiTroops || 0) + (player.archerTroops || 0) + (player.cavalryTroops || 0);
+    const room = Math.max(0, limit - current);
+    player[troopField] = (player[troopField] || 0) + Math.min(BUILDING_INITIAL_BONUS, room);
   }
 }
 
