@@ -1079,6 +1079,14 @@
   // sustituyen al conquistar).
   const aldeanoSpriteImg = loadSprite('aldeano');
   const ALDEANO_SPRITE_WORLD_W = 13;
+  // Guarnición neutral paseando (castillo/aldea/puerto SIN conquistar,
+  // sección 23): sprite PROPIO, distinto del de las tropas del propio
+  // jugador (antes reutilizaban troop/troop-archer/troop-cavalry, lo que
+  // impedía re-skinearlos por separado como "bárbaros" — se pidió
+  // expresamente separarlos). Mismos tamaños que su equivalente de tropa.
+  const barbaroImg = loadSprite('barbaro');
+  const barbaroArcherImg = loadSprite('barbaro-arquero');
+  const barbaroCavalryImg = loadSprite('barbaro-caballero');
   // Capital de faccion: placeholder gris que se tiñe del color de la
   // faccion en tiempo real (ver drawTintedSprite), igual que el marcador de
   // jugador.
@@ -1643,9 +1651,9 @@
         if (!s.conquered) {
           // Un par por tipo presente en la guarnicion (tope 3, para no
           // amontonar 15 sprites encima de un castillo grande).
-          if (s.aiTroops > 0) specs.push({ spriteKey: 'troop', n: Math.min(3, Math.max(1, Math.ceil(s.aiTroops / 4))) });
-          if (s.archerTroops > 0) specs.push({ spriteKey: 'troop-archer', n: Math.min(3, Math.max(1, Math.ceil(s.archerTroops / 4))) });
-          if (s.cavalryTroops > 0) specs.push({ spriteKey: 'troop-cavalry', n: Math.min(3, Math.max(1, Math.ceil(s.cavalryTroops / 4))) });
+          if (s.aiTroops > 0) specs.push({ spriteKey: 'barbaro', n: Math.min(3, Math.max(1, Math.ceil(s.aiTroops / 4))) });
+          if (s.archerTroops > 0) specs.push({ spriteKey: 'barbaro-arquero', n: Math.min(3, Math.max(1, Math.ceil(s.archerTroops / 4))) });
+          if (s.cavalryTroops > 0) specs.push({ spriteKey: 'barbaro-caballero', n: Math.min(3, Math.max(1, Math.ceil(s.cavalryTroops / 4))) });
         } else {
           specs.push({ spriteKey: 'aldeano', n: 3 });
         }
@@ -1762,7 +1770,12 @@
       });
     }
 
-    const SITE_WALKER_SPRITES = { troop: [troopImg, TROOP_SPRITE_WORLD_W], 'troop-archer': [archerTroopImg, TROOP_SPRITE_WORLD_W], 'troop-cavalry': [cavalryTroopImg, CAVALRY_TROOP_SPRITE_WORLD_W], aldeano: [aldeanoSpriteImg, ALDEANO_SPRITE_WORLD_W] };
+    const SITE_WALKER_SPRITES = {
+      barbaro: [barbaroImg, TROOP_SPRITE_WORLD_W],
+      'barbaro-arquero': [barbaroArcherImg, TROOP_SPRITE_WORLD_W],
+      'barbaro-caballero': [barbaroCavalryImg, CAVALRY_TROOP_SPRITE_WORLD_W],
+      aldeano: [aldeanoSpriteImg, ALDEANO_SPRITE_WORLD_W],
+    };
 
     /** Dibuja la capital (si el sitio tiene `factionColor`, tinta como un marcador de jugador) y los caminantes de cada sitio. */
     function drawSiteWalkers(w, h) {

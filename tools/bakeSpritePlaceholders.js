@@ -287,6 +287,28 @@ const SPRITES = {
     c.rect(2, 8, 12, 16, [150, 150, 168], 1);
   },
 
+  // GUARNICION NEUTRAL PASEANDO (ver docs/ACCIONES.md seccion 23,
+  // syncSiteWalkers() en mapRenderer.js): antes reutilizaban el mismo
+  // sprite que las tropas del PROPIO jugador (troop/troop-archer/
+  // troop-cavalry), lo que impedia re-skinearlos por separado como
+  // "bárbaros" — ahora tienen los suyos propios, mismo tamaño que su
+  // equivalente de jugador pero en tonos tierra/óxido, más salvajes/
+  // hostiles, para poder sustituirlos sin tocar el sprite de las tropas
+  // normales. 14x22 / 14x22 / 16x26, igual que troop/troop-archer/
+  // troop-cavalry.
+  barbaro: (c) => {
+    c.rect(4, 2, 6, 6, [150, 92, 54], 1);
+    c.rect(2, 8, 10, 13, [150, 92, 54], 1);
+  },
+  'barbaro-arquero': (c) => {
+    c.rect(4, 2, 6, 6, [112, 98, 48], 1);
+    c.rect(2, 8, 10, 13, [112, 98, 48], 1);
+  },
+  'barbaro-caballero': (c) => {
+    c.rect(5, 2, 6, 6, [90, 68, 58], 1);
+    c.rect(2, 8, 12, 16, [90, 68, 58], 1);
+  },
+
   // GUARNICION NEUTRAL (ver docs/ACCIONES.md seccion 20, rules/structures.js):
   // la IA que defiende castillo/aldea/puerto antes de que alguien conquiste
   // con !conquista. Mismo tamaño que `troop` (14x22, sin variante de
@@ -383,6 +405,7 @@ const SIZES = {
   industry: [36, 28],
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
   troop: [14, 22], 'troop-archer': [14, 22], 'troop-cavalry': [16, 26],
+  barbaro: [14, 22], 'barbaro-arquero': [14, 22], 'barbaro-caballero': [16, 26],
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
