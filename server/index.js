@@ -109,6 +109,11 @@ function buildWireMapLayout(layout) {
     centroids: layout.centroids,
     cellTileIdsPacked,
     decorations: layout.decorations || [],
+    // Que PNG de fondo cargar y su tamaño real — ver AVAILABLE_MAPS en
+    // mapTemplates.js y setLayout() en public/mapRenderer.js.
+    terrainFile: layout.terrainFile,
+    terrainImageCols: layout.terrainImageCols,
+    terrainImageRows: layout.terrainImageRows,
   };
 }
 

@@ -21,14 +21,32 @@
  * territorio (resolveAiTroops, solo soldados) como los edificios de
  * !levas/!arqueros/!caballeros (ver rules/troopBuildings.js, los 3 tipos).
  */
+function totalTroops(p) {
+  return (p.aiTroops || 0) + (p.archerTroops || 0) + (p.cavalryTroops || 0);
+}
+
+/**
+ * `match.config.troopLimitPerPlayer` (panel de admin, 1-200, por defecto 50):
+ * un jugador que ya lleva ese total de tropas (sumando los 3 tipos) deja de
+ * poder recibir más — no importa el tipo que le tocara repartir, se le trata
+ * como si no existiera para el reparto. Si TODA la facción viva está al
+ * límite, esa producción se pierde sin más (no se acumula para después): es
+ * justo lo que se pidió — "si no hay más usuario en esa facción no se
+ * generarán tropas".
+ */
 function distributeTroops(match, faction, count, fieldName) {
   if (count <= 0) return;
-  const living = [...match.players.values()].filter((p) => p.alive && p.factionNumber === faction.number);
+  const limit = match.config.troopLimitPerPlayer;
+  const living = [...match.players.values()].filter(
+    (p) => p.alive && p.factionNumber === faction.number && totalTroops(p) < limit
+  );
   if (!living.length) return;
 
   for (let i = 0; i < count; i++) {
-    const minTroops = Math.min(...living.map((p) => p[fieldName] || 0));
-    const eligible = living.filter((p) => (p[fieldName] || 0) === minTroops);
+    const eligibleNow = living.filter((p) => totalTroops(p) < limit);
+    if (!eligibleNow.length) break; // toda la facción llegó al límite a mitad de reparto: se pierde el resto
+    const minTroops = Math.min(...eligibleNow.map((p) => p[fieldName] || 0));
+    const eligible = eligibleNow.filter((p) => (p[fieldName] || 0) === minTroops);
     const chosen = eligible[Math.floor(Math.random() * eligible.length)];
     chosen[fieldName] = (chosen[fieldName] || 0) + 1;
   }

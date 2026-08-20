@@ -45,55 +45,105 @@
  */
 
 const { shuffle } = require('./rules/shared');
-const { decodeLandMaskPacked, isLand, COLS: FULL_COLS, ROWS: FULL_ROWS } = require('./worldLandMask');
+const worldLandMaskMod = require('./worldLandMask');
+const iberiaLandMaskMod = require('./iberiaLandMask');
 
 const OCEAN = -1; // sentinel en cellTileIds: la celda es oceano, no pertenece a ningun tile
 
-// Cuantas celdas del raster horneado (FULL_COLS x FULL_ROWS) equivalen a UNA
-// celda de la rejilla de territorios. 8 da 1100x576 (~633K celdas) — de sobra
-// para fronteras suaves al zoom maximo del juego (MAX_SCALE=2.5 en
-// public/mapRenderer.js; ver el comentario de mas arriba). Subir este numero
-// = mapas mas rapidos/ligeros pero fronteras mas bastas; bajarlo = al reves.
+// Cuantas celdas del raster horneado equivalen a UNA celda de la rejilla de
+// territorios. 8 da fronteras suaves al zoom maximo del juego (MAX_SCALE=2.5
+// en public/mapRenderer.js) sin tener que barajar millones de celdas por
+// partida. Subir este numero = mapas mas rapidos/ligeros pero fronteras mas
+// bastas; bajarlo = al reves. Mismo valor para todos los mapas (ver
+// MAP_SOURCES) para que el "grano" de frontera se sienta igual en cualquiera.
 const TERRAIN_DOWNSAMPLE = 8;
-const RASTER_COLS = Math.round(FULL_COLS / TERRAIN_DOWNSAMPLE);
-const RASTER_ROWS = Math.round(FULL_ROWS / TERRAIN_DOWNSAMPLE);
 
-// La mascara y la lista de celdas de tierra se construyen una unica vez al
-// cargar el modulo (no por partida) — server/worldLandMask.js seccion "Como
-// se genera" tiene el detalle de donde sale esta silueta.
-//
-// Se lee directamente del Buffer empaquetado (`decodeLandMaskPacked()`, ~5MB)
-// en vez de desempaquetar antes la mascara completa a resolucion de horneado
-// (`decodeLandMask()`, ~40,5MB y ~1s de CPU) — como esta rejilla solo
-// necesita 1 de cada TERRAIN_DOWNSAMPLE^2 celdas, desempaquetar TODO antes
-// de tirar el 98% seria trabajo desperdiciado.
-//
-// `landCellsX`/`landCellsY` van en arrays tipados PAREJOS (no un array de
-// objetos {x,y}) por la misma razon de siempre: son mas baratos de barajar
-// (ver `shuffleParallel` mas abajo) que un array de objetos JS.
-const packedLandMask = decodeLandMaskPacked();
-const landMask = new Uint8Array(RASTER_COLS * RASTER_ROWS);
-let landCellCount = 0;
-for (let ry = 0; ry < RASTER_ROWS; ry++) {
-  const fy = Math.min(FULL_ROWS - 1, ry * TERRAIN_DOWNSAMPLE);
-  for (let rx = 0; rx < RASTER_COLS; rx++) {
-    const fx = Math.min(FULL_COLS - 1, rx * TERRAIN_DOWNSAMPLE);
-    if (isLand(packedLandMask, fx, fy)) {
-      landMask[ry * RASTER_COLS + rx] = 1;
-      landCellCount++;
+/**
+ * Un "source" es todo lo que generateMap() necesita de UN mapa concreto
+ * (mundo entero, España...): su rejilla de tierra/oceano ya reducida a
+ * resolucion de territorio, la lista plana de celdas de tierra (para
+ * sortear semillas), y las medidas del PNG horneado que el cliente tiene
+ * que cargar de fondo (ver mapLayout.terrainFile/terrainImageCols/Rows,
+ * consumidos por setLayout() en public/mapRenderer.js). Se calcula una
+ * UNICA vez por mapa (no por partida) y se cachea — construir la mascara
+ * reducida es la unica parte cara (recorrer millones de celdas), y es la
+ * misma sea cual sea tileCount/factionCount de la partida.
+ */
+const mapSourceCache = new Map();
+
+function buildSourceFromMask(decodeFn, fullCols, fullRows, isLandFn) {
+  const cols = Math.round(fullCols / TERRAIN_DOWNSAMPLE);
+  const rows = Math.round(fullRows / TERRAIN_DOWNSAMPLE);
+  const landMask = new Uint8Array(cols * rows);
+  let landCellCount = 0;
+  const full = decodeFn();
+  for (let ry = 0; ry < rows; ry++) {
+    const fy = Math.min(fullRows - 1, ry * TERRAIN_DOWNSAMPLE);
+    for (let rx = 0; rx < cols; rx++) {
+      const fx = Math.min(fullCols - 1, rx * TERRAIN_DOWNSAMPLE);
+      if (isLandFn(full, fx, fy)) { landMask[ry * cols + rx] = 1; landCellCount++; }
     }
   }
-}
-const landCellsX = new Int32Array(landCellCount);
-const landCellsY = new Int32Array(landCellCount);
-{
+  const landCellsX = new Int32Array(landCellCount);
+  const landCellsY = new Int32Array(landCellCount);
   let k = 0;
-  for (let ry = 0; ry < RASTER_ROWS; ry++) {
-    for (let rx = 0; rx < RASTER_COLS; rx++) {
-      if (landMask[ry * RASTER_COLS + rx]) { landCellsX[k] = rx; landCellsY[k] = ry; k++; }
+  for (let ry = 0; ry < rows; ry++) {
+    for (let rx = 0; rx < cols; rx++) {
+      if (landMask[ry * cols + rx]) { landCellsX[k] = rx; landCellsY[k] = ry; k++; }
     }
   }
+  return { cols, rows, landMask, landCellsX, landCellsY };
 }
+
+// Definicion de cada mapa jugable: como reducir su mascara real a rejilla de
+// territorio, y que PNG horneado le corresponde de fondo en el cliente (ver
+// tools/bakeWorldTerrain.js y la generacion equivalente de España, misma
+// tecnica y parametros). Añadir un mapa nuevo en el futuro es añadir una
+// entrada aqui, sin tocar el resto de este archivo.
+const MAP_SOURCE_DEFS = {
+  world: {
+    label: 'Mundo',
+    // Se lee directamente del Buffer empaquetado (`decodeLandMaskPacked()`,
+    // ~5MB) en vez de desempaquetar antes la mascara completa de horneado
+    // (`decodeLandMask()`, ~40,5MB y ~1s de CPU) — como esta rejilla solo
+    // necesita 1 de cada TERRAIN_DOWNSAMPLE² celdas, desempaquetar TODO
+    // antes de tirar el 98% seria trabajo desperdiciado.
+    build: () => buildSourceFromMask(
+      worldLandMaskMod.decodeLandMaskPacked, worldLandMaskMod.COLS, worldLandMaskMod.ROWS, worldLandMaskMod.isLand
+    ),
+    terrainFile: '/terrain/world.png',
+    terrainImageCols: worldLandMaskMod.COLS,
+    terrainImageRows: worldLandMaskMod.ROWS,
+  },
+  iberia: {
+    label: 'España',
+    build: () => buildSourceFromMask(
+      iberiaLandMaskMod.decodeLandMask, iberiaLandMaskMod.COLS, iberiaLandMaskMod.ROWS,
+      (mask, x, y) => mask[y * iberiaLandMaskMod.COLS + x] === 1
+    ),
+    terrainFile: '/terrain/iberia.png',
+    terrainImageCols: iberiaLandMaskMod.COLS,
+    terrainImageRows: iberiaLandMaskMod.ROWS,
+  },
+};
+const DEFAULT_MAP_KEY = 'world';
+
+function getMapSource(mapKey) {
+  const key = MAP_SOURCE_DEFS[mapKey] ? mapKey : DEFAULT_MAP_KEY;
+  if (!mapSourceCache.has(key)) {
+    const def = MAP_SOURCE_DEFS[key];
+    mapSourceCache.set(key, { ...def.build(), terrainFile: def.terrainFile, terrainImageCols: def.terrainImageCols, terrainImageRows: def.terrainImageRows });
+  }
+  return mapSourceCache.get(key);
+}
+
+// Fuente EN USO durante la llamada a generateMap() en curso — todas las
+// funciones de mas abajo (isLandCell, placeDecorations, rasterizeLand...) la
+// leen de aqui en vez de recibirla por parametro en cada una: la generacion
+// de mapa es siempre sincrona (nunca dos generateMap() a la vez), asi que no
+// hace falta mas que esto para que cada partida use el mapa que le toca sin
+// tener que enhebrar el parametro por una decena de funciones.
+let currentSource = getMapSource(DEFAULT_MAP_KEY);
 
 /** Fisher-Yates in-place, pero sobre DOS arrays tipados en paralelo (misma permutacion en ambos) — equivalente a `shuffle()` de rules/shared.js, que no sirve aqui porque necesitamos mover x[i] e y[i] juntos, no dos barajados independientes. */
 function shuffleParallel(xs, ys) {
@@ -106,15 +156,18 @@ function shuffleParallel(xs, ys) {
 
 /**
  * modo: 'total' (todo el mapa repartido, sin neutral) o 'neutral' (zonas pequenas + territorio neutral)
+ * mapKey: que mapa jugar ('world' | 'iberia', ver MAP_SOURCE_DEFS) — por defecto el mundo.
  */
-function generateMap({ tileCount, factionCount, mode }) {
+function generateMap({ tileCount, factionCount, mode, mapKey }) {
   if (factionCount < 2) throw new Error('generateMap: se necesitan al menos 2 facciones');
   if (tileCount < factionCount * 2) throw new Error('generateMap: tileCount demasiado pequenio para factionCount');
-  if (tileCount > landCellsX.length) throw new Error('generateMap: tileCount demasiado grande, no caben tantos territorios en la tierra del mapa');
+
+  currentSource = getMapSource(mapKey);
+  if (tileCount > currentSource.landCellsX.length) throw new Error('generateMap: tileCount demasiado grande, no caben tantos territorios en la tierra del mapa');
 
   const seeds = placeSeedsOnLand(tileCount);
-  const { cellTileIds, centroids } = rasterizeLand(seeds, RASTER_COLS, RASTER_ROWS);
-  const neighborSets = computeNeighbors(cellTileIds, RASTER_COLS, RASTER_ROWS, tileCount);
+  const { cellTileIds, centroids } = rasterizeLand(seeds, currentSource.cols, currentSource.rows);
+  const neighborSets = computeNeighbors(cellTileIds, currentSource.cols, currentSource.rows, tileCount);
   const ownerByTile = assignInitialOwners({ tileCount, factionCount, mode, seeds, neighborSets });
 
   const tiles = [];
@@ -145,11 +198,16 @@ function generateMap({ tileCount, factionCount, mode }) {
   const decorations = placeDecorations();
 
   const mapLayout = {
-    cols: RASTER_COLS,
-    rows: RASTER_ROWS,
+    cols: currentSource.cols,
+    rows: currentSource.rows,
     cellTileIds,
     centroids,
     decorations,
+    // Con que PNG horneado pintar el fondo, y su tamaño real en pixeles —
+    // ver setLayout() en public/mapRenderer.js, que ya NO asume world.png.
+    terrainFile: currentSource.terrainFile,
+    terrainImageCols: currentSource.terrainImageCols,
+    terrainImageRows: currentSource.terrainImageRows,
   };
   return { tiles, mode, mapLayout, structures: buildStructures(decorations, cellTileIds) };
 }
@@ -189,7 +247,7 @@ const DECORATION_KINDS = [
 const DECOR_MAX_TRIES = 400;
 
 function isLandCell(x, y) {
-  return landMask[y * RASTER_COLS + x] === 1;
+  return currentSource.landMask[y * currentSource.cols + x] === 1;
 }
 
 /** Celda de tierra con al menos un vecino (4-conectado) de agua: la orilla. */
@@ -197,9 +255,9 @@ function isCoastCell(x, y) {
   if (!isLandCell(x, y)) return false;
   return (
     (x > 0 && !isLandCell(x - 1, y)) ||
-    (x < RASTER_COLS - 1 && !isLandCell(x + 1, y)) ||
+    (x < currentSource.cols - 1 && !isLandCell(x + 1, y)) ||
     (y > 0 && !isLandCell(x, y - 1)) ||
-    (y < RASTER_ROWS - 1 && !isLandCell(x, y + 1))
+    (y < currentSource.rows - 1 && !isLandCell(x, y + 1))
   );
 }
 
@@ -230,8 +288,8 @@ function placeDecorations() {
     for (let n = 0; n < count; n++) {
       let best = null;
       for (let attempt = 0; attempt < DECOR_MAX_TRIES; attempt++) {
-        const x = Math.floor(Math.random() * RASTER_COLS);
-        const y = Math.floor(Math.random() * RASTER_ROWS);
+        const x = Math.floor(Math.random() * currentSource.cols);
+        const y = Math.floor(Math.random() * currentSource.rows);
         if (!matchesTerrain(terrain, x, y)) continue;
         best = { x, y }; // vale como plan B aunque quede pegado a otro
         if (placed.every((p) => (p.x - x) ** 2 + (p.y - y) ** 2 >= minGapSq)) break;
@@ -282,7 +340,7 @@ function buildStructures(decorations, cellTileIds) {
     const ranges = STRUCTURE_GARRISON_RANGES[d.type];
     if (!ranges) continue; // no es castillo/aldea/puerto (arbol, barco...): no es conquistable
 
-    const tileId = cellTileIds[d.y * RASTER_COLS + d.x];
+    const tileId = cellTileIds[d.y * currentSource.cols + d.x];
     if (tileId === OCEAN) continue; // defensivo: no debería pasar (castillo/aldea/puerto solo salen en tierra)
 
     structures.push({
@@ -312,6 +370,7 @@ function placeSeedsOnLand(tileCount) {
   // vuelve a examinar la misma lista (algunos candidatos rechazados por
   // estar muy cerca de una semilla pueden pasar en la siguiente ronda, al
   // relajarse `minDist`), pero sin pagar otro barajado completo cada vez.
+  const landCellsX = currentSource.landCellsX, landCellsY = currentSource.landCellsY;
   shuffleParallel(landCellsX, landCellsY);
   let minDist = Math.sqrt(landCellsX.length / tileCount) * 0.7;
   const seeds = [];
@@ -361,6 +420,8 @@ function placeSeedsOnLand(tileCount) {
  * estilo Risk como estas.
  */
 function rasterizeLand(seeds, cols, rows) {
+  const landMask = currentSource.landMask;
+  const landCellsX = currentSource.landCellsX, landCellsY = currentSource.landCellsY;
   const cellTileIds = new Int32Array(cols * rows).fill(OCEAN);
   const sums = seeds.map(() => ({ x: 0, y: 0, count: 0 }));
 
@@ -494,4 +555,9 @@ function assignInitialOwners({ tileCount, factionCount, mode, seeds, neighborSet
   return owner;
 }
 
-module.exports = { generateMap, OCEAN };
+// Lista de mapas jugables para el panel de admin (clave + nombre a mostrar),
+// ver admin/index.html. Se deriva de MAP_SOURCE_DEFS para que añadir un mapa
+// nuevo ahi (con su build()/terrainFile) baste para que aparezca aqui solo.
+const AVAILABLE_MAPS = Object.keys(MAP_SOURCE_DEFS).map((key) => ({ key, label: MAP_SOURCE_DEFS[key].label }));
+
+module.exports = { generateMap, OCEAN, AVAILABLE_MAPS, DEFAULT_MAP_KEY };
