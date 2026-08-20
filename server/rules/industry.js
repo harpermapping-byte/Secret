@@ -14,9 +14,17 @@ const INDUSTRY_PER_BUILDING = 0.5;
 // Nivel 2: cuantos edificios de industria se levantan solos al desbloquear
 // (como si otros tantos usuarios hubieran votado !industria esa ronda).
 const TIER2_AUTO_INDUSTRIES = 3;
-// Nivel 1 y nivel 3: cuantos soldados pasan a caballero de golpe.
+// Nivel 1: cuantos soldados pasan a caballero de golpe.
 const TIER1_KNIGHT_COUNT = 1;
-const TIER3_KNIGHT_COUNT = 3;
+// Nivel 4 (castillo especial, ver rules/towers.js para el mismo patron de
+// "edificio + tope + produccion pasiva" con las torres): cuantas tropas
+// especiales trae el castillo AL CONSTRUIRSE, cuantas mas produce cada ronda
+// despues (mientras no se llegue al tope), el tope por faccion, y el bonus
+// de ataque/defensa FIJO que aporta cada una (simetrico, como un dungeon).
+const SPECIAL_CASTLE_INITIAL_TROOPS = 2;
+const SPECIAL_CASTLE_TROOPS_PER_ROUND = 1;
+const SPECIAL_TROOP_CAP = 10;
+const SPECIAL_TROOP_COMBAT_BONUS = 0.4;
 
 /**
  * Las 4 mejoras, en orden fijo. `perPlayer` = industria acumulada necesaria
@@ -43,20 +51,31 @@ const TIER3_KNIGHT_COUNT = 3;
  * distintas: mide "como de bien coopera mi gente", no "cuanta gente tengo".
  *
  * Que hace cada nivel, TODO automatico (nadie vota nada para esto, se
- * dispara solo al cruzar el umbral):
- *   1 'caballero'        -> 1 soldado al azar de la faccion pasa a caballero
- *   2 'industria_extra'  -> se levantan 3 edificios de industria de golpe
- *   3 'caballeros_x3'    -> 3 soldados MAS pasan a caballero (nunca repite a
- *                           quien ya lo sea, ver upgradeRandomSoldiers)
- *   4 'tregua'           -> nadie puede atacar a esta faccion la RONDA
- *                           SIGUIENTE (igual que una alianza automatica con
- *                           todo el mundo, ver resolveIndustryImmunity)
+ * dispara solo al cruzar el umbral). El nivel 3 ('caballeros_x3', 3 soldados
+ * mas a caballero) se ha RETIRADO segun lo pedido — el nivel 4 de siempre
+ * ('tregua') baja a ocupar su hueco (mismo umbral perPlayer=15 que tenia
+ * antes 'caballeros_x3', el numero de la POSICION no cambia), y el nuevo
+ * nivel 4 es 'castillo_especial':
+ *   1 'caballero'         -> 1 soldado al azar de la faccion pasa a caballero
+ *   2 'industria_extra'   -> se levantan 3 edificios de industria de golpe
+ *   3 'tregua'            -> nadie puede atacar a esta faccion la RONDA
+ *                            SIGUIENTE (igual que una alianza automatica con
+ *                            todo el mundo, ver resolveIndustryImmunity)
+ *   4 'castillo_especial' -> aparece un castillo cerca de la capital de la
+ *                            faccion (placeholder decorativo, ver
+ *                            public/mapRenderer.js), que trae 2 tropas
+ *                            especiales al construirse y produce 1 mas cada
+ *                            ronda despues, hasta un tope de 10 por faccion
+ *                            — cada una aporta 0.4 de ataque Y defensa fijos
+ *                            (ver SPECIAL_TROOP_COMBAT_BONUS, integrado en
+ *                            rules/combat.js). Sin aldeanos alrededor, a
+ *                            diferencia de la capital.
  */
 const INDUSTRY_TIERS = [
   { key: 'caballero', perPlayer: 3 },
   { key: 'industria_extra', perPlayer: 8 },
-  { key: 'caballeros_x3', perPlayer: 15 },
-  { key: 'tregua', perPlayer: 24 },
+  { key: 'tregua', perPlayer: 15 },
+  { key: 'castillo_especial', perPlayer: 24 },
 ];
 
 // Suelo de jugadores al calcular los umbrales. Sin el, una faccion a la que
@@ -92,6 +111,14 @@ function resolveIndustry(match, context) {
 
     const votes = context.votesByFactionAndType.get(faction.number)[ACTION_INDUSTRY].length;
     buildIndustries(match, context, faction, votes);
+
+    // Produccion pasiva del castillo especial (nivel 4, ver INDUSTRY_TIERS):
+    // se comprueba con el flag de ANTES de esta ronda, asi que la ronda en la
+    // que se construye (mas abajo, en el bucle de niveles) solo da las 2
+    // tropas iniciales — el +1/ronda empieza la ronda SIGUIENTE.
+    if (faction.specialCastleBuilt && faction.specialTroopCount < SPECIAL_TROOP_CAP) {
+      faction.specialTroopCount = Math.min(SPECIAL_TROOP_CAP, faction.specialTroopCount + SPECIAL_CASTLE_TROOPS_PER_ROUND);
+    }
 
     const passive = faction.territoryIds.length * PASSIVE_INDUSTRY_PER_TERRITORY;
     const fromBuildings = countFactionIndustries(match, faction) * INDUSTRY_PER_BUILDING;
@@ -142,8 +169,10 @@ function applyIndustryTier(match, context, faction, tierKey) {
       return upgradeRandomSoldiers(match, faction, TIER1_KNIGHT_COUNT);
     case 'industria_extra':
       return buildIndustries(match, context, faction, TIER2_AUTO_INDUSTRIES);
-    case 'caballeros_x3':
-      return upgradeRandomSoldiers(match, faction, TIER3_KNIGHT_COUNT);
+    case 'castillo_especial':
+      faction.specialCastleBuilt = true;
+      faction.specialTroopCount = Math.min(SPECIAL_TROOP_CAP, faction.specialTroopCount + SPECIAL_CASTLE_INITIAL_TROOPS);
+      return;
     case 'tregua':
       // Se activa la RONDA SIGUIENTE, no esta — mismo patron que el Sabotaje
       // (industryPenaltyNextRound): se arma aqui y gameEngine.js lo "activa"
@@ -199,12 +228,28 @@ function resolveIndustryImmunity(match, context) {
   }
 }
 
+/**
+ * Bonus de ataque/defensa FIJO (0.4 cada uno, simetrico) que aportan las
+ * tropas especiales del castillo del nivel 4 de industria — se suma tal cual
+ * en rules/combat.js, igual que towerDefenseBonus() de rules/towers.js pero
+ * afectando a los DOS lados del combate (ataque Y defensa), tal y como se
+ * pidio ("0.4 de defensa y ataque").
+ */
+function specialTroopCombatBonus(faction) {
+  return (faction.specialTroopCount || 0) * SPECIAL_TROOP_COMBAT_BONUS;
+}
+
 module.exports = {
   resolveIndustry,
   resolveIndustryImmunity,
+  specialTroopCombatBonus,
   INDUSTRY_TIERS,
   industryThresholdsFor,
   MIN_PLAYERS_FOR_THRESHOLDS,
   PASSIVE_INDUSTRY_PER_TERRITORY,
   INDUSTRY_PER_BUILDING,
+  SPECIAL_TROOP_CAP,
+  SPECIAL_TROOP_COMBAT_BONUS,
+  SPECIAL_CASTLE_INITIAL_TROOPS,
+  SPECIAL_CASTLE_TROOPS_PER_ROUND,
 };

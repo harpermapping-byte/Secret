@@ -571,8 +571,8 @@
   const TIER_LABELS = {
     caballero: '1 caballero 🐴',
     industria_extra: '3 industrias gratis',
-    caballeros_x3: '3 caballeros más 🐴',
     tregua: 'Tregua (nadie os ataca la próxima ronda)',
+    castillo_especial: 'Castillo especial 🏯 junto a tu capital (2 tropas especiales, +1/ronda)',
   };
 
   function industryLines(state, industryData, unlocksData) {
@@ -683,7 +683,7 @@
   // explicación, la explicación grande va en el texto de ayuda".
   const CHAT_COMMANDS = [
     { cmd: '!faccion1, !faccion2, ...', phase: 'Reclutamiento', short: 'Te unes a esa facción (una vez por partida).', desc: 'Te unes a esa facción (el número es el que muestra el admin). Solo se puede una vez por partida, y solo mientras dura la fase de Reclutamiento.' },
-    { cmd: '!industria', phase: 'Acción', short: 'Levantas una industria: +0.5 por ronda para siempre.', desc: 'Levantas una industria en un terreno al azar de tu facción. Cada industria da +0.5 por ronda, para siempre, además del +0.1 que da cada terreno por sí solo. Si te conquistan ese terreno, la industria se va con él. La industria acumulada de tu facción desbloquea 4 mejoras automáticas (nadie vota nada, saltan solas): 1 soldado al azar pasa a caballero 🐴 (más fuerte y más rápido), 3 industrias gratis, 3 caballeros más, y una tregua de una ronda en la que nadie os puede atacar.' },
+    { cmd: '!industria', phase: 'Acción', short: 'Levantas una industria: +0.5 por ronda para siempre.', desc: 'Levantas una industria en un terreno al azar de tu facción. Cada industria da +0.5 por ronda, para siempre, además del +0.1 que da cada terreno por sí solo. Si te conquistan ese terreno, la industria se va con él. La industria acumulada de tu facción desbloquea 4 mejoras automáticas (nadie vota nada, saltan solas): 1 soldado al azar pasa a caballero 🐴 (más fuerte y más rápido), 3 industrias gratis, una tregua de una ronda en la que nadie os puede atacar, y por último aparece un castillo especial 🏯 junto a tu capital que trae 2 tropas especiales al construirse y 1 más cada ronda después (hasta 10 por facción) — cada una con 0.4 fijo de ataque Y defensa, sin necesidad de que nadie vote nada por ellas.' },
     { cmd: '!ataque <N>', phase: 'Acción', short: 'Atacas a la facción N (solo si tenéis frontera).', desc: 'Atacas a la facción número N (solo si tenéis frontera). Cada atacante aporta entre 0.7 y 1.3 de fuerza (al azar) — o entre 0.9 y 1.4 si es un caballero 🐴 — así que el mismo número de gente no siempre gana. En el mapa sale una espada roja ⚔ sobre la facción atacada con cuántos la atacáis.' },
     { cmd: '!defender', phase: 'Acción', short: 'Defiendes a tu facción esta ronda.', desc: 'Defiendes a tu facción esta ronda, aportando entre 0.7 y 1.3 de defensa (al azar) — o entre 0.9 y 1.4 si eres caballero 🐴. ¡Importante! El territorio NO se defiende solo: si nadie escribe !defender, tu facción entra al combate con 0 de defensa. En el mapa sale un escudo verde 🛡 con cuántos estáis defendiendo.' },
     { cmd: '!expansion', phase: 'Acción', short: 'Ocupáis terreno neutral vecino.', desc: 'Ocupáis terreno neutral vecino: hacen falta 2 personas por cada terreno nuevo (1 o 2 votos = 1 terreno, 4 votos = 2 terrenos...). No hace nada si la partida es de "reparto total", sin neutrales.' },

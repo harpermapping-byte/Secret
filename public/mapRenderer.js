@@ -1123,6 +1123,15 @@
   const ESTATUA_SPRITE_WORLD_W = 34;
   const ESTATUA_RING_RADIUS = 75; // px de mundo de la capital, fuera de su sprite (60px de ancho)
   const ESTATUA_ANGLE_STEP = (137.5 * Math.PI) / 180; // angulo dorado: buen reparto en anillo sea cual sea el numero de estatuas
+  // Castillo especial del nivel 4 de industria (ver rules/industry.js): UNA
+  // sola vez por facción, a un lado fijo de la capital (no en anillo como
+  // las estatuas, que pueden ser varias — este es siempre uno solo), con sus
+  // propias tropas especiales paseando alrededor y SIN aldeanos.
+  const castilloEspecialImg = loadSprite('castillo-especial');
+  const tropaEspecialImg = loadSprite('tropa-especial');
+  const CASTILLO_ESPECIAL_SPRITE_WORLD_W = 70;
+  const CASTILLO_ESPECIAL_OFFSET_X = 95; // px de mundo, a la derecha de la capital
+  const TROPA_ESPECIAL_SPRITE_WORLD_W = 14;
   // Radio de paseo (px de mundo) alrededor de un castillo/aldea/puerto/
   // capital para su guarnicion/aldeanos — mucho mas pequeño que el de un
   // jugador paseando por su territorio: son NPCs "de guardia", no viajan.
@@ -1742,6 +1751,19 @@
             specs: [{ spriteKey: 'aldeano', n: 4 }],
           });
         }
+
+        // Castillo especial del nivel 4 de industria (rules/industry.js): UNA
+        // sola vez, a un lado fijo de la capital (no en anillo, a diferencia
+        // de las estatuas — solo puede haber uno). Sin aldeanos alrededor,
+        // solo sus propias tropas especiales, tal y como se pidió.
+        if (f.specialCastleBuilt) {
+          sites.set(`castillo-especial:${f.number}`, {
+            home: { x: home.x + CASTILLO_ESPECIAL_OFFSET_X, y: home.y },
+            factionColor: f.color,
+            buildingKind: 'castilloEspecial',
+            specs: [{ spriteKey: 'tropa-especial', n: Math.max(1, f.specialTroopCount || 0) }],
+          });
+        }
       });
 
       return sites;
@@ -1841,6 +1863,7 @@
       aldeano: [aldeanoSpriteImg, ALDEANO_SPRITE_WORLD_W],
       orco: [orcoImg, ORCO_SPRITE_WORLD_W],
       goblin: [goblinImg, GOBLIN_SPRITE_WORLD_W],
+      'tropa-especial': [tropaEspecialImg, TROPA_ESPECIAL_SPRITE_WORLD_W],
     };
 
     /** Dibuja el edificio del sitio (capital teñida de su facción, o estatua-trofeo sin teñir) y los caminantes de cada sitio. */
@@ -1863,6 +1886,10 @@
           const ew = ESTATUA_SPRITE_WORLD_W * scale;
           const eh = ew * (estatuaImg.naturalHeight / estatuaImg.naturalWidth);
           ctx.drawImage(estatuaImg, home.x * scale + vx - ew / 2, home.y * scale + vy - eh, ew, eh);
+        } else if (inView && group.buildingKind === 'castilloEspecial' && castilloEspecialImg.complete && castilloEspecialImg.naturalWidth) {
+          const kw = CASTILLO_ESPECIAL_SPRITE_WORLD_W * scale;
+          const kh = kw * (castilloEspecialImg.naturalHeight / castilloEspecialImg.naturalWidth);
+          drawTintedSprite(castilloEspecialImg, home.x * scale + vx - kw / 2, home.y * scale + vy - kh, kw, kh, group.factionColor, 0.65);
         }
 
         group.list.forEach((walker) => {
