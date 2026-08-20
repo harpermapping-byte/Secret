@@ -93,6 +93,14 @@ function createMatch(config) {
     specialAbility: f.specialAbility || null,
     specialUsed: false,
     territoryIds: [],
+    // Capital de la faccion (ver docs/ACCIONES.md): una de sus casillas
+    // iniciales, elegida al crear la partida un poco mas abajo (aqui todavia
+    // no hay territoryIds que elegir). `capitalVillagerCount` es cuantos
+    // aldeanos pasean alrededor, sorteado una vez al crear la partida (4-8,
+    // "aleatorio el numero entre esos que dije" tal y como se pidio) y fijo
+    // el resto de la partida.
+    capitalTileId: null,
+    capitalVillagerCount: 0,
     killsCaused: 0,
     // Miembros que tenia la faccion al cerrar el reclutamiento. Se rellena en
     // closeRecruitment(); antes de eso vale 0 y los umbrales de industria caen
@@ -111,6 +119,15 @@ function createMatch(config) {
     if (tile.ownerFactionNumber != null) {
       findInFactionList(factions, tile.ownerFactionNumber).territoryIds.push(tile.id);
     }
+  }
+
+  // Capital: una casilla al azar de las iniciales de cada faccion (ver
+  // docs/ACCIONES.md) — se sortea aqui, UNA sola vez, porque territoryIds ya
+  // esta completo pero todavia nadie ha podido conquistar ni perder terreno.
+  for (const faction of factions) {
+    if (faction.territoryIds.length === 0) continue;
+    faction.capitalTileId = faction.territoryIds[Math.floor(Math.random() * faction.territoryIds.length)];
+    faction.capitalVillagerCount = 4 + Math.floor(Math.random() * 5); // 4 a 8 (ambos incluidos)
   }
 
   match = {
@@ -590,6 +607,12 @@ function getPublicState() {
       industry: f.industry,
       industryGainedLastRound: f.industryGainedLastRound,
       territoryCount: f.territoryIds.length,
+      // Ver docs/ACCIONES.md: casilla con el placeholder de capital de esta
+      // faccion y cuantos aldeanos pasean alrededor. Sigue apuntando a la
+      // MISMA casilla aunque la pierda en combate (es solo decorativo, sin
+      // efecto de juego todavia) — no se recalcula sola.
+      capitalTileId: f.capitalTileId,
+      capitalVillagerCount: f.capitalVillagerCount,
       killsCaused: f.killsCaused,
       wondersCount: 0, // reservado para v2 (maravillas), ver docs/GDD "Alcance de v1 vs futuro"
       // Recuento EN VIVO de la fase de accion en curso (ver countLiveActions):
@@ -613,21 +636,33 @@ function getPublicState() {
       archeryCount: t.archeryCount,
       cavalryCount: t.cavalryCount,
     })),
-    // Estructuras conquistables todavía con guarnición (ver `!conquista` en
-    // rules/structures.js) — las ya conquistadas se omiten a propósito: su
-    // guarnición está a 0 y ya no hay nada que enseñar sobre ellas (su
-    // producción se ve igual que cualquier edificio, en `tiles` de arriba).
-    structures: match.structures
-      .filter((s) => s.aiTroops + s.archerTroops + s.cavalryTroops > 0)
-      .map((s) => ({
+    // TODAS las estructuras, conquistadas o no (antes se omitían las ya
+    // conquistadas porque su guarnición está a 0 y no había nada más que
+    // enseñar — pero el cliente necesita seguir sabiendo DÓNDE estaba cada
+    // una para dibujar sus aldeanos alrededor una vez conquistada, ver
+    // `conquered` y paintStructureMarkers()/paintVillagerWalkers() en
+    // public/mapRenderer.js). Su producción sigue viéndose igual que
+    // cualquier edificio, en `tiles` de arriba.
+    structures: match.structures.map((s) => {
+      const conquered = s.aiTroops + s.archerTroops + s.cavalryTroops === 0;
+      return {
         tileId: s.tileId,
+        // Posicion exacta del edificio dentro de su casilla (celdas de
+        // rejilla, igual que `centroids` en mapLayout) — varias
+        // estructuras pueden compartir tileId, así que el cliente ancla el
+        // marcador y sus tropas paseando aquí, no en el centroide medio de
+        // toda la casilla.
+        x: s.x,
+        y: s.y,
         type: s.type,
+        conquered,
         aiTroops: s.aiTroops,
         archerTroops: s.archerTroops,
         cavalryTroops: s.cavalryTroops,
         attackPower: Number(structureAttackPower(s).toFixed(2)),
         defensePower: Number(structureDefensePower(s).toFixed(2)),
-      })),
+      };
+    }),
     players: [...match.players.values()].map((p) => {
       // Que esta haciendo este jugador AHORA MISMO, para que el mapa pueda
       // animar su marcador segun el comando que haya escrito (irse a la

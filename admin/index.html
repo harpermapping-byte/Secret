@@ -13,8 +13,20 @@
      El panel de admin lleva el MISMO tema medieval que la web pública: los
      formularios de configuración son hojas de pergamino. */
 
-  /* Login y formulario de configuración = hoja de pergamino sobre la mesa. */
-  #login, #configForm { max-width: 720px; margin: 60px auto; padding: 22px 26px;
+  /* Login y formulario de configuración = hoja de pergamino sobre la mesa.
+     Con tantas opciones ya metidas (mapa, límites, casillas "próximamente"),
+     el formulario puede ser más alto que la ventana — como <body> lleva
+     overflow:hidden (shared.css, para que el mapa a pantalla completa nunca
+     tenga scrollbar), sin esto los botones de abajo del todo ("Crear
+     partida"/"Iniciar partida") quedaban inalcanzables, tapados encima por
+     la barra de madera fija de abajo (body::after). Se le da su PROPIO
+     scroll interno, acotado entre las dos barras (--map-margin-y arriba y
+     abajo) en vez de depender del scroll de la página entera.
+     padding-bottom extra = altura de la barra de abajo + margen, así el
+     contenido puede desplazarse del todo por encima de ella. */
+  #login, #configForm { max-width: 720px; margin: max(20px, 3vh) auto 0;
+                        max-height: calc(100vh - var(--map-margin-y) - max(20px, 3vh) - 16px);
+                        overflow-y: auto; padding: 22px 26px calc(var(--map-margin-y) + 22px);
                         background-image:url('/ui/parchment.png'); background-size:260px 260px;
                         color:var(--ink); font-family:var(--font-serif);
                         border:2px solid #4a331c; border-radius:3px;
@@ -81,7 +93,7 @@
 </style>
 </head>
 <body>
-  <div id="login" style="margin-top:120px">
+  <div id="login">
     <h1 style="font-size:20px;margin:0 0 4px">Condejorge Wars — Admin</h1>
     <label>Contraseña de admin</label>
     <input type="password" id="passwordInput" />

@@ -565,10 +565,12 @@
       // drawSiteWalkers) — aqui, en la chapa de guarnicion/ataque/defensa, no
       // hay nada que enseñar de ellas (guarnicion a 0), asi que se omiten.
       structures.filter((s) => !s.conquered).forEach((s) => {
-        const c = layout.centroids[s.tileId];
-        if (!c) return;
-        const cx = c.x * BLOCK_PX;
-        const cy = c.y * BLOCK_PX - STRUCTURE_MARKER_OFFSET_Y;
+        // Posicion EXACTA del edificio (no el centroide de toda la
+        // casilla, que apilaría varias estructuras de la misma casilla en
+        // el mismo punto — ver docs/ACCIONES.md sección 26).
+        if (s.x == null || s.y == null) return;
+        const cx = s.x * BLOCK_PX;
+        const cy = s.y * BLOCK_PX - STRUCTURE_MARKER_OFFSET_Y;
 
         const label = `${STRUCTURE_TYPE_ICON[s.type] || ''} Lv${s.aiTroops} Ar${s.archerTroops} Cb${s.cavalryTroops}  ⚔${s.attackPower} 🛡${s.defensePower}`;
         ctx.font = '13px system-ui, sans-serif';
@@ -1633,9 +1635,10 @@
 
     /** Cuantos caminantes de que tipo le tocan a un sitio, sin listar posiciones todavia. */
     function desiredSiteSpecs(structures, factions) {
-      const sites = new Map(); // siteKey -> { tileId, factionColor, specs: [{spriteKey, n}] }
+      const sites = new Map(); // siteKey -> { home:{x,y}, factionColor, specs: [{spriteKey, n}] }
 
       (structures || []).forEach((s) => {
+        if (s.x == null || s.y == null) return; // partida vieja/estado incompleto: sin posicion no hay donde pintar
         const specs = [];
         if (!s.conquered) {
           // Un par por tipo presente en la guarnicion (tope 3, para no
@@ -1646,13 +1649,25 @@
         } else {
           specs.push({ spriteKey: 'aldeano', n: 3 });
         }
-        if (specs.length) sites.set(`struct:${s.tileId}`, { tileId: s.tileId, factionColor: null, specs });
+        if (!specs.length) return;
+        // Clave por tileId+type (no solo tileId): varias estructuras pueden
+        // compartir casilla (ver sección 22 de docs/ACCIONES.md), cada una
+        // con su propio grupo de paseantes anclado a SU posición exacta
+        // (`s.x`/`s.y`, celdas de rejilla -> px de mundo), no al centroide
+        // medio de la casilla entera.
+        sites.set(`struct:${s.tileId}:${s.type}`, {
+          home: { x: s.x * walkerWorld.blockPx, y: s.y * walkerWorld.blockPx },
+          factionColor: null,
+          specs,
+        });
       });
 
       (factions || []).forEach((f) => {
         if (f.capitalTileId == null) return;
+        const home = tileCenter(f.capitalTileId);
+        if (!home) return;
         sites.set(`capital:${f.number}`, {
-          tileId: f.capitalTileId,
+          home,
           factionColor: f.color,
           specs: [{ spriteKey: 'aldeano', n: Math.max(1, f.capitalVillagerCount || 0) }],
         });
@@ -1677,8 +1692,7 @@
       }
 
       desired.forEach((site, key) => {
-        const home = tileCenter(site.tileId);
-        if (!home) return;
+        const home = site.home;
         let group = siteWalkers.get(key);
         if (!group) { group = { home, factionColor: site.factionColor, list: [] }; siteWalkers.set(key, group); }
         group.home = home;
