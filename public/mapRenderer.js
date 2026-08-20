@@ -129,9 +129,12 @@
   // del jugador, ver getPublicState() en gameEngine.js — el cliente no
   // repite esa cuenta, solo la pinta).
   const guardiaSpriteImg = loadBuildingSprite('guardia');
+  // Icono del marcador de un dungeon (ver docs/ACCIONES.md sección 27):
+  // orco, para diferenciarlo de un vistazo del icono de guarnición normal.
+  const orcoSpriteImg = loadBuildingSprite('orco');
   const STRUCTURE_MARKER_ICON_W = 16;
   const STRUCTURE_MARKER_OFFSET_Y = 90; // px de mundo por encima del centroide de la casilla
-  const STRUCTURE_TYPE_ICON = { castle: '🏰', village: '🏘️', port: '⚓' };
+  const STRUCTURE_TYPE_ICON = { castle: '🏰', village: '🏘️', port: '⚓', dungeon: '💀' };
 
   // Chapitas de combate en vivo (escudo de defensores / espada de atacantes,
   // ver paintCombatBadges). BADGE_OFFSET_Y va en celdas de rejilla: cuanto se
@@ -572,7 +575,9 @@
         const cx = s.x * BLOCK_PX;
         const cy = s.y * BLOCK_PX - STRUCTURE_MARKER_OFFSET_Y;
 
-        const label = `${STRUCTURE_TYPE_ICON[s.type] || ''} Lv${s.aiTroops} Ar${s.archerTroops} Cb${s.cavalryTroops}  ⚔${s.attackPower} 🛡${s.defensePower}`;
+        const label = s.type === 'dungeon'
+          ? `${STRUCTURE_TYPE_ICON[s.type] || ''} Or${s.orcCount} Gb${s.goblinCount}  ⚔${s.attackPower} 🛡${s.defensePower}`
+          : `${STRUCTURE_TYPE_ICON[s.type] || ''} Lv${s.aiTroops} Ar${s.archerTroops} Cb${s.cavalryTroops}  ⚔${s.attackPower} 🛡${s.defensePower}`;
         ctx.font = '13px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -588,10 +593,11 @@
         ctx.fill();
         ctx.stroke();
 
-        if (guardiaSpriteImg.complete && guardiaSpriteImg.naturalWidth) {
+        const markerIcon = s.type === 'dungeon' ? orcoSpriteImg : guardiaSpriteImg;
+        if (markerIcon.complete && markerIcon.naturalWidth) {
           const iw = STRUCTURE_MARKER_ICON_W;
-          const ih = iw * (guardiaSpriteImg.naturalHeight / guardiaSpriteImg.naturalWidth);
-          ctx.drawImage(guardiaSpriteImg, cx - boxW / 2 + 4, cy - ih / 2, iw, ih);
+          const ih = iw * (markerIcon.naturalHeight / markerIcon.naturalWidth);
+          ctx.drawImage(markerIcon, cx - boxW / 2 + 4, cy - ih / 2, iw, ih);
         }
 
         ctx.fillStyle = '#f5e9df';
@@ -1092,6 +1098,21 @@
   // jugador.
   const capitalSpriteImg = loadSprite('capital');
   const CAPITAL_SPRITE_WORLD_W = 60;
+  // Dungeon (ver docs/ACCIONES.md sección 27, !dungeon): guarnición de
+  // orcos (más grandes) y goblins (más pequeños) paseando alrededor,
+  // número SIEMPRE fijo (2 orcos + 4 goblins) a diferencia de castillo/
+  // aldea/puerto (que escalan con la guarnición real).
+  const orcoImg = loadSprite('orco');
+  const goblinImg = loadSprite('goblin');
+  const ORCO_SPRITE_WORLD_W = 18;
+  const GOBLIN_SPRITE_WORLD_W = 11;
+  // Trofeo por derrotar un dungeon: una estatua junto a la capital de la
+  // facción que lo mató, con sus propios aldeanos alrededor (igual que la
+  // capital) — ver desiredSiteSpecs().
+  const estatuaImg = loadSprite('estatua');
+  const ESTATUA_SPRITE_WORLD_W = 34;
+  const ESTATUA_RING_RADIUS = 75; // px de mundo de la capital, fuera de su sprite (60px de ancho)
+  const ESTATUA_ANGLE_STEP = (137.5 * Math.PI) / 180; // angulo dorado: buen reparto en anillo sea cual sea el numero de estatuas
   // Radio de paseo (px de mundo) alrededor de un castillo/aldea/puerto/
   // capital para su guarnicion/aldeanos — mucho mas pequeño que el de un
   // jugador paseando por su territorio: son NPCs "de guardia", no viajan.
@@ -1158,7 +1179,7 @@
   // "ganar terreno" se usa una banderita, no un icono de ataque a distancia.
   const ACTION_ICONS = {
     ATTACK: ' ⚔️', DEFEND: ' 🛡️', INDUSTRY: ' ⚒️', EXPAND: ' 🚩',
-    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎', CONQUISTA: ' 🗡️',
+    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎', CONQUISTA: ' 🗡️', DUNGEON: ' 💀',
   };
 
   /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */
@@ -1643,18 +1664,29 @@
 
     /** Cuantos caminantes de que tipo le tocan a un sitio, sin listar posiciones todavia. */
     function desiredSiteSpecs(structures, factions) {
-      const sites = new Map(); // siteKey -> { home:{x,y}, factionColor, specs: [{spriteKey, n}] }
+      const sites = new Map(); // siteKey -> { home:{x,y}, factionColor, buildingKind, specs: [{spriteKey, n}] }
 
       (structures || []).forEach((s) => {
         if (s.x == null || s.y == null) return; // partida vieja/estado incompleto: sin posicion no hay donde pintar
+        const isDungeon = s.type === 'dungeon';
         const specs = [];
         if (!s.conquered) {
-          // Un par por tipo presente en la guarnicion (tope 3, para no
-          // amontonar 15 sprites encima de un castillo grande).
-          if (s.aiTroops > 0) specs.push({ spriteKey: 'barbaro', n: Math.min(3, Math.max(1, Math.ceil(s.aiTroops / 4))) });
-          if (s.archerTroops > 0) specs.push({ spriteKey: 'barbaro-arquero', n: Math.min(3, Math.max(1, Math.ceil(s.archerTroops / 4))) });
-          if (s.cavalryTroops > 0) specs.push({ spriteKey: 'barbaro-caballero', n: Math.min(3, Math.max(1, Math.ceil(s.cavalryTroops / 4))) });
-        } else {
+          if (isDungeon) {
+            // Numero SIEMPRE fijo (2 orcos + 4 goblins), a diferencia de
+            // castillo/aldea/puerto — asi se pidio explicitamente.
+            specs.push({ spriteKey: 'orco', n: 2 });
+            specs.push({ spriteKey: 'goblin', n: 4 });
+          } else {
+            // Un par por tipo presente en la guarnicion (tope 3, para no
+            // amontonar 15 sprites encima de un castillo grande).
+            if (s.aiTroops > 0) specs.push({ spriteKey: 'barbaro', n: Math.min(3, Math.max(1, Math.ceil(s.aiTroops / 4))) });
+            if (s.archerTroops > 0) specs.push({ spriteKey: 'barbaro-arquero', n: Math.min(3, Math.max(1, Math.ceil(s.archerTroops / 4))) });
+            if (s.cavalryTroops > 0) specs.push({ spriteKey: 'barbaro-caballero', n: Math.min(3, Math.max(1, Math.ceil(s.cavalryTroops / 4))) });
+          }
+        } else if (!isDungeon) {
+          // Un dungeon derrotado NO deja aldeanos en su sitio — su
+          // recompensa es una estatua junto a la capital (ver más abajo),
+          // no producción para la casilla como castillo/aldea/puerto.
           specs.push({ spriteKey: 'aldeano', n: 3 });
         }
         if (!specs.length) return;
@@ -1666,6 +1698,7 @@
         sites.set(`struct:${s.tileId}:${s.type}`, {
           home: { x: s.x * walkerWorld.blockPx, y: s.y * walkerWorld.blockPx },
           factionColor: null,
+          buildingKind: null,
           specs,
         });
       });
@@ -1677,8 +1710,28 @@
         sites.set(`capital:${f.number}`, {
           home,
           factionColor: f.color,
+          buildingKind: 'capital',
           specs: [{ spriteKey: 'aldeano', n: Math.max(1, f.capitalVillagerCount || 0) }],
         });
+
+        // Trofeos de dungeon (sección 27): una estatua nueva por cada
+        // dungeon derrotado, repartidas en un anillo alrededor de la
+        // capital (ángulo dorado para que no se amontonen sea cual sea el
+        // número) — "la capital va creciendo según haces cosas", cada una
+        // con sus propios 4 aldeanos alrededor, igual que la capital.
+        const trophies = f.dungeonTrophies || 0;
+        for (let i = 0; i < trophies; i++) {
+          const angle = i * ESTATUA_ANGLE_STEP;
+          sites.set(`trophy:${f.number}:${i}`, {
+            home: {
+              x: home.x + Math.cos(angle) * ESTATUA_RING_RADIUS,
+              y: home.y + Math.sin(angle) * ESTATUA_RING_RADIUS,
+            },
+            factionColor: null,
+            buildingKind: 'estatua',
+            specs: [{ spriteKey: 'aldeano', n: 4 }],
+          });
+        }
       });
 
       return sites;
@@ -1702,9 +1755,10 @@
       desired.forEach((site, key) => {
         const home = site.home;
         let group = siteWalkers.get(key);
-        if (!group) { group = { home, factionColor: site.factionColor, list: [] }; siteWalkers.set(key, group); }
+        if (!group) { group = { home, factionColor: site.factionColor, buildingKind: site.buildingKind, list: [] }; siteWalkers.set(key, group); }
         group.home = home;
         group.factionColor = site.factionColor;
+        group.buildingKind = site.buildingKind;
 
         const wantCounts = new Map();
         site.specs.forEach(({ spriteKey, n }) => wantCounts.set(spriteKey, (wantCounts.get(spriteKey) || 0) + n));
@@ -1775,9 +1829,11 @@
       'barbaro-arquero': [barbaroArcherImg, TROOP_SPRITE_WORLD_W],
       'barbaro-caballero': [barbaroCavalryImg, CAVALRY_TROOP_SPRITE_WORLD_W],
       aldeano: [aldeanoSpriteImg, ALDEANO_SPRITE_WORLD_W],
+      orco: [orcoImg, ORCO_SPRITE_WORLD_W],
+      goblin: [goblinImg, GOBLIN_SPRITE_WORLD_W],
     };
 
-    /** Dibuja la capital (si el sitio tiene `factionColor`, tinta como un marcador de jugador) y los caminantes de cada sitio. */
+    /** Dibuja el edificio del sitio (capital teñida de su facción, o estatua-trofeo sin teñir) y los caminantes de cada sitio. */
     function drawSiteWalkers(w, h) {
       if (!siteWalkers.size) return;
       const { x: vx, y: vy, scale } = currentView;
@@ -1788,11 +1844,15 @@
 
       siteWalkers.forEach((group) => {
         const { home } = group;
-        if (group.factionColor && capitalSpriteImg.complete && capitalSpriteImg.naturalWidth &&
-            home.x >= wx0 && home.x <= wx1 && home.y >= wy0 && home.y <= wy1) {
+        const inView = home.x >= wx0 && home.x <= wx1 && home.y >= wy0 && home.y <= wy1;
+        if (inView && group.buildingKind === 'capital' && capitalSpriteImg.complete && capitalSpriteImg.naturalWidth) {
           const cw = CAPITAL_SPRITE_WORLD_W * scale;
           const chh = cw * (capitalSpriteImg.naturalHeight / capitalSpriteImg.naturalWidth);
           drawTintedSprite(capitalSpriteImg, home.x * scale + vx - cw / 2, home.y * scale + vy - chh, cw, chh, group.factionColor, 0.65);
+        } else if (inView && group.buildingKind === 'estatua' && estatuaImg.complete && estatuaImg.naturalWidth) {
+          const ew = ESTATUA_SPRITE_WORLD_W * scale;
+          const eh = ew * (estatuaImg.naturalHeight / estatuaImg.naturalWidth);
+          ctx.drawImage(estatuaImg, home.x * scale + vx - ew / 2, home.y * scale + vy - eh, ew, eh);
         }
 
         group.list.forEach((walker) => {

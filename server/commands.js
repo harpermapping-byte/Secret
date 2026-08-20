@@ -21,6 +21,11 @@ const ACTION_CABALLEROS = 'CABALLEROS';
 // Ataca a una estructura neutral (castillo/aldea/puerto) al azar dentro de TU
 // territorio, ver rules/structures.js y docs/ACCIONES.md seccion 20.
 const ACTION_CONQUISTA = 'CONQUISTA';
+// Ataca a un dungeon (orcos/goblins) dentro de TU territorio — comando
+// APARTE de !conquista a propósito (solo aparecen si el admin los activó, y
+// la recompensa es distinta: una estatua junto a tu capital, no producción
+// para la casilla). Ver rules/structures.js y docs/ACCIONES.md sección 27.
+const ACTION_DUNGEON = 'DUNGEON';
 
 // En que fase es valido cada tipo de accion.
 const VALID_PHASE_BY_ACTION = {
@@ -35,6 +40,7 @@ const VALID_PHASE_BY_ACTION = {
   [ACTION_ARQUEROS]: PHASE_ACTION,
   [ACTION_CABALLEROS]: PHASE_ACTION,
   [ACTION_CONQUISTA]: PHASE_ACTION,
+  [ACTION_DUNGEON]: PHASE_ACTION,
 };
 
 const JOIN_RE = /^!faccion(\d+)$/i;
@@ -48,6 +54,7 @@ const LEVAS_RE = /^!levas$/i;
 const ARQUEROS_RE = /^!arqueros$/i;
 const CABALLEROS_RE = /^!caballeros$/i;
 const CONQUISTA_RE = /^!conquista$/i;
+const DUNGEON_RE = /^!dungeon$/i;
 
 /**
  * Convierte un mensaje de chat en { type, targetFactionNumber } o null si no es un comando reconocido.
@@ -81,6 +88,8 @@ function parseCommand(rawText) {
 
   if (CONQUISTA_RE.test(text)) return { type: ACTION_CONQUISTA, targetFactionNumber: null };
 
+  if (DUNGEON_RE.test(text)) return { type: ACTION_DUNGEON, targetFactionNumber: null };
+
   return null;
 }
 
@@ -96,6 +105,7 @@ module.exports = {
   ACTION_ARQUEROS,
   ACTION_CABALLEROS,
   ACTION_CONQUISTA,
+  ACTION_DUNGEON,
   VALID_PHASE_BY_ACTION,
   parseCommand,
 };

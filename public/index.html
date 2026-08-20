@@ -607,7 +607,7 @@
     return `☠️ ${fchip(state, e.factionNumber)} se ha quedado sin miembros — su territorio ha pasado a ser neutral (eliminada por ${fchip(state, e.eliminatedByFactionNumber)})`;
   }
 
-  const STRUCTURE_LABELS = { castle: 'un castillo 🏰 (+1 caballero de IA/ronda)', village: 'una aldea 🏘️ (+2 levas/ronda)', port: 'un puerto ⚓ (+1 industria/ronda)' };
+  const STRUCTURE_LABELS = { castle: 'un castillo 🏰 (+1 caballero de IA/ronda)', village: 'una aldea 🏘️ (+2 levas/ronda)', port: 'un puerto ⚓ (+1 industria/ronda)', dungeon: 'un dungeon 💀 (estatua junto a tu capital)' };
 
   /** `!conquista` ganado esta ronda (ver rules/structures.js) — la guarnición neutral cayó. */
   function structureConquestLine(state, c) {
@@ -693,6 +693,7 @@
     { cmd: '!arqueros', phase: 'Acción', short: 'Levanta un campo de arquería 🏹: +5 arqueros de IA, +1/ronda después.', desc: 'Levantas un campo de arquería 🏹 (igual mecánica que !levas) y te da +5 arqueros de IA al momento, +1 por ronda después por cada campo en pie. Los arqueros son especialistas de ataque: +0.2 fijo atacando, 0 defendiendo.' },
     { cmd: '!caballeros', phase: 'Acción', short: 'Levanta una caballeriza 🐎: +5 caballeros de IA, +1/ronda después.', desc: 'Levantas una caballeriza 🐎 (igual mecánica que !levas) y te da +5 caballeros de IA al momento, +1 por ronda después por cada caballeriza en pie. Los caballeros de IA son especialistas de defensa: +0.2 fijo defendiendo, 0 atacando (no confundir con el caballero 🐴 de la mejora de industria, que es un jugador que cambia de sprite).' },
     { cmd: '!conquista', phase: 'Acción', short: 'Ataca a una estructura neutral de tu territorio (castillo/aldea/puerto).', desc: 'Conquista al azar una estructura neutral (castillo 🏰, aldea 🏘️ o puerto ⚓) que esté dentro de tu propio territorio y todavía tenga guarnición — no puedes elegir cuál, el juego elige una entre las disponibles. Si varios de tu facción votan !conquista la misma ronda, todos atacan juntos a esa única estructura. Sobre cada estructura sin conquistar verás un marcador con la guarnición que tiene (soldados/arqueros/caballeros de IA) y su ataque/defensa ya calculados, para saber si te conviene intentarlo. Si ganáis, la estructura pasa a producir para tu facción para siempre (castillo +1 caballero de IA/ronda, aldea +2 levas/ronda, puerto +1 de industria/ronda) — y si luego pierdes ese terreno, se lo lleva quien te lo conquiste a ti. Si perdéis el asalto, los que votaron sufren bajas según lo fuerte que fuera la guarnición.' },
+    { cmd: '!dungeon', phase: 'Acción', short: 'Ataca a un dungeon (orcos/goblins) de tu territorio — solo si el admin los activó.', desc: 'Ataca a un dungeon 💀 (guarnición de orcos y goblins, ver marcador sobre él) que esté dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 5 por mapa). Misma mecánica de grupo que !conquista: todos los que voten !dungeon esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no. Si lo derrotáis, la guarnición desaparece para siempre y tu facción gana una estatua junto a su capital (con sus propios aldeanos alrededor) — a diferencia de castillo/aldea/puerto, un dungeon no da producción para la casilla.' },
   ];
 
   function openCommands() {

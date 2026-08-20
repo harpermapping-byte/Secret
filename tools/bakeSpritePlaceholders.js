@@ -309,6 +309,36 @@ const SPRITES = {
     c.rect(2, 8, 12, 16, [90, 68, 58], 1);
   },
 
+  // DUNGEON (ver docs/ACCIONES.md sección 27, !dungeon): guarnición de
+  // orcos y goblins, siempre 2 orcos + 4 goblins paseando alrededor. El
+  // orco es GRANDE (verde oscuro, más ancho que un bárbaro), el goblin es
+  // PEQUEÑO (verde claro, el más chico de todos los placeholders de
+  // unidad) — para que se distingan de un vistazo incluso sin mirar la
+  // etiqueta.
+  orco: (c) => {
+    const body = [64, 92, 48];
+    c.rect(7, 2, 10, 9, body, 1);   // cabeza, mas grande que un bárbaro
+    c.rect(3, 12, 18, 18, body, 1); // torso ancho
+  },
+  goblin: (c) => {
+    const body = [124, 158, 82];
+    c.rect(3, 2, 5, 5, body, 1);
+    c.rect(1, 7, 9, 10, body, 1);
+  },
+
+  // ESTATUA-TROFEO (ver docs/ACCIONES.md sección 27): se gana al derrotar
+  // un dungeon, se coloca junto a la capital de la facción que lo mató. Gris
+  // piedra, SIN teñir de color de facción a propósito (es un monumento
+  // compartido de la facción, no "de" nadie en particular) — pedestal +
+  // figura sencilla.
+  estatua: (c) => {
+    const stone = [168, 164, 156];
+    const dark = [90, 86, 80];
+    c.rect(4, 40, 26, 8, dark, 2);   // pedestal
+    c.rect(10, 6, 14, 34, stone, 2); // cuerpo de la estatua
+    c.rect(12, 0, 10, 8, stone, 2);  // cabeza
+  },
+
   // GUARNICION NEUTRAL (ver docs/ACCIONES.md seccion 20, rules/structures.js):
   // la IA que defiende castillo/aldea/puerto antes de que alguien conquiste
   // con !conquista. Mismo tamaño que `troop` (14x22, sin variante de
@@ -406,6 +436,7 @@ const SIZES = {
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
   troop: [14, 22], 'troop-archer': [14, 22], 'troop-cavalry': [16, 26],
   barbaro: [14, 22], 'barbaro-arquero': [14, 22], 'barbaro-caballero': [16, 26],
+  orco: [24, 30], goblin: [11, 17], estatua: [34, 48],
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],

@@ -1,6 +1,6 @@
 'use strict';
 
-const { ACTION_CONQUISTA } = require('../commands');
+const { ACTION_CONQUISTA, ACTION_DUNGEON } = require('../commands');
 const {
   sumRandomPower,
   applyTroopCascadeDamage,
@@ -11,6 +11,8 @@ const {
   ARCHER_DEFENSE_BONUS,
   CAVALRY_ATTACK_BONUS,
   CAVALRY_DEFENSE_BONUS,
+  ORC_COMBAT_BONUS,
+  GOBLIN_COMBAT_BONUS,
 } = require('./shared');
 
 /**
@@ -36,7 +38,11 @@ function resolveConquista(match, context) {
     const attackerUserIds = context.votesByFactionAndType.get(faction.number)[ACTION_CONQUISTA];
     if (!attackerUserIds || attackerUserIds.length === 0) continue;
 
-    const target = pickEligibleStructure(match, faction.number);
+    // Los dungeon NO entran en este reparto al azar — tienen su propio
+    // comando (!dungeon, ver resolveDungeon() más abajo) porque su
+    // recompensa es distinta (estatua junto a tu capital, no producción
+    // para la casilla).
+    const target = pickEligibleStructure(match, faction.number, (s) => s.type !== 'dungeon');
     if (!target) continue; // no hay ninguna estructura con guarnición en su territorio ahora mismo: voto desperdiciado
 
     const attackPower = sumRandomPower(match, attackerUserIds, 'attack');
@@ -66,6 +72,50 @@ function resolveConquista(match, context) {
 }
 
 /**
+ * `!dungeon` (ver docs/ACCIONES.md sección 27): mismo combate bidireccional
+ * que `!conquista` (tu ataque contra su defensa decide si lo derrotas, su
+ * ataque contra tu defensa os causa bajas siempre), pero:
+ *   - Solo ataca a un dungeon (guarnición de orcos/goblins) dentro de TU
+ *     territorio — nunca castillo/aldea/puerto (esos son de `!conquista`).
+ *   - La recompensa NO es producción para la casilla: al derrotarlo, la
+ *     guarnición se vacía para siempre (igual que conquerStructure) y la
+ *     FACCIÓN gana un trofeo — una estatua nueva junto a su capital, con
+ *     sus propios aldeanos alrededor (ver `faction.dungeonTrophies` y
+ *     desiredSiteSpecs() en public/mapRenderer.js).
+ */
+function resolveDungeon(match, context) {
+  for (const faction of match.factions) {
+    const attackerUserIds = context.votesByFactionAndType.get(faction.number)[ACTION_DUNGEON];
+    if (!attackerUserIds || attackerUserIds.length === 0) continue;
+
+    const target = pickEligibleStructure(match, faction.number, (s) => s.type === 'dungeon');
+    if (!target) continue; // no hay ningun dungeon con guarnición en su territorio ahora mismo: voto desperdiciado
+
+    const attackPower = sumRandomPower(match, attackerUserIds, 'attack');
+    const ourDefense = sumRandomPower(match, attackerUserIds, 'defense');
+    const garrisonAttack = structureAttackPower(target);
+    const garrisonDefense = structureDefensePower(target);
+
+    if (attackPower > garrisonDefense) {
+      target.orcCount = 0;
+      target.goblinCount = 0;
+      faction.dungeonTrophies += 1;
+      context.roundEvents.structureConquests.push({
+        tileId: target.tileId,
+        structureType: target.type,
+        factionNumber: faction.number,
+      });
+    }
+
+    const counterDamage = Math.round(garrisonAttack - ourDefense);
+    if (counterDamage > 0) {
+      const remaining = applyTroopCascadeDamage(match, attackerUserIds, counterDamage);
+      applyStructureCasualties(match, attackerUserIds, remaining);
+    }
+  }
+}
+
+/**
  * Baja `count` de los votantes que perdieron el asalto, al azar entre ellos
  * mismos. NO reutiliza `applyCasualties()` de rules/shared.js a propósito:
  * esa reparte bajas entre 4 bolsas con prioridad fija pensadas para el
@@ -82,35 +132,50 @@ function applyStructureCasualties(match, userIds, count) {
   }
 }
 
-/** Fuerza de defensa de una guarnición: suma de bonus llanos, sin tirada (no hay "jugador" al mando). */
+/**
+ * Fuerza de defensa de una guarnición: suma de bonus llanos, sin tirada (no
+ * hay "jugador" al mando). Castillo/aldea/puerto usan aiTroops/
+ * archerTroops/cavalryTroops; dungeon usa orcCount/goblinCount (siempre a 0
+ * los que no le tocan al tipo, ver buildStructures() en mapTemplates.js) —
+ * sumar los 5 campos de golpe evita ramificar por tipo aquí.
+ */
 function structureDefensePower(structure) {
   return (
     structure.aiTroops * AI_TROOP_COMBAT_BONUS +
     structure.archerTroops * ARCHER_DEFENSE_BONUS +
-    structure.cavalryTroops * CAVALRY_DEFENSE_BONUS
+    structure.cavalryTroops * CAVALRY_DEFENSE_BONUS +
+    (structure.orcCount || 0) * ORC_COMBAT_BONUS +
+    (structure.goblinCount || 0) * GOBLIN_COMBAT_BONUS
   );
 }
 
-/** Fuerza de ataque "de referencia" de una guarnición — puramente informativa (ver docs/ACCIONES.md sección 20), la estructura nunca ataca a nadie. */
+/** Fuerza de ataque de una guarnición — ver structureDefensePower() para por qué suma los 5 campos. */
 function structureAttackPower(structure) {
   return (
     structure.aiTroops * AI_TROOP_COMBAT_BONUS +
     structure.archerTroops * ARCHER_ATTACK_BONUS +
-    structure.cavalryTroops * CAVALRY_ATTACK_BONUS
+    structure.cavalryTroops * CAVALRY_ATTACK_BONUS +
+    (structure.orcCount || 0) * ORC_COMBAT_BONUS +
+    (structure.goblinCount || 0) * GOBLIN_COMBAT_BONUS
   );
 }
 
-/** Todavía tiene guarnición (no conquistada) y su casilla es del territorio de esta facción ahora mismo. */
-function pickEligibleStructure(match, factionNumber) {
+/**
+ * Todavía tiene guarnición (no conquistada/derrotada) y su casilla es del
+ * territorio de esta facción ahora mismo. `extraFilter` opcional para que
+ * `!conquista` excluya los dungeon y `!dungeon` excluya todo lo que NO sea
+ * dungeon, sin duplicar esta función.
+ */
+function pickEligibleStructure(match, factionNumber, extraFilter = () => true) {
   const eligible = match.structures.filter(
-    (s) => hasGarrison(s) && match.tiles[s.tileId].ownerFactionNumber === factionNumber
+    (s) => hasGarrison(s) && match.tiles[s.tileId].ownerFactionNumber === factionNumber && extraFilter(s)
   );
   if (eligible.length === 0) return null;
   return eligible[Math.floor(Math.random() * eligible.length)];
 }
 
 function hasGarrison(structure) {
-  return structure.aiTroops + structure.archerTroops + structure.cavalryTroops > 0;
+  return structure.aiTroops + structure.archerTroops + structure.cavalryTroops + (structure.orcCount || 0) + (structure.goblinCount || 0) > 0;
 }
 
 /**
@@ -138,4 +203,4 @@ function conquerStructure(match, structure) {
   else if (structure.type === 'port') tile.industryCount += 2;
 }
 
-module.exports = { resolveConquista, structureDefensePower, structureAttackPower };
+module.exports = { resolveConquista, resolveDungeon, structureDefensePower, structureAttackPower };

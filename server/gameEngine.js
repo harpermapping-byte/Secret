@@ -18,7 +18,7 @@ const { resolveCombat } = require('./rules/combat');
 const { resolveIndustry, resolveIndustryImmunity, industryThresholdsFor } = require('./rules/industry');
 const { resolveAiTroops } = require('./rules/troops');
 const { resolveTroopBuildings } = require('./rules/troopBuildings');
-const { resolveConquista, structureAttackPower, structureDefensePower } = require('./rules/structures');
+const { resolveConquista, resolveDungeon, structureAttackPower, structureDefensePower } = require('./rules/structures');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
@@ -31,6 +31,7 @@ const {
   ACTION_ARQUEROS,
   ACTION_CABALLEROS,
   ACTION_CONQUISTA,
+  ACTION_DUNGEON,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -101,6 +102,11 @@ function createMatch(config) {
     // el resto de la partida.
     capitalTileId: null,
     capitalVillagerCount: 0,
+    // Trofeos de dungeon ganados (ver !dungeon, rules/structures.js
+    // seccion 27): cada uno es una estatua nueva junto a la capital, con
+    // sus propios aldeanos paseando alrededor — el cliente decide DONDE
+    // colocar cada una (aqui solo se cuenta cuantas hay).
+    dungeonTrophies: 0,
     killsCaused: 0,
     // Miembros que tenia la faccion al cerrar el reclutamiento. Se rellena en
     // closeRecruitment(); antes de eso vale 0 y los umbrales de industria caen
@@ -113,6 +119,9 @@ function createMatch(config) {
     factionCount: factions.length,
     mode: normalizedConfig.map.mode,
     mapKey: normalizedConfig.map.key,
+    // Dungeons solo se generan si el admin los activó en el panel (ver
+    // futureFeatures.dungeons más abajo) — 1 a 5 al azar por partida.
+    dungeonsEnabled: normalizedConfig.futureFeatures.dungeons,
   });
 
   for (const tile of tiles) {
@@ -179,9 +188,10 @@ function normalizeConfig(config) {
       // tierra real se reparten territorios/decoraciones.
       key: config.map?.key || DEFAULT_MAP_KEY,
     },
-    // Casillas futuras del panel de admin, sin efecto de juego todavia (ver
-    // docs/ACCIONES.md): el admin ya puede marcarlas para cuando se
-    // implementen, pero hoy no cambian nada en la partida.
+    // Casillas del panel de admin (ver docs/ACCIONES.md): `dungeons` YA
+    // tiene efecto real (createMatch() se lo pasa a generateMap(), ver
+    // dungeonsEnabled más arriba) — wonders/bosses/weather/randomEvents
+    // siguen sin implementar, solo se guardan para cuando se hagan.
     futureFeatures: {
       wonders: !!config.futureFeatures?.wonders,
       dungeons: !!config.futureFeatures?.dungeons,
@@ -394,6 +404,7 @@ function resolveRound() {
   context.allInactiveUserIds = new Set([...context.inactiveUserIds, ...context.forceInactive]);
   resolveCombat(match, context);
   resolveConquista(match, context);
+  resolveDungeon(match, context);
   resolveIndustry(match, context);
   resolveAiTroops(match);
   resolveTroopBuildings(match, context);
@@ -453,6 +464,7 @@ function tallyActions() {
       [ACTION_ARQUEROS]: [],
       [ACTION_CABALLEROS]: [],
       [ACTION_CONQUISTA]: [],
+      [ACTION_DUNGEON]: [],
     });
     activePlayerCountByFaction.set(faction.number, 0);
   }
@@ -613,6 +625,7 @@ function getPublicState() {
       // efecto de juego todavia) — no se recalcula sola.
       capitalTileId: f.capitalTileId,
       capitalVillagerCount: f.capitalVillagerCount,
+      dungeonTrophies: f.dungeonTrophies,
       killsCaused: f.killsCaused,
       wondersCount: 0, // reservado para v2 (maravillas), ver docs/GDD "Alcance de v1 vs futuro"
       // Recuento EN VIVO de la fase de accion en curso (ver countLiveActions):
@@ -644,7 +657,7 @@ function getPublicState() {
     // public/mapRenderer.js). Su producción sigue viéndose igual que
     // cualquier edificio, en `tiles` de arriba.
     structures: match.structures.map((s) => {
-      const conquered = s.aiTroops + s.archerTroops + s.cavalryTroops === 0;
+      const conquered = s.aiTroops + s.archerTroops + s.cavalryTroops + s.orcCount + s.goblinCount === 0;
       return {
         tileId: s.tileId,
         // Posicion exacta del edificio dentro de su casilla (celdas de
@@ -659,6 +672,11 @@ function getPublicState() {
         aiTroops: s.aiTroops,
         archerTroops: s.archerTroops,
         cavalryTroops: s.cavalryTroops,
+        // Solo los dungeon llevan guarnición de orcos/goblins (ver
+        // rules/structures.js sección 27) — castillo/aldea/puerto siempre
+        // van a 0 aquí.
+        orcCount: s.orcCount,
+        goblinCount: s.goblinCount,
         attackPower: Number(structureAttackPower(s).toFixed(2)),
         defensePower: Number(structureDefensePower(s).toFixed(2)),
       };

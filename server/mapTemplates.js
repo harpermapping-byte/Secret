@@ -175,7 +175,7 @@ function shuffleParallel(xs, ys) {
  * modo: 'total' (todo el mapa repartido, sin neutral) o 'neutral' (zonas pequenas + territorio neutral)
  * mapKey: que mapa jugar ('world' | 'iberia', ver MAP_SOURCE_DEFS) — por defecto el mundo.
  */
-function generateMap({ tileCount, factionCount, mode, mapKey }) {
+function generateMap({ tileCount, factionCount, mode, mapKey, dungeonsEnabled }) {
   if (factionCount < 2) throw new Error('generateMap: se necesitan al menos 2 facciones');
   if (tileCount < factionCount * 2) throw new Error('generateMap: tileCount demasiado pequenio para factionCount');
 
@@ -212,7 +212,11 @@ function generateMap({ tileCount, factionCount, mode, mapKey }) {
     });
   }
 
-  const decorations = placeDecorations(cellTileIds, currentSource.cols, currentSource.rows, tileCount);
+  // Dungeons (ver docs/ACCIONES.md sección 27, !dungeon): 1 a 5 al azar por
+  // partida, SOLO si el admin los activó en el panel — si no, 0 (sin
+  // efecto, como el resto de "próximamente" que aún no se implementan).
+  const dungeonCount = dungeonsEnabled ? 1 + Math.floor(Math.random() * 5) : 0;
+  const decorations = placeDecorations(cellTileIds, currentSource.cols, currentSource.rows, tileCount, dungeonCount);
 
   const mapLayout = {
     cols: currentSource.cols,
@@ -273,6 +277,9 @@ const FIXED_COUNT_KINDS = [
 // elemento ya colocado (misma idea que minGap de FIXED_COUNT_KINDS, pero
 // estos no tienen "count" fijo así que viven en su propia tabla).
 const STRUCTURE_MIN_GAP = { castle: 40, port: 30, village: 22 };
+// Separación mínima de un dungeon frente a cualquier otro elemento —
+// grande a propósito, son landmarks poco frecuentes (1-5 por partida).
+const DUNGEON_MIN_GAP = 45;
 
 // Cuantos intentos como mucho por elemento antes de rendirse y colocarlo sin
 // respetar la separacion minima. Evita que un mapa con poca costa (o un
@@ -316,7 +323,7 @@ function matchesTerrain(kind, x, y) {
  * apilado encima de otra cosa ("regla para evitar se solape cualquier
  * elemento", tal y como se pidió).
  */
-function placeDecorations(cellTileIds, cols, rows, tileCount) {
+function placeDecorations(cellTileIds, cols, rows, tileCount, dungeonCount = 0) {
   const decorations = [];
   const placedAll = [];
 
@@ -367,9 +374,27 @@ function placeDecorations(cellTileIds, cols, rows, tileCount) {
     }
   }
 
+  // 1.5) Dungeons (ver docs/ACCIONES.md sección 27): cantidad FIJA por
+  // partida (sorteada en generateMap(), 1-5 solo si el admin los activó),
+  // en cualquier tierra del mapa entero — no depende de la casilla en la
+  // que caigan, a diferencia de castillo/aldea/puerto. Mismo anti-solape
+  // global que todo lo demás.
+  for (let n = 0; n < dungeonCount; n++) {
+    let best = null;
+    for (let attempt = 0; attempt < DECOR_MAX_TRIES; attempt++) {
+      const x = Math.floor(Math.random() * cols);
+      const y = Math.floor(Math.random() * rows);
+      if (!matchesTerrain('land', x, y)) continue;
+      best = { x, y };
+      if (!overlapsAny(x, y, DUNGEON_MIN_GAP)) break;
+    }
+    if (!best) continue; // mapa sin tierra libre (rarisimo): se deja fuera
+    place('dungeon', best.x, best.y, DUNGEON_MIN_GAP);
+  }
+
   // 2) Resto de decoración (paisaje, conteo fijo por partida) — mismo
   // anti-solape global de arriba (placedAll ya tiene dentro los
-  // castillos/aldeas/puertos recién colocados).
+  // castillos/aldeas/puertos/dungeons recién colocados).
   for (const { type, count, terrain, minGap } of FIXED_COUNT_KINDS) {
     for (let n = 0; n < count; n++) {
       let best = null;
@@ -407,6 +432,14 @@ const STRUCTURE_GARRISON_RANGES = {
   port: { aiTroops: [6, 12], archerTroops: [0, 5], cavalryTroops: [0, 0] },
 };
 
+// Guarnición de un dungeon (orcos/goblins, ver !dungeon sección 27) — un
+// tipo de unidad totalmente aparte de aiTroops/archerTroops/cavalryTroops
+// (ORC_COMBAT_BONUS/GOBLIN_COMBAT_BONUS en rules/shared.js). El número que
+// PASEA alrededor del dungeon es siempre fijo (2 orcos + 4 goblins, ver
+// desiredSiteSpecs() en mapRenderer.js) pero la fuerza de combate real
+// varía un poco por partida, centrada en esos mismos números.
+const DUNGEON_GARRISON_RANGE = { orcCount: [2, 3], goblinCount: [3, 5] };
+
 function randomInRange([min, max]) {
   return min + Math.floor(Math.random() * (max - min + 1));
 }
@@ -422,27 +455,35 @@ function randomInRange([min, max]) {
 function buildStructures(decorations, cellTileIds) {
   const structures = [];
   for (const d of decorations) {
-    const ranges = STRUCTURE_GARRISON_RANGES[d.type];
-    if (!ranges) continue; // no es castillo/aldea/puerto (arbol, barco...): no es conquistable
+    const isDungeon = d.type === 'dungeon';
+    const ranges = isDungeon ? DUNGEON_GARRISON_RANGE : STRUCTURE_GARRISON_RANGES[d.type];
+    if (!ranges) continue; // no es castillo/aldea/puerto/dungeon (arbol, barco...): no es conquistable
 
     const tileId = cellTileIds[d.y * currentSource.cols + d.x];
-    if (tileId === OCEAN) continue; // defensivo: no debería pasar (castillo/aldea/puerto solo salen en tierra)
+    if (tileId === OCEAN) continue; // defensivo: no debería pasar (solo salen en tierra)
 
     structures.push({
       tileId,
-      // Posicion EXACTA de este castillo/aldea/puerto (celdas de rejilla,
-      // igual que `centroids` — el cliente las multiplica por BLOCK_PX),
-      // no solo el tileId: varias estructuras pueden caer en la MISMA
-      // casilla (ver PROBABILISTIC_KINDS, sección 22 de docs/ACCIONES.md),
-      // así que el marcador de guarnición y sus tropas paseando tienen que
-      // anclarse a SU propio edificio, no al centroide medio de la casilla
-      // entera (que las apilaría todas en el mismo punto).
+      // Posicion EXACTA de este edificio (celdas de rejilla, igual que
+      // `centroids` — el cliente las multiplica por BLOCK_PX), no solo el
+      // tileId: varias estructuras pueden caer en la MISMA casilla (ver
+      // PROBABILISTIC_KINDS, sección 22 de docs/ACCIONES.md), así que el
+      // marcador de guarnición y sus tropas paseando tienen que anclarse a
+      // SU propio edificio, no al centroide medio de la casilla entera.
       x: d.x,
       y: d.y,
       type: d.type,
-      aiTroops: randomInRange(ranges.aiTroops),
-      archerTroops: randomInRange(ranges.archerTroops),
-      cavalryTroops: randomInRange(ranges.cavalryTroops),
+      // Castillo/aldea/puerto usan aiTroops/archerTroops/cavalryTroops;
+      // dungeon usa orcCount/goblinCount (tipo de unidad totalmente
+      // aparte, ver rules/shared.js ORC_COMBAT_BONUS/GOBLIN_COMBAT_BONUS)
+      // — cada estructura lleva SIEMPRE los 5 campos (a 0 los que no le
+      // tocan) para que rules/structures.js pueda sumar la fuerza de
+      // cualquier tipo con la misma fórmula, sin ramificar por tipo.
+      aiTroops: isDungeon ? 0 : randomInRange(ranges.aiTroops),
+      archerTroops: isDungeon ? 0 : randomInRange(ranges.archerTroops),
+      cavalryTroops: isDungeon ? 0 : randomInRange(ranges.cavalryTroops),
+      orcCount: isDungeon ? randomInRange(ranges.orcCount) : 0,
+      goblinCount: isDungeon ? randomInRange(ranges.goblinCount) : 0,
     });
   }
   return structures;
