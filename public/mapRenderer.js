@@ -128,22 +128,6 @@
   const torreObrasSpriteImg = loadBuildingSprite('torre-obras');
   const torreSpriteImg = loadBuildingSprite('torre');
 
-  // Maravillas (ver docs/ACCIONES.md sección 30, rules/wonders.js): 6 fijas,
-  // cada una con su propio placeholder — se cargan todas de una vez en un
-  // mapa `key -> Image` para que paintWonderMarkers() no tenga que hacer un
-  // switch largo. SIN teñir de color de facción (landmark del mapa, no "de"
-  // nadie, aunque quien posea la casilla se lleve el bono).
-  const WONDER_SPRITES = {
-    guggenheim: loadBuildingSprite('wonder-guggenheim'),
-    numancia: loadBuildingSprite('wonder-numancia'),
-    moncloa: loadBuildingSprite('wonder-moncloa'),
-    spacex: loadBuildingSprite('wonder-spacex'),
-    kebab: loadBuildingSprite('wonder-kebab'),
-    contrato: loadBuildingSprite('wonder-contrato'),
-  };
-  const WONDER_SPRITE_WORLD_W = 60;
-  const WONDER_MARKER_OFFSET_Y = 78; // px de mundo por encima del sprite, para el nombre+bono
-
   // Marcador de guarnición neutral sobre castillo/aldea/puerto todavía sin
   // conquistar (!conquista, ver rules/structures.js y docs/ACCIONES.md
   // sección 20): icono + cuántas tropas de cada tipo tiene + su ataque/
@@ -188,8 +172,6 @@
     let lastFactions = null; // llega despues de un `state:public`/`state:admin` (el orden de los
     let lastPlayers = null; // mensajes WS no esta garantizado en todos los casos — ver docs/ACCIONES.md seccion 5).
     let lastStructures = null; // estructuras conquistables con guarnicion todavia (ver paintStructureMarkers()).
-    let lastWonders = null; // maravillas (ver paintWonderMarkers(), rules/wonders.js seccion 30).
-    let lastBosses = null; // bosses (ver syncBossWalkers() en createObjectLayer, rules/bosses.js seccion 31).
     let lastRasterFingerprint = null; // ver paint(): evita repintar el raster si la propiedad de las casillas no cambio
     let overlayRepaintPending = false; // ver scheduleOverlayRepaint()
 
@@ -336,18 +318,16 @@
     }
 
     /** tiles: state.tiles (id, neutral, ownerFactionNumber). factions: state.factions (number, color). players: state.players. structures: state.structures (ver paintStructureMarkers()). */
-    function setTiles(tiles, factions, players, structures, wonders, bosses) {
+    function setTiles(tiles, factions, players, structures) {
       lastTiles = tiles;
       lastFactions = factions;
       lastPlayers = players || [];
       lastStructures = structures || [];
-      lastWonders = wonders || [];
-      lastBosses = bosses || [];
       if (!layout) return; // aun no ha llegado `map:layout` — se pintara en cuanto llegue, ver setLayout()
-      paint(tiles, factions, lastPlayers, lastStructures, lastWonders, lastBosses);
+      paint(tiles, factions, lastPlayers, lastStructures);
     }
 
-    function paint(tiles, factions, players, structures, wonders, bosses) {
+    function paint(tiles, factions, players, structures) {
       const colorByTileId = new Array(tiles.length);
       const fingerprintParts = new Array(tiles.length);
       tiles.forEach((t) => {
@@ -375,7 +355,7 @@
         lastRasterFingerprint = fingerprint;
       }
 
-      paintOverlay(tiles, factions, players, structures, wonders, bosses);
+      paintOverlay(tiles, factions, players, structures);
 
       // `hasFitOnce` solo se marca a true si reset() de verdad pudo encajar
       // el mapa (viewport con medidas reales). En el panel de admin el mapa
@@ -440,13 +420,13 @@
      * salto este repintado por el fingerprint sin cambios) — las dos paginas
      * del proyecto pasan siempre `markersEl`.
      */
-    function paintOverlay(tiles, factions, players, structures, wonders, bosses) {
+    function paintOverlay(tiles, factions, players, structures) {
       // Los marcadores de jugador YA NO se pintan en `markersEl`: se movieron
       // a la capa de objetos (canvas del tamaño del VIEWPORT) porque ahora se
       // animan a 60fps, y `markersEl` es del tamaño del mundo entero —
       // limpiarlo y repintarlo en cada frame seria carisimo. Aqui solo se le
       // pasa a esa capa el estado nuevo para que recalcule a donde va cada uno.
-      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX, structures, bosses });
+      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX, structures });
 
       if (!markersEl) return;
       const ctx = markersEl.getContext('2d');
@@ -464,7 +444,6 @@
       paintBuildingMarkers(ctx, tiles, 'towerBuildingCount', torreObrasSpriteImg, MARKER_SALT_TORRE_OBRAS, markerOccupied);
       paintBuildingMarkers(ctx, tiles, 'towerCount', torreSpriteImg, MARKER_SALT_TORRE, markerOccupied);
       paintStructureMarkers(ctx, structures);
-      paintWonderMarkers(ctx, wonders, factions);
       paintCombatBadges(ctx, tiles, factions);
     }
 
@@ -636,55 +615,7 @@
       });
     }
 
-    /**
-     * Maravillas (ver docs/ACCIONES.md sección 30, rules/wonders.js): el
-     * placeholder de cada una se pinta SIEMPRE (no hay "sin conquistar" que
-     * ocultar, a diferencia de castillo/aldea/puerto/dungeon), con su nombre
-     * y el bono que da encima, tal y como se pidió ("aparecerán con el
-     * nombre arriba de su placeholder y el bonus que dan"). Si alguna
-     * facción posee su casilla ahora mismo, el borde de la chapa se tiñe de
-     * su color para que se note de un vistazo quién se la está llevando.
-     */
-    function paintWonderMarkers(ctx, wonders, factions) {
-      if (!wonders || !wonders.length || !layout) return;
-      wonders.forEach((w) => {
-        if (w.x == null || w.y == null) return;
-        const cx = w.x * BLOCK_PX;
-        const baseY = w.y * BLOCK_PX; // el sprite se ancla por su base aqui, igual que el resto de decoracion
-
-        const sprite = WONDER_SPRITES[w.key];
-        if (sprite && sprite.complete && sprite.naturalWidth) {
-          const sw = WONDER_SPRITE_WORLD_W;
-          const sh = sw * (sprite.naturalHeight / sprite.naturalWidth);
-          ctx.drawImage(sprite, cx - sw / 2, baseY - sh, sw, sh);
-        }
-
-        const bonusIcon = w.bonusType === 'industry' ? '⚒️' : '🛡️';
-        const label = `${w.icon || ''} ${w.name}  +${w.bonusAmount} ${bonusIcon}`;
-        const owner = w.ownerFactionNumber != null ? (factions || []).find((f) => f.number === w.ownerFactionNumber) : null;
-
-        ctx.font = '13px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const paddingX = 10;
-        const textW = ctx.measureText(label).width;
-        const boxW = textW + paddingX * 2;
-        const boxH = 22;
-        const labelY = baseY - WONDER_MARKER_OFFSET_Y; // por encima del sprite entero (~40-44 de alto) + hueco
-
-        ctx.fillStyle = 'rgba(30, 14, 12, .82)';
-        ctx.strokeStyle = owner ? owner.color : 'rgba(140, 60, 52, .9)';
-        ctx.lineWidth = owner ? 2.5 : 1.5;
-        roundRect(ctx, cx - boxW / 2, labelY - boxH / 2, boxW, boxH, 5);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#f5e9df';
-        ctx.fillText(label, cx, labelY + 1);
-      });
-    }
-
-    /** Rectángulo con esquinas redondeadas — sin `ctx.roundRect()` nativo por compatibilidad, usado por paintStructureMarkers()/paintWonderMarkers(). */
+    /** Rectángulo con esquinas redondeadas — sin `ctx.roundRect()` nativo por compatibilidad, usado solo por paintStructureMarkers(). */
     function roundRect(ctx, x, y, w, h, r) {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
@@ -880,7 +811,7 @@
       overlayRepaintPending = true;
       requestAnimationFrame(() => {
         overlayRepaintPending = false;
-        if (layout && lastTiles) paintOverlay(lastTiles, lastFactions, lastPlayers, lastStructures, lastWonders, lastBosses);
+        if (layout && lastTiles) paintOverlay(lastTiles, lastFactions, lastPlayers, lastStructures);
       });
     }
 
@@ -1192,13 +1123,6 @@
   const ESTATUA_SPRITE_WORLD_W = 34;
   const ESTATUA_RING_RADIUS = 75; // px de mundo de la capital, fuera de su sprite (60px de ancho)
   const ESTATUA_ANGLE_STEP = (137.5 * Math.PI) / 180; // angulo dorado: buen reparto en anillo sea cual sea el numero de estatuas
-  // Trofeo por derrotar un boss (ver docs/ACCIONES.md sección 31, !boss):
-  // un museo junto a la capital, "igual que el monumento" (mismo mecanismo
-  // que la estatua de arriba) pero en un anillo más ancho para no
-  // solaparse si la facción tiene trofeos de los dos tipos a la vez.
-  const museoImg = loadSprite('museo');
-  const MUSEO_SPRITE_WORLD_W = 40;
-  const MUSEO_RING_RADIUS = ESTATUA_RING_RADIUS + 40;
   // Castillo especial del nivel 4 de industria (ver rules/industry.js): UNA
   // sola vez por facción, a un lado fijo de la capital (no en anillo como
   // las estatuas, que pueden ser varias — este es siempre uno solo), con sus
@@ -1208,15 +1132,6 @@
   const CASTILLO_ESPECIAL_SPRITE_WORLD_W = 70;
   const CASTILLO_ESPECIAL_OFFSET_X = 95; // px de mundo, a la derecha de la capital
   const TROPA_ESPECIAL_SPRITE_WORLD_W = 14;
-  // Bosses (ver docs/ACCIONES.md sección 31, !boss): 3 sprites fijos, uno
-  // por tipo — "grandotes", bastante más anchos que la vaca (40) o un
-  // troop. Su ataque/defensa (5-10, sorteado por instancia) se pinta encima
-  // de la cabeza, ver drawBossWalkers().
-  const BOSS_SPRITES = {
-    ogro: [loadSprite('ogro'), 62],
-    troll: [loadSprite('troll'), 54],
-    behemot: [loadSprite('behemot'), 70],
-  };
   // Radio de paseo (px de mundo) alrededor de un castillo/aldea/puerto/
   // capital para su guarnicion/aldeanos — mucho mas pequeño que el de un
   // jugador paseando por su territorio: son NPCs "de guardia", no viajan.
@@ -1283,7 +1198,7 @@
   // "ganar terreno" se usa una banderita, no un icono de ataque a distancia.
   const ACTION_ICONS = {
     ATTACK: ' ⚔️', DEFEND: ' 🛡️', INDUSTRY: ' ⚒️', EXPAND: ' 🚩',
-    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎', CONQUISTA: ' 🗡️', DUNGEON: ' 💀', TORRE: ' 🗼', BOSS: ' 👹',
+    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎', CONQUISTA: ' 🗡️', DUNGEON: ' 💀', TORRE: ' 🗼',
   };
 
   /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */
@@ -1330,15 +1245,6 @@
     // docs/ACCIONES.md seccion 15. Se siembra sola en cuanto hay mapa (no
     // depende de que haya partida ni jugadores).
     let cow = null;
-
-    // Bosses (ver docs/ACCIONES.md sección 31, !boss, rules/bosses.js):
-    // igual idea que la vaca (un placeholder grande vagando solo), pero
-    // LEASHED a la casilla en la que salió ("se van moviendo solo por el
-    // terreno en el que spawnearon", tal y como se pidió) en vez de recorrer
-    // el mapa entero — ver syncBossWalkers()/stepBossWalkers()/
-    // drawBossWalkers() mas abajo. key -> { x,y,tx,ty,tileId,bossKey,
-    // attackPower,defensePower,dir,pauseUntil,hopSeed }
-    const bossWalkers = new Map();
 
     // Nubes del cielo (decorativo, ver stepClouds()/drawClouds()): pocas a
     // la vez, en pantalla (no en coordenadas de mundo), cruzando solo la
@@ -1429,12 +1335,11 @@
      * recalcula el destino de cada uno segun el comando que tenga escrito.
      * Se llama en cada `state:*`, no en cada frame.
      */
-    function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures, bosses }) {
+    function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures }) {
       if (!layout) return;
       walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1 };
       if (!cow) spawnCow();
       syncSiteWalkers(structures || [], factions || []);
-      syncBossWalkers(bosses || []);
 
       const alive = new Set();
       const byFaction = new Map();
@@ -1847,26 +1752,6 @@
           });
         }
 
-        // Museos (trofeo de `!boss`, ver rules/bosses.js sección 31): "se
-        // spawnea igual que el monumento alrededor de la capital", tal y
-        // como se pidió — mismo mecanismo de anillo con ángulo dorado y
-        // los mismos 4 aldeanos alrededor que una estatua de dungeon, pero
-        // en un anillo MÁS ANCHO (MUSEO_RING_RADIUS) para no solaparse con
-        // las estatuas si la facción tiene trofeos de los dos tipos a la vez.
-        const museums = f.bossTrophies || 0;
-        for (let i = 0; i < museums; i++) {
-          const angle = i * ESTATUA_ANGLE_STEP;
-          sites.set(`museo:${f.number}:${i}`, {
-            home: {
-              x: home.x + Math.cos(angle) * MUSEO_RING_RADIUS,
-              y: home.y + Math.sin(angle) * MUSEO_RING_RADIUS,
-            },
-            factionColor: null,
-            buildingKind: 'museo',
-            specs: [{ spriteKey: 'aldeano', n: 4 }],
-          });
-        }
-
         // Castillo especial del nivel 4 de industria (rules/industry.js): UNA
         // sola vez, a un lado fijo de la capital (no en anillo, a diferencia
         // de las estatuas — solo puede haber uno). Sin aldeanos alrededor,
@@ -2005,10 +1890,6 @@
           const kw = CASTILLO_ESPECIAL_SPRITE_WORLD_W * scale;
           const kh = kw * (castilloEspecialImg.naturalHeight / castilloEspecialImg.naturalWidth);
           drawTintedSprite(castilloEspecialImg, home.x * scale + vx - kw / 2, home.y * scale + vy - kh, kw, kh, group.factionColor, 0.65);
-        } else if (inView && group.buildingKind === 'museo' && museoImg.complete && museoImg.naturalWidth) {
-          const mw = MUSEO_SPRITE_WORLD_W * scale;
-          const mh = mw * (museoImg.naturalHeight / museoImg.naturalWidth);
-          ctx.drawImage(museoImg, home.x * scale + vx - mw / 2, home.y * scale + vy - mh, mw, mh);
         }
 
         group.list.forEach((walker) => {
@@ -2025,111 +1906,6 @@
           const sy = (walker.y - hop) * scale + vy;
           ctx.drawImage(img, sx - drawW / 2, sy - drawH, drawW, drawH);
         });
-      });
-    }
-
-    // -----------------------------------------------------------------------
-    // Bosses (ver docs/ACCIONES.md sección 31, !boss, rules/bosses.js): un
-    // placeholder grande por boss vivo, vagando SOLO por la casilla en la
-    // que salió (a diferencia de la vaca, que recorre todo el mapa) — se
-    // reutiliza `pathStaysInside()` con un único tileId como territorio
-    // permitido, en vez del territorio entero de una facción.
-    // -----------------------------------------------------------------------
-    const BOSS_WALK_SPEED = 30; // mas lento que la vaca: son grandes y torpes
-    const BOSS_WANDER_RADIUS = 90;
-    const BOSS_PAUSE_MS = 1600;
-    const BOSS_LABEL_OFFSET_Y = 14; // px de mundo extra por encima del sprite para el atk/def
-
-    /** Da de alta/baja los bosses vivos, sin reposicionar los que ya estaban paseando. */
-    function syncBossWalkers(bosses) {
-      const desiredKeys = new Set();
-      (bosses || []).forEach((b) => {
-        if (b.defeated || b.x == null || b.y == null) return;
-        const key = `${b.tileId}:${b.key}`;
-        desiredKeys.add(key);
-        if (bossWalkers.has(key)) return;
-        const home = { x: b.x * walkerWorld.blockPx, y: b.y * walkerWorld.blockPx };
-        bossWalkers.set(key, {
-          x: home.x, y: home.y, tx: home.x, ty: home.y,
-          tileId: b.tileId, bossKey: b.key,
-          attackPower: b.attackPower, defensePower: b.defensePower,
-          dir: 'right', pauseUntil: 0, hopSeed: Math.random() * Math.PI * 2,
-        });
-      });
-      for (const key of [...bossWalkers.keys()]) {
-        if (!desiredKeys.has(key)) bossWalkers.delete(key);
-      }
-    }
-
-    /** Siguiente sitio al que vagar SIN salir de `tileId` — mismo patrón que wanderTarget()/cowWanderTarget(). */
-    function bossWanderTarget(w) {
-      const ownedIds = new Set([w.tileId]);
-      for (let attempt = 0; attempt < 10; attempt++) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = BOSS_WANDER_RADIUS * (0.3 + Math.random() * 0.7);
-        const x = w.x + Math.cos(angle) * dist;
-        const y = w.y + Math.sin(angle) * dist;
-        if (pathStaysInside(w.x, w.y, x, y, ownedIds)) return { x, y };
-      }
-      return null; // casilla muy pequeña/estrecha: se queda quieto hasta el proximo intento
-    }
-
-    function stepBossWalkers(dt, now) {
-      bossWalkers.forEach((w) => {
-        const dx = w.tx - w.x, dy = w.ty - w.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist <= WALK_ARRIVE_DIST) {
-          if (now >= w.pauseUntil) {
-            const next = bossWanderTarget(w);
-            if (next) { w.tx = next.x; w.ty = next.y; }
-            w.pauseUntil = now + BOSS_PAUSE_MS * (0.5 + Math.random());
-          }
-        } else {
-          const step = Math.min(dist, BOSS_WALK_SPEED * dt);
-          w.x += (dx / dist) * step;
-          w.y += (dy / dist) * step;
-          if (dx > WALKER_DIR_THRESHOLD) w.dir = 'right';
-          else if (dx < -WALKER_DIR_THRESHOLD) w.dir = 'left';
-        }
-      });
-    }
-
-    /** Dibuja cada boss vivo y su ataque/defensa encima de la cabeza, si cae dentro de lo visible. */
-    function drawBossWalkers(w, h) {
-      if (!bossWalkers.size) return;
-      const { x: vx, y: vy, scale } = currentView;
-      const margin = OBJ_VIEWPORT_MARGIN_PX / scale;
-      const wx0 = (0 - vx) / scale - margin, wx1 = (w - vx) / scale + margin;
-      const wy0 = (0 - vy) / scale - margin, wy1 = (h - vy) / scale + margin;
-      const t = performance.now() / 1000;
-
-      bossWalkers.forEach((walker) => {
-        if (walker.x < wx0 || walker.x > wx1 || walker.y < wy0 || walker.y > wy1) return;
-        const spec = BOSS_SPRITES[walker.bossKey];
-        if (!spec) return;
-        const [img, worldW] = spec;
-        if (!img.complete || !img.naturalWidth) return;
-        const drawW = worldW * scale;
-        const drawH = drawW * (img.naturalHeight / img.naturalWidth);
-        const moving = Math.hypot(walker.tx - walker.x, walker.ty - walker.y) > WALK_ARRIVE_DIST;
-        const hop = moving ? Math.abs(Math.sin(t * HOP_SPEED + walker.hopSeed)) * HOP_HEIGHT * 0.6 : 0;
-        const sx = walker.x * scale + vx;
-        const sy = (walker.y - hop) * scale + vy;
-        ctx.drawImage(img, sx - drawW / 2, sy - drawH, drawW, drawH);
-
-        // Mismo estilo que el nombre de un jugador (sombra oscura detras +
-        // relleno claro, sin caja) — roundRect()/screenPx() viven en el
-        // closure de createMapController, no en este de createObjectLayer.
-        const label = `⚔${walker.attackPower} 🛡${walker.defensePower}`;
-        ctx.font = '12px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        const labelY = sy - drawH - BOSS_LABEL_OFFSET_Y * scale;
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(6,18,26,.85)';
-        ctx.strokeText(label, sx, labelY);
-        ctx.fillStyle = '#f5fbff';
-        ctx.fillText(label, sx, labelY);
       });
     }
 
@@ -2633,7 +2409,7 @@
 
     /** Hay algo que necesite el bucle de animacion corriendo ahora mismo. */
     function needsAnimationLoop() {
-      return walkers.size > 0 || siteWalkers.size > 0 || bossWalkers.size > 0 || cow != null || clouds.length > 0;
+      return walkers.size > 0 || siteWalkers.size > 0 || cow != null || clouds.length > 0;
     }
 
     /**
@@ -2656,7 +2432,6 @@
         lastFrameAt = now;
         stepWalkers(dt, now);
         stepSiteWalkers(dt, now);
-        stepBossWalkers(dt, now);
         stepCow(dt, now);
         stepClouds(dt, now);
         drawObjectLayer();
@@ -2743,7 +2518,6 @@
       drawDecorations(w, h);
       drawTerrainObjects(w, h);
       drawSiteWalkers(w, h);
-      drawBossWalkers(w, h);
       drawCow(w, h);
       drawWalkers(w, h);
       drawClouds(w, h);
