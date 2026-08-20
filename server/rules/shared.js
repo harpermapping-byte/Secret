@@ -32,6 +32,14 @@ const ARCHER_DEFENSE_BONUS = 0;
 const CAVALRY_ATTACK_BONUS = 0;
 const CAVALRY_DEFENSE_BONUS = 0.2;
 
+// Guarnición de dungeon (ver rules/structures.js sección 27, !dungeon): no
+// son tropas de IA de un jugador, sino la guarnición fija de un dungeon —
+// mismo mecanismo que AI_TROOP_COMBAT_BONUS (bonus llano, simétrico
+// ataque/defensa, sin tirada), pero más fuertes: el orco es grande y pega
+// fuerte, el goblin es débil de uno en uno pero suelen ir varios.
+const ORC_COMBAT_BONUS = 0.3;
+const GOBLIN_COMBAT_BONUS = 0.15;
+
 /**
  * Suma una tirada por cada userId de `userIds`, cada una en el rango que le
  * toque segun `player.unitType` (soldado o caballero) — por eso hace falta
@@ -185,4 +193,6 @@ module.exports = {
   ARCHER_DEFENSE_BONUS,
   CAVALRY_ATTACK_BONUS,
   CAVALRY_DEFENSE_BONUS,
+  ORC_COMBAT_BONUS,
+  GOBLIN_COMBAT_BONUS,
 };
