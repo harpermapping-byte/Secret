@@ -5,6 +5,7 @@ const { sumRandomPower, applyCasualties, applyTroopCascadeDamage } = require('./
 const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
 const { towerDefenseBonus } = require('./towers');
 const { specialTroopCombatBonus } = require('./industry');
+const { wonderDefenseBonus } = require('./wonders');
 
 /**
  * Resuelve todo el combate de la ronda a la vez: agrupa los ataques que recibe
@@ -17,7 +18,7 @@ const { specialTroopCombatBonus } = require('./industry');
  * `!defender` en la Fase de Accion, cada uno aportando su propia tirada
  * (ver COMBAT_RANDOM_MIN/MAX en rules/shared.js).
  *
- * Dos excepciones a lo anterior, ambas sumadas tal cual (sin combatModifier)
+ * Tres excepciones a lo anterior, todas sumadas tal cual (sin combatModifier)
  * al final del calculo correspondiente:
  * - Las torres (`!torre`, ver rules/towers.js) dan +0.5 de defensa pasiva
  *   CADA UNA, siempre, aunque nadie vote `!defender` esa ronda.
@@ -25,6 +26,9 @@ const { specialTroopCombatBonus } = require('./industry');
  *   rules/industry.js) dan +0.4 fijo tanto atacando como defendiendo, POR
  *   FACCION (cada facción atacante suma solo su propio bonus al ataque
  *   conjunto, no el de las demas que ataquen a la vez al mismo objetivo).
+ * - Las maravillas de tipo 'defense' (Ruinas de Numancia/Kebab/Contrato
+ *   indefinido, ver rules/wonders.js) dan +4 de defensa pasiva cada una
+ *   MIENTRAS la facción posea la casilla en la que salieron.
  */
 function resolveCombat(match, context) {
   const incomingByDefender = groupIncomingAttacks(match, context);
@@ -49,7 +53,8 @@ function resolveCombat(match, context) {
     const defensePower =
       sumRandomPower(match, defenderUserIds, 'defense') * combatModifier(match, defenderNumber, 'defense') +
       towerDefenseBonus(match, defenderFaction) +
-      specialTroopCombatBonus(defenderFaction);
+      specialTroopCombatBonus(defenderFaction) +
+      wonderDefenseBonus(match, defenderFaction);
 
     if (attackPower > defensePower) {
       // Gana el ataque: baja la faccion defensora y conquista territorio.

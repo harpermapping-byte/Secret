@@ -128,6 +128,22 @@
   const torreObrasSpriteImg = loadBuildingSprite('torre-obras');
   const torreSpriteImg = loadBuildingSprite('torre');
 
+  // Maravillas (ver docs/ACCIONES.md sección 30, rules/wonders.js): 6 fijas,
+  // cada una con su propio placeholder — se cargan todas de una vez en un
+  // mapa `key -> Image` para que paintWonderMarkers() no tenga que hacer un
+  // switch largo. SIN teñir de color de facción (landmark del mapa, no "de"
+  // nadie, aunque quien posea la casilla se lleve el bono).
+  const WONDER_SPRITES = {
+    guggenheim: loadBuildingSprite('wonder-guggenheim'),
+    numancia: loadBuildingSprite('wonder-numancia'),
+    moncloa: loadBuildingSprite('wonder-moncloa'),
+    spacex: loadBuildingSprite('wonder-spacex'),
+    kebab: loadBuildingSprite('wonder-kebab'),
+    contrato: loadBuildingSprite('wonder-contrato'),
+  };
+  const WONDER_SPRITE_WORLD_W = 60;
+  const WONDER_MARKER_OFFSET_Y = 78; // px de mundo por encima del sprite, para el nombre+bono
+
   // Marcador de guarnición neutral sobre castillo/aldea/puerto todavía sin
   // conquistar (!conquista, ver rules/structures.js y docs/ACCIONES.md
   // sección 20): icono + cuántas tropas de cada tipo tiene + su ataque/
@@ -172,6 +188,7 @@
     let lastFactions = null; // llega despues de un `state:public`/`state:admin` (el orden de los
     let lastPlayers = null; // mensajes WS no esta garantizado en todos los casos — ver docs/ACCIONES.md seccion 5).
     let lastStructures = null; // estructuras conquistables con guarnicion todavia (ver paintStructureMarkers()).
+    let lastWonders = null; // maravillas (ver paintWonderMarkers(), rules/wonders.js seccion 30).
     let lastRasterFingerprint = null; // ver paint(): evita repintar el raster si la propiedad de las casillas no cambio
     let overlayRepaintPending = false; // ver scheduleOverlayRepaint()
 
@@ -318,16 +335,17 @@
     }
 
     /** tiles: state.tiles (id, neutral, ownerFactionNumber). factions: state.factions (number, color). players: state.players. structures: state.structures (ver paintStructureMarkers()). */
-    function setTiles(tiles, factions, players, structures) {
+    function setTiles(tiles, factions, players, structures, wonders) {
       lastTiles = tiles;
       lastFactions = factions;
       lastPlayers = players || [];
       lastStructures = structures || [];
+      lastWonders = wonders || [];
       if (!layout) return; // aun no ha llegado `map:layout` — se pintara en cuanto llegue, ver setLayout()
-      paint(tiles, factions, lastPlayers, lastStructures);
+      paint(tiles, factions, lastPlayers, lastStructures, lastWonders);
     }
 
-    function paint(tiles, factions, players, structures) {
+    function paint(tiles, factions, players, structures, wonders) {
       const colorByTileId = new Array(tiles.length);
       const fingerprintParts = new Array(tiles.length);
       tiles.forEach((t) => {
@@ -355,7 +373,7 @@
         lastRasterFingerprint = fingerprint;
       }
 
-      paintOverlay(tiles, factions, players, structures);
+      paintOverlay(tiles, factions, players, structures, wonders);
 
       // `hasFitOnce` solo se marca a true si reset() de verdad pudo encajar
       // el mapa (viewport con medidas reales). En el panel de admin el mapa
@@ -420,7 +438,7 @@
      * salto este repintado por el fingerprint sin cambios) — las dos paginas
      * del proyecto pasan siempre `markersEl`.
      */
-    function paintOverlay(tiles, factions, players, structures) {
+    function paintOverlay(tiles, factions, players, structures, wonders) {
       // Los marcadores de jugador YA NO se pintan en `markersEl`: se movieron
       // a la capa de objetos (canvas del tamaño del VIEWPORT) porque ahora se
       // animan a 60fps, y `markersEl` es del tamaño del mundo entero —
@@ -444,6 +462,7 @@
       paintBuildingMarkers(ctx, tiles, 'towerBuildingCount', torreObrasSpriteImg, MARKER_SALT_TORRE_OBRAS, markerOccupied);
       paintBuildingMarkers(ctx, tiles, 'towerCount', torreSpriteImg, MARKER_SALT_TORRE, markerOccupied);
       paintStructureMarkers(ctx, structures);
+      paintWonderMarkers(ctx, wonders, factions);
       paintCombatBadges(ctx, tiles, factions);
     }
 
@@ -615,7 +634,55 @@
       });
     }
 
-    /** Rectángulo con esquinas redondeadas — sin `ctx.roundRect()` nativo por compatibilidad, usado solo por paintStructureMarkers(). */
+    /**
+     * Maravillas (ver docs/ACCIONES.md sección 30, rules/wonders.js): el
+     * placeholder de cada una se pinta SIEMPRE (no hay "sin conquistar" que
+     * ocultar, a diferencia de castillo/aldea/puerto/dungeon), con su nombre
+     * y el bono que da encima, tal y como se pidió ("aparecerán con el
+     * nombre arriba de su placeholder y el bonus que dan"). Si alguna
+     * facción posee su casilla ahora mismo, el borde de la chapa se tiñe de
+     * su color para que se note de un vistazo quién se la está llevando.
+     */
+    function paintWonderMarkers(ctx, wonders, factions) {
+      if (!wonders || !wonders.length || !layout) return;
+      wonders.forEach((w) => {
+        if (w.x == null || w.y == null) return;
+        const cx = w.x * BLOCK_PX;
+        const baseY = w.y * BLOCK_PX; // el sprite se ancla por su base aqui, igual que el resto de decoracion
+
+        const sprite = WONDER_SPRITES[w.key];
+        if (sprite && sprite.complete && sprite.naturalWidth) {
+          const sw = WONDER_SPRITE_WORLD_W;
+          const sh = sw * (sprite.naturalHeight / sprite.naturalWidth);
+          ctx.drawImage(sprite, cx - sw / 2, baseY - sh, sw, sh);
+        }
+
+        const bonusIcon = w.bonusType === 'industry' ? '⚒️' : '🛡️';
+        const label = `${w.icon || ''} ${w.name}  +${w.bonusAmount} ${bonusIcon}`;
+        const owner = w.ownerFactionNumber != null ? (factions || []).find((f) => f.number === w.ownerFactionNumber) : null;
+
+        ctx.font = '13px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const paddingX = 10;
+        const textW = ctx.measureText(label).width;
+        const boxW = textW + paddingX * 2;
+        const boxH = 22;
+        const labelY = baseY - WONDER_MARKER_OFFSET_Y; // por encima del sprite entero (~40-44 de alto) + hueco
+
+        ctx.fillStyle = 'rgba(30, 14, 12, .82)';
+        ctx.strokeStyle = owner ? owner.color : 'rgba(140, 60, 52, .9)';
+        ctx.lineWidth = owner ? 2.5 : 1.5;
+        roundRect(ctx, cx - boxW / 2, labelY - boxH / 2, boxW, boxH, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#f5e9df';
+        ctx.fillText(label, cx, labelY + 1);
+      });
+    }
+
+    /** Rectángulo con esquinas redondeadas — sin `ctx.roundRect()` nativo por compatibilidad, usado por paintStructureMarkers()/paintWonderMarkers(). */
     function roundRect(ctx, x, y, w, h, r) {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
@@ -811,7 +878,7 @@
       overlayRepaintPending = true;
       requestAnimationFrame(() => {
         overlayRepaintPending = false;
-        if (layout && lastTiles) paintOverlay(lastTiles, lastFactions, lastPlayers, lastStructures);
+        if (layout && lastTiles) paintOverlay(lastTiles, lastFactions, lastPlayers, lastStructures, lastWonders);
       });
     }
 

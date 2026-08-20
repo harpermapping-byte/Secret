@@ -124,7 +124,7 @@ function createMatch(config) {
     rosterSize: 0,
   }));
 
-  const { tiles, mapLayout, structures } = generateMap({
+  const { tiles, mapLayout, structures, wonders } = generateMap({
     tileCount: normalizedConfig.map.tileCount,
     factionCount: factions.length,
     mode: normalizedConfig.map.mode,
@@ -132,6 +132,9 @@ function createMatch(config) {
     // Dungeons solo se generan si el admin los activó en el panel (ver
     // futureFeatures.dungeons más abajo) — 1 a 5 al azar por partida.
     dungeonsEnabled: normalizedConfig.futureFeatures.dungeons,
+    // Maravillas (ver futureFeatures.wonders más abajo, docs/ACCIONES.md
+    // sección 30) — 2 a 6 al azar por partida, sin repetir ninguna.
+    wondersEnabled: normalizedConfig.futureFeatures.wonders,
   });
 
   for (const tile of tiles) {
@@ -161,6 +164,13 @@ function createMatch(config) {
     // eso vive aquí y no dentro de `mapLayout` — viaja en cada
     // `state:public`/`state:admin`, no solo una vez.
     structures,
+    // Maravillas (ver rules/wonders.js, docs/ACCIONES.md sección 30):
+    // estática igual que `structures`/`mapLayout` en cuanto a POSICIÓN (nunca
+    // cambia de sitio ni de tipo en toda la partida) pero su DUEÑO no se
+    // guarda aquí — se consulta en vivo a partir de `tile.ownerFactionNumber`
+    // (ver wonderIndustryBonus()/wonderDefenseBonus()), así que basta con
+    // `!ataque`/`!expansion` normales para "conquistarla", sin código propio.
+    wonders,
     players: new Map(),
     round: 0,
     roundActions: new Map(),
@@ -198,10 +208,11 @@ function normalizeConfig(config) {
       // tierra real se reparten territorios/decoraciones.
       key: config.map?.key || DEFAULT_MAP_KEY,
     },
-    // Casillas del panel de admin (ver docs/ACCIONES.md): `dungeons` YA
-    // tiene efecto real (createMatch() se lo pasa a generateMap(), ver
-    // dungeonsEnabled más arriba) — wonders/bosses/weather/randomEvents
-    // siguen sin implementar, solo se guardan para cuando se hagan.
+    // Casillas del panel de admin (ver docs/ACCIONES.md): `dungeons` y
+    // `wonders` YA tienen efecto real (createMatch() se lo pasa a
+    // generateMap(), ver dungeonsEnabled/wondersEnabled más arriba) —
+    // bosses/weather/randomEvents siguen sin implementar, solo se guardan
+    // para cuando se hagan.
     futureFeatures: {
       wonders: !!config.futureFeatures?.wonders,
       dungeons: !!config.futureFeatures?.dungeons,
@@ -612,6 +623,7 @@ function getPublicState() {
       factions: [],
       tiles: [],
       structures: [],
+      wonders: [],
       players: [],
       summaryBlocks: [],
       winnerFactionNumber: null,
@@ -652,7 +664,11 @@ function getPublicState() {
       // resto de stats de defensa.
       towerDefenseBonus: towerDefenseBonus(match, f),
       killsCaused: f.killsCaused,
-      wondersCount: 0, // reservado para v2 (maravillas), ver docs/GDD "Alcance de v1 vs futuro"
+      // Cuantas maravillas posee esta facción AHORA MISMO (ver
+      // rules/wonders.js sección 30) — se cuenta en vivo a partir de quién
+      // controla la casilla de cada una, igual que su bono de industria/
+      // defensa; usado en la clasificación (leaderboard).
+      wondersCount: match.wonders.filter((w) => match.tiles[w.tileId].ownerFactionNumber === f.number).length,
       // Recuento EN VIVO de la fase de accion en curso (ver countLiveActions):
       // cuanta gente de esta faccion esta defendiendo, y cuantos atacantes
       // tiene encima ahora mismo. El mapa los pinta como escudo verde / espada
@@ -708,6 +724,22 @@ function getPublicState() {
         defensePower: Number(structureDefensePower(s).toFixed(2)),
       };
     }),
+    // Maravillas (ver rules/wonders.js, docs/ACCIONES.md sección 30):
+    // posición y bono fijos toda la partida, `ownerFactionNumber` se calcula
+    // aquí en vivo a partir de quién controla `tileId` ahora mismo — no hace
+    // falta ningún comando para "conquistarlas", basta con poseer la
+    // casilla (`!ataque`/`!expansion` normales).
+    wonders: match.wonders.map((w) => ({
+      tileId: w.tileId,
+      x: w.x,
+      y: w.y,
+      key: w.key,
+      name: w.name,
+      icon: w.icon,
+      bonusType: w.bonusType,
+      bonusAmount: w.bonusAmount,
+      ownerFactionNumber: match.tiles[w.tileId].ownerFactionNumber,
+    })),
     players: [...match.players.values()].map((p) => {
       // Que esta haciendo este jugador AHORA MISMO, para que el mapa pueda
       // animar su marcador segun el comando que haya escrito (irse a la

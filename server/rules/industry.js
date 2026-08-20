@@ -2,6 +2,7 @@
 
 const { ACTION_INDUSTRY, ACTION_ATTACK } = require('../commands');
 const { shuffle } = require('./shared');
+const { wonderIndustryBonus } = require('./wonders');
 
 // Cada casilla controlada rinde esto por ronda por el mero hecho de tenerla.
 const PASSIVE_INDUSTRY_PER_TERRITORY = 0.1;
@@ -122,7 +123,12 @@ function resolveIndustry(match, context) {
 
     const passive = faction.territoryIds.length * PASSIVE_INDUSTRY_PER_TERRITORY;
     const fromBuildings = countFactionIndustries(match, faction) * INDUSTRY_PER_BUILDING;
-    const gained = faction.industryPenaltyActive ? 0 : passive + fromBuildings;
+    // Maravillas de tipo 'industry' (Guggenheim/La Moncloa/SpaceX, ver
+    // rules/wonders.js sección 30): +4/ronda cada una MIENTRAS la facción
+    // posea la casilla en la que salió — se suma en vivo, sin ningún estado
+    // propio que guardar.
+    const fromWonders = wonderIndustryBonus(match, faction);
+    const gained = faction.industryPenaltyActive ? 0 : passive + fromBuildings + fromWonders;
     faction.industryPenaltyActive = false;
 
     faction.industry += gained;

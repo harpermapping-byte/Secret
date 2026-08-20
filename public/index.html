@@ -285,7 +285,7 @@
     lastState = state;
     document.getElementById('phase').textContent = state.phase ? `Fase: ${phaseLabel(state.phase)} (ronda ${state.round})` : 'Esperando a que el admin configure la partida...';
 
-    mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || [], state.structures || []);
+    mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || [], state.structures || [], state.wonders || []);
     CondejorgeFactionCards.renderFactionCards(document.getElementById('factionsPanelCards'), state);
     handleFactionsPanelAutoOpen(state);
     renderRoster(state);

@@ -449,6 +449,48 @@ const SPRITES = {
     c.rect(2, 8, 10, 13, [108, 72, 148], 1);
   },
 
+  // MARAVILLAS (ver docs/ACCIONES.md sección 30, rules/wonders.js): 6 fijas
+  // y nombradas, cada una con su propio placeholder para distinguirse de un
+  // vistazo — SIN teñir de color de facción (a diferencia de capital/
+  // castillo especial: una maravilla es un landmark del MAPA, no "de"
+  // ninguna facción en particular, aunque quien posea su casilla se lleve el
+  // bono). Todas ~40-44 de ancho, un pelín más grandes que barraca/campo-
+  // arquería/caballeriza para leerse como "importante".
+  'wonder-guggenheim': (c) => { // curvas plateadas apiladas, tejado en angulo
+    const silver = [200, 200, 208];
+    c.rect(2, 20, 40, 20, silver, 2, [110, 110, 120]);
+    c.rect(10, 8, 24, 16, silver, 2, [110, 110, 120]);
+    c.rect(16, 0, 12, 10, silver, 2, [110, 110, 120]);
+  },
+  'wonder-numancia': (c) => { // columnas de piedra en ruinas, alturas distintas
+    const stone = [186, 176, 156];
+    c.rect(2, 18, 8, 22, stone, 2, [100, 92, 76]);
+    c.rect(14, 6, 8, 34, stone, 2, [100, 92, 76]);
+    c.rect(26, 14, 8, 26, stone, 2, [100, 92, 76]);
+    c.rect(0, 36, 40, 4, stone, 1, [100, 92, 76]);
+  },
+  'wonder-moncloa': (c) => { // edificio blanco con torreta central, rojo institucional
+    const white = [232, 228, 220];
+    c.rect(2, 16, 40, 24, white, 2, [140, 136, 128]);
+    c.rect(16, 0, 12, 18, [176, 44, 44], 2, [90, 20, 20]);
+  },
+  'wonder-spacex': (c) => { // cohete blanco sobre plataforma gris
+    const grey = [120, 120, 128];
+    c.rect(4, 34, 36, 8, grey, 2, [60, 60, 66]);
+    c.rect(16, 10, 12, 26, [230, 230, 234], 2, [130, 130, 136]);
+    c.triangle(16, 10, 28, 10, 22, 0, [190, 40, 40], [130, 130, 136]);
+  },
+  'wonder-kebab': (c) => { // tienda pequeña, toldo amarillo
+    const brick = [156, 90, 62];
+    c.rect(4, 16, 32, 24, brick, 2, [80, 44, 28]);
+    c.rect(0, 10, 40, 8, [214, 176, 48], 2, [120, 96, 20]);
+  },
+  'wonder-contrato': (c) => { // tablon de anuncios beige con un papel prendido
+    const board = [176, 156, 118];
+    c.rect(4, 4, 32, 36, board, 2, [96, 82, 56]);
+    c.rect(10, 10, 20, 14, [238, 234, 220], 1, [180, 176, 160]);
+  },
+
   // NUBES DEL CIELO (decorativo, ver docs/ACCIONES.md seccion 15): 3 tamaños
   // para que no se vean todas iguales al agruparse. Blancas y opacas aqui a
   // proposito — la transparencia final ("muy transparentes" segun se pidio)
@@ -489,6 +531,8 @@ const SIZES = {
   torre: [20, 30], 'torre-obras': [20, 30],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
   'castillo-especial': [48, 40], 'tropa-especial': [14, 22],
+  'wonder-guggenheim': [44, 40], 'wonder-numancia': [40, 40], 'wonder-moncloa': [44, 40],
+  'wonder-spacex': [40, 42], 'wonder-kebab': [40, 40], 'wonder-contrato': [40, 40],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };
 

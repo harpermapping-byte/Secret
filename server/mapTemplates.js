@@ -175,7 +175,7 @@ function shuffleParallel(xs, ys) {
  * modo: 'total' (todo el mapa repartido, sin neutral) o 'neutral' (zonas pequenas + territorio neutral)
  * mapKey: que mapa jugar ('world' | 'iberia', ver MAP_SOURCE_DEFS) — por defecto el mundo.
  */
-function generateMap({ tileCount, factionCount, mode, mapKey, dungeonsEnabled }) {
+function generateMap({ tileCount, factionCount, mode, mapKey, dungeonsEnabled, wondersEnabled }) {
   if (factionCount < 2) throw new Error('generateMap: se necesitan al menos 2 facciones');
   if (tileCount < factionCount * 2) throw new Error('generateMap: tileCount demasiado pequenio para factionCount');
 
@@ -222,7 +222,12 @@ function generateMap({ tileCount, factionCount, mode, mapKey, dungeonsEnabled })
   // partida, SOLO si el admin los activó en el panel — si no, 0 (sin
   // efecto, como el resto de "próximamente" que aún no se implementan).
   const dungeonCount = dungeonsEnabled ? 1 + Math.floor(Math.random() * 5) : 0;
-  const decorations = placeDecorations(cellTileIds, currentSource.cols, currentSource.rows, tileCount, dungeonCount);
+  // Maravillas (ver docs/ACCIONES.md sección 30, !!wonders): de 2 a 6 al
+  // azar por partida, SOLO si el admin las activó — igual patrón que
+  // dungeonCount. Nunca más de WONDER_TYPES.length (no hay tantos tipos
+  // distintos como para repetir ninguno).
+  const wonderCount = wondersEnabled ? Math.min(WONDER_TYPES.length, 2 + Math.floor(Math.random() * 5)) : 0;
+  const decorations = placeDecorations(cellTileIds, currentSource.cols, currentSource.rows, tileCount, dungeonCount, wonderCount);
 
   const mapLayout = {
     cols: currentSource.cols,
@@ -236,7 +241,13 @@ function generateMap({ tileCount, factionCount, mode, mapKey, dungeonsEnabled })
     terrainImageCols: currentSource.terrainImageCols,
     terrainImageRows: currentSource.terrainImageRows,
   };
-  return { tiles, mode, mapLayout, structures: buildStructures(decorations, cellTileIds) };
+  return {
+    tiles,
+    mode,
+    mapLayout,
+    structures: buildStructures(decorations, cellTileIds),
+    wonders: buildWonders(decorations, cellTileIds),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +297,30 @@ const STRUCTURE_MIN_GAP = { castle: 40, port: 30, village: 22 };
 // Separación mínima de un dungeon frente a cualquier otro elemento —
 // grande a propósito, son landmarks poco frecuentes (1-5 por partida).
 const DUNGEON_MIN_GAP = 45;
+// Separación mínima de una maravilla — igual de landmark-poco-frecuente que
+// un dungeon (2-6 por partida), mismo criterio de tamaño.
+const WONDER_MIN_GAP = 45;
+
+// Maravillas (ver docs/ACCIONES.md sección 30, `!!wonders` en el panel de
+// admin): 6 fijas, nombradas y con bono propio — se sortean cuáles de las 6
+// salen esta partida (2 a 6, `wonderCount` en generateMap()), nunca se
+// repite ninguna. `bonusType` decide dónde se suma su `bonusAmount`:
+// 'industry' -> rules/industry.js (resolveIndustry, igual que un edificio de
+// industria, pero atado a poseer ESTA casilla en concreto); 'defense' ->
+// rules/combat.js (mismo mecanismo pasivo que las torres, sección 28 —
+// tercera excepción a "el territorio no se defiende solo"). Se poseen
+// simplemente teniendo el terreno en el que salieron — no hace falta ningún
+// comando para "conquistarlas", basta con `!ataque`/`!expansion` normales
+// sobre esa casilla, tal y como se pidió ("para conquistarlas hay que poseer
+// el terreno en el que aparezcas").
+const WONDER_TYPES = [
+  { key: 'guggenheim', name: 'Guggenheim', icon: '🏛️', bonusType: 'industry', bonusAmount: 4 },
+  { key: 'numancia', name: 'Ruinas de Numancia', icon: '🏺', bonusType: 'defense', bonusAmount: 4 },
+  { key: 'moncloa', name: 'La Moncloa', icon: '🏢', bonusType: 'industry', bonusAmount: 4 },
+  { key: 'spacex', name: 'Plataforma SpaceX', icon: '🚀', bonusType: 'industry', bonusAmount: 4 },
+  { key: 'kebab', name: 'Kebab', icon: '🥙', bonusType: 'defense', bonusAmount: 4 },
+  { key: 'contrato', name: 'Contrato indefinido', icon: '📄', bonusType: 'defense', bonusAmount: 4 },
+];
 
 // Cuantos intentos como mucho por elemento antes de rendirse y colocarlo sin
 // respetar la separacion minima. Evita que un mapa con poca costa (o un
@@ -329,7 +364,7 @@ function matchesTerrain(kind, x, y) {
  * apilado encima de otra cosa ("regla para evitar se solape cualquier
  * elemento", tal y como se pidió).
  */
-function placeDecorations(cellTileIds, cols, rows, tileCount, dungeonCount = 0) {
+function placeDecorations(cellTileIds, cols, rows, tileCount, dungeonCount = 0, wonderCount = 0) {
   const decorations = [];
   const placedAll = [];
 
@@ -396,6 +431,26 @@ function placeDecorations(cellTileIds, cols, rows, tileCount, dungeonCount = 0) 
     }
     if (!best) continue; // mapa sin tierra libre (rarisimo): se deja fuera
     place('dungeon', best.x, best.y, DUNGEON_MIN_GAP);
+  }
+
+  // 1.6) Maravillas (ver docs/ACCIONES.md sección 30): `wonderCount` tipos
+  // DISTINTOS sorteados de WONDER_TYPES (sin repetir ninguno), cada uno en
+  // tierra al azar de todo el mapa — igual que un dungeon, no dependen de la
+  // casilla en la que caigan. El tipo va codificado en el propio `type` de
+  // la decoración (`wonder:<key>`) para que buildWonders() sepa qué bono le
+  // toca sin tener que ir a buscarlo en otra lista aparte.
+  const shuffledWonderTypes = [...WONDER_TYPES].sort(() => Math.random() - 0.5).slice(0, wonderCount);
+  for (const { key } of shuffledWonderTypes) {
+    let best = null;
+    for (let attempt = 0; attempt < DECOR_MAX_TRIES; attempt++) {
+      const x = Math.floor(Math.random() * cols);
+      const y = Math.floor(Math.random() * rows);
+      if (!matchesTerrain('land', x, y)) continue;
+      best = { x, y };
+      if (!overlapsAny(x, y, WONDER_MIN_GAP)) break;
+    }
+    if (!best) continue; // mapa sin tierra libre (rarisimo): se deja fuera
+    place(`wonder:${key}`, best.x, best.y, WONDER_MIN_GAP);
   }
 
   // 2) Resto de decoración (paisaje, conteo fijo por partida) — mismo
@@ -493,6 +548,31 @@ function buildStructures(decorations, cellTileIds) {
     });
   }
   return structures;
+}
+
+/**
+ * Maravillas (ver docs/ACCIONES.md sección 30): a diferencia de castillo/
+ * aldea/puerto/dungeon, NO llevan guarnición ni se "conquistan" con un
+ * combate — su dueño es, en todo momento, quien controle `tileId` ahora
+ * mismo (`rules/wonders.js` lo consulta en vivo cada ronda, sin guardar
+ * ningún `ownerFactionNumber` aquí: guardarlo por duplicado se
+ * desincronizaría en cuanto la casilla cambiara de dueño por combate/
+ * expansión normal, sin pasar por ningún código de maravillas).
+ */
+function buildWonders(decorations, cellTileIds) {
+  const wonders = [];
+  for (const d of decorations) {
+    if (!d.type.startsWith('wonder:')) continue;
+    const key = d.type.slice('wonder:'.length);
+    const meta = WONDER_TYPES.find((w) => w.key === key);
+    if (!meta) continue; // defensivo: no debería pasar
+
+    const tileId = cellTileIds[d.y * currentSource.cols + d.x];
+    if (tileId === OCEAN) continue; // defensivo: no debería pasar (solo salen en tierra)
+
+    wonders.push({ tileId, x: d.x, y: d.y, key: meta.key, name: meta.name, icon: meta.icon, bonusType: meta.bonusType, bonusAmount: meta.bonusAmount });
+  }
+  return wonders;
 }
 
 /**
