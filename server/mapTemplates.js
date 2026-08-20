@@ -57,7 +57,6 @@ const OCEAN = -1; // sentinel en cellTileIds: la celda es oceano, no pertenece a
 // bastas; bajarlo = al reves. Mismo valor para todos los mapas (ver
 // MAP_SOURCES) para que el "grano" de frontera se sienta igual en cualquiera.
 const TERRAIN_DOWNSAMPLE = 8;
-const WORLD_EQUATOR_CIRCUMFERENCE_KM = 40075;
 
 /**
  * Un "source" es todo lo que generateMap() necesita de UN mapa concreto
@@ -72,7 +71,7 @@ const WORLD_EQUATOR_CIRCUMFERENCE_KM = 40075;
  */
 const mapSourceCache = new Map();
 
-function buildSourceFromMask(decodeFn, fullCols, fullRows, isLandFn, fullWidthKm) {
+function buildSourceFromMask(decodeFn, fullCols, fullRows, isLandFn) {
   const cols = Math.round(fullCols / TERRAIN_DOWNSAMPLE);
   const rows = Math.round(fullRows / TERRAIN_DOWNSAMPLE);
   const landMask = new Uint8Array(cols * rows);
@@ -93,11 +92,7 @@ function buildSourceFromMask(decodeFn, fullCols, fullRows, isLandFn, fullWidthKm
       if (landMask[ry * cols + rx]) { landCellsX[k] = rx; landCellsY[k] = ry; k++; }
     }
   }
-  // Km reales por celda de ESTA rejilla de territorio — necesario para poder
-  // pedir "conecta costas a menos de X km" en km reales sin importar la
-  // resolución/escala de cada mapa (ver SEA_ADJACENCY_REACH_KM mas abajo).
-  const kmPerCell = (fullWidthKm / fullCols) * TERRAIN_DOWNSAMPLE;
-  return { cols, rows, landMask, landCellsX, landCellsY, kmPerCell };
+  return { cols, rows, landMask, landCellsX, landCellsY };
 }
 
 // Definicion de cada mapa jugable: como reducir su mascara real a rejilla de
@@ -114,8 +109,7 @@ const MAP_SOURCE_DEFS = {
     // necesita 1 de cada TERRAIN_DOWNSAMPLE² celdas, desempaquetar TODO
     // antes de tirar el 98% seria trabajo desperdiciado.
     build: () => buildSourceFromMask(
-      worldLandMaskMod.decodeLandMaskPacked, worldLandMaskMod.COLS, worldLandMaskMod.ROWS, worldLandMaskMod.isLand,
-      WORLD_EQUATOR_CIRCUMFERENCE_KM
+      worldLandMaskMod.decodeLandMaskPacked, worldLandMaskMod.COLS, worldLandMaskMod.ROWS, worldLandMaskMod.isLand
     ),
     terrainFile: '/terrain/world.png',
     terrainImageCols: worldLandMaskMod.COLS,
@@ -125,22 +119,11 @@ const MAP_SOURCE_DEFS = {
     label: 'España',
     build: () => buildSourceFromMask(
       iberiaLandMaskMod.decodeLandMask, iberiaLandMaskMod.COLS, iberiaLandMaskMod.ROWS,
-      (mask, x, y) => mask[y * iberiaLandMaskMod.COLS + x] === 1,
-      // Ancho real en km de TODO el lienzo (LON_MIN..LON_MAX), a la latitud
-      // media de la peninsula — mismo calculo que PX_PER_KM en el script de
-      // horneado del terreno.
-      (iberiaLandMaskMod.LON_MAX - iberiaLandMaskMod.LON_MIN) * 111.32 *
-        Math.cos(((iberiaLandMaskMod.LAT_MIN + iberiaLandMaskMod.LAT_MAX) / 2) * Math.PI / 180)
+      (mask, x, y) => mask[y * iberiaLandMaskMod.COLS + x] === 1
     ),
     terrainFile: '/terrain/iberia.png',
-    // OJO: NO son iberiaLandMaskMod.COLS/ROWS — esas son la resolución del
-    // land mask que reparte territorios (fija, no cambia), pero el PNG
-    // horneado se generó a una resolución más baja para poder entregarlo
-    // (bajo el límite de subida) y son medidas INDEPENDIENTES. Si se
-    // regenera public/terrain/iberia.png a otro tamaño, esto hay que
-    // actualizarlo a mano para que coincida.
-    terrainImageCols: 4600,
-    terrainImageRows: 2850,
+    terrainImageCols: iberiaLandMaskMod.COLS,
+    terrainImageRows: iberiaLandMaskMod.ROWS,
   },
 };
 const DEFAULT_MAP_KEY = 'world';
@@ -184,7 +167,7 @@ function generateMap({ tileCount, factionCount, mode, mapKey }) {
 
   const seeds = placeSeedsOnLand(tileCount);
   const { cellTileIds, centroids } = rasterizeLand(seeds, currentSource.cols, currentSource.rows);
-  const neighborSets = computeNeighbors(cellTileIds, currentSource.cols, currentSource.rows, tileCount, currentSource.kmPerCell);
+  const neighborSets = computeNeighbors(cellTileIds, currentSource.cols, currentSource.rows, tileCount);
   const ownerByTile = assignInitialOwners({ tileCount, factionCount, mode, seeds, neighborSets });
 
   const tiles = [];
@@ -500,24 +483,8 @@ function rasterizeLand(seeds, cols, rows) {
   return { cellTileIds, centroids };
 }
 
-/**
- * Alcance de la "vecindad de mar" (ver addSeaAdjacency() mas abajo): dos
- * costas a menos de esta distancia real se tratan como fronterizas para
- * atacar/expandirse, igual que si tocaran pixel a pixel. Sin esto, una
- * faccion que sale en una masa de tierra aislada (Australia es el caso real
- * que lo hizo evidente: sin vecinos de verdad, `factionsAreAdjacent()` y
- * `pickExpandableNeutralTile()` — ambas basadas solo en `tile.neighborIds`,
- * ver rules/territory.js — nunca encuentran nada, asi que esa facción no
- * puede atacar, ser atacada NI expandirse, JAMAS, en toda la partida) se
- * queda completamente fuera del juego. 400km cubre estrechos reales tipo
- * Australia-Nueva Guinea (~150km por el estrecho de Torres) o Sicilia-Tunez
- * (~140km) sin llegar a "teletransportar" continentes que de verdad estan a
- * miles de km (Australia-Sudafrica, por ejemplo, se queda sin conectar).
- */
-const SEA_ADJACENCY_REACH_KM = 400;
-
 /** Dos tiles son vecinos si en algun punto del raster quedan pegados (misma fila/columna, id distinto, ninguno oceano). */
-function computeNeighbors(cellTileIds, cols, rows, tileCount, kmPerCell) {
+function computeNeighbors(cellTileIds, cols, rows, tileCount) {
   const sets = Array.from({ length: tileCount }, () => new Set());
 
   for (let ry = 0; ry < rows; ry++) {
@@ -543,71 +510,7 @@ function computeNeighbors(cellTileIds, cols, rows, tileCount, kmPerCell) {
     }
   }
 
-  addSeaAdjacency(sets, cellTileIds, cols, rows, kmPerCell);
-
   return sets;
-}
-
-/**
- * Añade, a las vecindades de tierra ya calculadas, la "vecindad de mar":
- * casillas costeras (con al menos una celda de oceano al lado) de dos tiles
- * DISTINTOS que caigan a SEA_ADJACENCY_REACH_KM o menos entre si. Con una
- * rejilla espacial de cubos (mismo cubo = mismo radio de busqueda) en vez de
- * comparar cada celda costera contra todas las demas: a la resolucion de
- * territorio (cientos de miles de celdas como mucho) la costa real son unos
- * pocos miles de celdas, así que esto sale barato incluso en el mapa mundial.
- */
-function addSeaAdjacency(sets, cellTileIds, cols, rows, kmPerCell) {
-  const reachCells = Math.max(1, Math.round(SEA_ADJACENCY_REACH_KM / kmPerCell));
-  const bucketSize = reachCells;
-
-  // 1) casillas costeras: tierra con al menos un vecino de oceano.
-  const coastal = []; // { x, y, id }
-  for (let ry = 0; ry < rows; ry++) {
-    for (let rx = 0; rx < cols; rx++) {
-      const idx = ry * cols + rx;
-      const id = cellTileIds[idx];
-      if (id === OCEAN) continue;
-      const touchesOcean =
-        (rx > 0 && cellTileIds[idx - 1] === OCEAN) ||
-        (rx + 1 < cols && cellTileIds[idx + 1] === OCEAN) ||
-        (ry > 0 && cellTileIds[idx - cols] === OCEAN) ||
-        (ry + 1 < rows && cellTileIds[idx + cols] === OCEAN);
-      if (touchesOcean) coastal.push({ x: rx, y: ry, id });
-    }
-  }
-  if (!coastal.length) return;
-
-  // 2) rejilla espacial de cubos de lado `bucketSize` — un punto solo puede
-  // caer dentro de SEA_ADJACENCY_REACH_KM de otro si sus cubos son iguales o
-  // vecinos (3x3 alrededor), así que nunca hace falta mirar mas alla de eso.
-  const grid = new Map();
-  const bucketKey = (bx, by) => `${bx},${by}`;
-  for (const c of coastal) {
-    const bx = Math.floor(c.x / bucketSize), by = Math.floor(c.y / bucketSize);
-    const key = bucketKey(bx, by);
-    if (!grid.has(key)) grid.set(key, []);
-    grid.get(key).push(c);
-  }
-
-  const reachSq = reachCells * reachCells;
-  for (const a of coastal) {
-    const bx = Math.floor(a.x / bucketSize), by = Math.floor(a.y / bucketSize);
-    for (let dby = -1; dby <= 1; dby++) {
-      for (let dbx = -1; dbx <= 1; dbx++) {
-        const bucket = grid.get(bucketKey(bx + dbx, by + dby));
-        if (!bucket) continue;
-        for (const b of bucket) {
-          if (b.id === a.id) continue;
-          const dx = a.x - b.x, dy = a.y - b.y;
-          if (dx * dx + dy * dy <= reachSq) {
-            sets[a.id].add(b.id);
-            sets[b.id].add(a.id);
-          }
-        }
-      }
-    }
-  }
 }
 
 /**
