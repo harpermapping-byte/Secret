@@ -102,6 +102,62 @@ function applyCasualties(match, context, factionNumber, count, causedByFactionNu
   return killed;
 }
 
+// Orden de absorcion del nuevo modelo de daño en cascada (ver
+// docs/ACCIONES.md): antes de que el daño sobrante llegue a matar
+// JUGADORES via applyCasualties()/applyStructureCasualties(), primero se
+// reparte entre sus tropas de IA, en este orden fijo — caballero, arquero,
+// luego leva — "las de mas rango primero", tal y como se pidio.
+const TROOP_CASCADE_PRIORITY = [
+  { field: 'cavalryTroops', defense: CAVALRY_DEFENSE_BONUS },
+  { field: 'archerTroops', defense: ARCHER_DEFENSE_BONUS },
+  { field: 'aiTroops', defense: AI_TROOP_COMBAT_BONUS },
+];
+
+/**
+ * Consume `damage` matando tropas de `userIds` en el orden de
+ * TROOP_CASCADE_PRIORITY antes de que llegue a los jugadores. Cada unidad
+ * absorbe su propio bonus de defensa (rules/shared.js) al morir — salvo un
+ * tipo con defensa 0 (los arqueros defendiendo, ver ARCHER_DEFENSE_BONUS):
+ * esos mueren TODOS gratis sin gastar nada de `damage`, porque una unidad
+ * sin ninguna defensa no "aguanta" nada del golpe, tal y como se pidio
+ * explicitamente ("si tengo arqueros que tienen 0 defensa mueren todos...
+ * y seguiria matando levas porque no consumimos esos 0.5 de daño"). Quien
+ * muere dentro de cada tipo se sortea al azar entre `userIds` que lo
+ * lleven. Devuelve el `damage` sobrante (redondeado, misma escala que
+ * `count` en applyCasualties/applyStructureCasualties) para que el
+ * llamador se lo pase a la baja de JUGADORES de siempre — "cuando me
+ * quedo sin tropas el daño es a mi, por tanto podria morir".
+ */
+function applyTroopCascadeDamage(match, userIds, damage) {
+  let remaining = damage;
+  for (const { field, defense } of TROOP_CASCADE_PRIORITY) {
+    if (remaining <= 0) break;
+
+    const pool = [];
+    for (const userId of userIds) {
+      const player = match.players.get(userId);
+      if (!player) continue;
+      for (let i = 0; i < (player[field] || 0); i++) pool.push(player);
+    }
+    if (pool.length === 0) continue;
+
+    if (defense <= 0) {
+      for (const userId of userIds) {
+        const player = match.players.get(userId);
+        if (player) player[field] = 0;
+      }
+      continue;
+    }
+
+    const killable = Math.min(pool.length, Math.floor(remaining / defense));
+    if (killable <= 0) continue;
+    shuffle(pool);
+    for (let i = 0; i < killable; i++) pool[i][field] = Math.max(0, pool[i][field] - 1);
+    remaining -= killable * defense;
+  }
+  return Math.max(0, Math.round(remaining));
+}
+
 function killPlayer(match, userId) {
   const player = match.players.get(userId);
   if (!player || !player.alive) return false;
@@ -121,6 +177,7 @@ function shuffle(array) {
 module.exports = {
   sumRandomPower,
   applyCasualties,
+  applyTroopCascadeDamage,
   killPlayer,
   shuffle,
   AI_TROOP_COMBAT_BONUS,

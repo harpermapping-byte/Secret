@@ -1,7 +1,7 @@
 'use strict';
 
 const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
-const { sumRandomPower, applyCasualties } = require('./shared');
+const { sumRandomPower, applyCasualties, applyTroopCascadeDamage } = require('./shared');
 const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
 
 /**
@@ -33,8 +33,15 @@ function resolveCombat(match, context) {
 
     if (attackPower > defensePower) {
       // Gana el ataque: baja la faccion defensora y conquista territorio.
+      // El daño sobrante se reparte primero entre las tropas de IA de los
+      // que votaron !defender (caballero->arquero->leva, ver
+      // applyTroopCascadeDamage en rules/shared.js) antes de matar
+      // jugadores — solo lo que sobra de esa cascada llega a
+      // applyCasualties().
       const winningAttacker = attackers.sort((a, b) => b.userIds.length - a.userIds.length)[0];
-      applyCasualties(match, context, defenderNumber, Math.round(attackPower - defensePower), winningAttacker.factionNumber);
+      const rawDamage = Math.round(attackPower - defensePower);
+      const remainingDamage = applyTroopCascadeDamage(match, defenderUserIds, rawDamage);
+      applyCasualties(match, context, defenderNumber, remainingDamage, winningAttacker.factionNumber);
 
       const tile = pickBorderTileToConquer(match, defenderNumber, winningAttacker.factionNumber);
       if (tile) {
@@ -61,11 +68,15 @@ function resolveCombat(match, context) {
         });
       }
     } else {
-      // Empate o gana la defensa: las facciones atacantes sufren bajas proporcionales a su aporte.
+      // Empate o gana la defensa: las facciones atacantes sufren bajas
+      // proporcionales a su aporte — igual que arriba, primero cascada de
+      // tropas de los votantes de ESE ataque, solo el resto mata jugadores.
       const excess = Math.round(defensePower - attackPower);
       for (const attacker of attackers) {
         const share = attacker.userIds.length / totalAttackers;
-        applyCasualties(match, context, attacker.factionNumber, Math.round(excess * share), defenderNumber);
+        const rawDamage = Math.round(excess * share);
+        const remainingDamage = applyTroopCascadeDamage(match, attacker.userIds, rawDamage);
+        applyCasualties(match, context, attacker.factionNumber, remainingDamage, defenderNumber);
         checkFactionElimination(match, context, attacker.factionNumber, defenderNumber);
         context.roundEvents.combats.push({
           attackerFactionNumber: attacker.factionNumber,

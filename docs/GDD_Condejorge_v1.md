@@ -131,6 +131,8 @@ Los castillos, aldeas y puertos que decoran el mapa empiezan sin dueño, con una
 
 Votando `!conquista` atacas, junto con el resto de tu facción que también lo vote esa ronda, a UNA estructura elegida al azar entre las que estén dentro de tu propio territorio y todavía tengan guarnición — no se puede elegir cuál. Tu fuerza de ataque se calcula igual que en un `!ataque` normal (tirada + tus propias tropas); la guarnición no tira dado, solo suma su fuerza fija. Si ganáis, la estructura queda conquistada para siempre y empieza a producir para tu facción: castillo +1 caballero de IA/ronda, aldea +2 levas/ronda, puerto +1 de industria/ronda — y si más adelante pierdes ese terreno, la producción se la lleva quien te lo conquiste a ti, igual que con cualquier otro edificio. Si perdéis el asalto, los que votaron sufren bajas según lo grande que fuera la diferencia de fuerza.
 
+Mientras una estructura no está conquistada, su guarnición se ve paseando alrededor (los mismos placeholders que las tropas de un jugador); en cuanto se conquista, esos mismos puestos pasan a ser aldeanos. Cada facción también tiene, desde que empieza la partida, una **capital** representativa en una de sus casillas iniciales, con sus propios aldeanos paseando alrededor — de momento puramente decorativa, sin efecto de juego.
+
 ### Combate
 Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa).
 
@@ -138,7 +140,9 @@ Cuando una facción recibe ataques de una o varias facciones en la misma ronda, 
 
 **El territorio no se defiende solo.** Una facción a la que nadie defiende esa ronda entra al combate con **0 de defensa**, por muchas casillas que tenga: toda la defensa sale de los `!defender` de esa ronda.
 
-La defensa reduce el ataque entrante; lo que sobra causa bajas reales, repartidas en este orden de prioridad: **inactivos → usuarios en `!industria` → atacantes propios → defensores** (los defensores son los últimos en caer, ya que su rol es bloquear). El territorio conquistado se elige al azar entre las casillas fronterizas del perdedor que tocan al ganador. Visualmente, los atacantes se mueven hacia la casilla de destino y los defensores se reparten entre los distintos frentes activos de su facción.
+La defensa reduce el ataque entrante; lo que sobra causa bajas — pero antes de matar JUGADORES, ese daño se reparte primero entre las tropas de IA del bando perdedor, en orden **caballero → arquero → leva** (un tipo sin nada de defensa, como el arquero defendiendo, muere entero gratis sin gastar nada del daño). Solo lo que sobra de esa cascada de tropas mata jugadores de verdad, con la prioridad de siempre: **inactivos → usuarios en `!industria` → atacantes propios → defensores** (los defensores son los últimos en caer, ya que su rol es bloquear). El territorio conquistado se elige al azar entre las casillas fronterizas del perdedor que tocan al ganador. Visualmente, los atacantes se mueven hacia la casilla de destino y los defensores se reparten entre los distintos frentes activos de su facción.
+
+`!conquista` (contra la guarnición neutral de un castillo/aldea/puerto, ver arriba) es la excepción bidireccional: ahí SÍ hay un "ataque del defensor" de verdad (la guarnición tiene su propia fuerza de ataque fija), así que el contraataque se aplica siempre, ganes o pierdas el asalto — puedes conquistar el edificio y perder tropas en el mismo turno.
 
 Durante la Fase de Acción, el mapa muestra en vivo, sobre cada facción, un **escudo verde 🛡 con el número de defensores** que lleva acumulados y una **espada roja ⚔ con el número de atacantes** que tiene encima, actualizados según la gente va escribiendo en el chat.
 
