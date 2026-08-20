@@ -212,7 +212,7 @@ function generateMap({ tileCount, factionCount, mode, mapKey }) {
     });
   }
 
-  const decorations = placeDecorations();
+  const decorations = placeDecorations(cellTileIds, currentSource.cols, currentSource.rows, tileCount);
 
   const mapLayout = {
     cols: currentSource.cols,
@@ -235,28 +235,44 @@ function generateMap({ tileCount, factionCount, mode, mapKey }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Cuantos elementos de cada tipo se reparten por partida y donde puede caer
- * cada uno. La clave es EXACTAMENTE el nombre del PNG en `public/sprites/`
- * (ver tools/bakeSpritePlaceholders.js): el cliente monta la ruta a partir de
- * ella, asi que añadir un tipo nuevo es añadir una fila aqui y su .png — sin
- * tocar el codigo del cliente.
+ * Castillo/aldea/puerto YA NO son un conteo fijo por partida: cada CASILLA
+ * de la partida tira sus 3 dados por separado (independientes entre sí, así
+ * que una misma casilla puede tener aldea Y puerto Y castillo a la vez, o
+ * ninguno) — así la cantidad total escala sola con el tamaño del mapa
+ * (`tileCount`) en vez de ser siempre "10 castillos" tenga la partida 10
+ * casillas o 200. `terrain: 'coast'` en el puerto significa que la tirada
+ * solo cuenta si esa casilla tiene ALGUNA celda de costa — una casilla
+ * totalmente interior nunca saca puerto, tenga la suerte que tenga.
+ */
+const PROBABILISTIC_KINDS = [
+  { type: 'village', chance: 0.70, terrain: 'land' },
+  { type: 'port', chance: 0.55, terrain: 'coast' },
+  { type: 'castle', chance: 0.25, terrain: 'land' },
+];
+
+/**
+ * El resto de la decoración (paisaje puro, no conquistable) sigue con
+ * conteo fijo por partida — la clave es EXACTAMENTE el nombre del PNG en
+ * `public/sprites/` (ver tools/bakeSpritePlaceholders.js).
  *
  *   terrain: 'land'  -> cualquier celda de tierra
- *            'coast' -> celda de tierra que toca el agua (para los puertos)
  *            'water' -> cualquier celda de oceano
- *   minGap: separacion minima entre elementos DEL MISMO TIPO, en celdas de la
- *           rejilla, para que no salgan amontonados en un pegote.
+ *   minGap: separación mínima frente a CUALQUIER otro elemento ya colocado
+ *           (de cualquier tipo, ver placedAll en placeDecorations) para que
+ *           nada salga amontonado ni pisando a otra cosa.
  */
-const DECORATION_KINDS = [
-  { type: 'castle', count: 10, terrain: 'land', minGap: 40 },
-  { type: 'port', count: 15, terrain: 'coast', minGap: 30 },
-  { type: 'village', count: 20, terrain: 'land', minGap: 22 },
+const FIXED_COUNT_KINDS = [
   { type: 'tree', count: 100, terrain: 'land', minGap: 8 },
   { type: 'ship-small', count: 10, terrain: 'water', minGap: 40 },
   { type: 'ship-big', count: 5, terrain: 'water', minGap: 60 },
   { type: 'whale', count: 5, terrain: 'water', minGap: 60 },
   { type: 'kraken', count: 1, terrain: 'water', minGap: 0 },
 ];
+
+// Separación mínima de castillo/aldea/puerto frente a CUALQUIER otro
+// elemento ya colocado (misma idea que minGap de FIXED_COUNT_KINDS, pero
+// estos no tienen "count" fijo así que viven en su propia tabla).
+const STRUCTURE_MIN_GAP = { castle: 40, port: 30, village: 22 };
 
 // Cuantos intentos como mucho por elemento antes de rendirse y colocarlo sin
 // respetar la separacion minima. Evita que un mapa con poca costa (o un
@@ -288,32 +304,84 @@ function matchesTerrain(kind, x, y) {
  * Reparte los elementos decorativos por el mapa, distinto en cada partida.
  * Se generan EN EL SERVIDOR (no en cada navegador) para que el streamer y
  * todos los espectadores vean exactamente la misma decoracion; viajan una
- * unica vez dentro del mensaje `map:layout`, y son tan pocos (~166 objetos,
- * unos pocos KB) que no se notan al lado de la rejilla del mapa.
+ * unica vez dentro del mensaje `map:layout`.
  *
  * Coordenadas en celdas de la rejilla del mapa (las mismas que `centroids`),
  * no en pixeles de pantalla: el cliente las escala con el zoom como el resto
  * del terreno.
+ *
+ * `placedAll` es la lista de TODO lo colocado hasta ahora (cualquier tipo:
+ * castillo, aldea, puerto, árbol, barco...) — el anti-solape se comprueba
+ * contra ella entera, no solo contra el propio tipo, para que nada quede
+ * apilado encima de otra cosa ("regla para evitar se solape cualquier
+ * elemento", tal y como se pidió).
  */
-function placeDecorations() {
+function placeDecorations(cellTileIds, cols, rows, tileCount) {
   const decorations = [];
+  const placedAll = [];
 
-  for (const { type, count, terrain, minGap } of DECORATION_KINDS) {
-    const placed = [];
-    const minGapSq = minGap * minGap;
+  function overlapsAny(x, y, minGap) {
+    return placedAll.some((p) => {
+      const gap = Math.max(minGap, p.minGap);
+      return (p.x - x) ** 2 + (p.y - y) ** 2 < gap * gap;
+    });
+  }
 
+  function place(type, x, y, minGap) {
+    placedAll.push({ x, y, minGap });
+    decorations.push({ type, x, y });
+  }
+
+  /** Prueba varios candidatos al azar de `candidates` y se queda con el primero libre; si no encuentra ninguno libre en DECOR_MAX_TRIES, coloca igual el último probado (mejor solapado que perdido). */
+  function tryPlaceFromCandidates(type, candidates, minGap) {
+    if (!candidates.length) return;
+    let fallback = null;
+    for (let attempt = 0; attempt < DECOR_MAX_TRIES; attempt++) {
+      const c = candidates[Math.floor(Math.random() * candidates.length)];
+      fallback = c;
+      if (!overlapsAny(c.x, c.y, minGap)) { place(type, c.x, c.y, minGap); return; }
+    }
+    place(type, fallback.x, fallback.y, minGap);
+  }
+
+  // 1) Castillo/aldea/puerto: una tirada independiente por CASILLA (ver
+  // PROBABILISTIC_KINDS) — hace falta la lista de celdas de tierra/costa DE
+  // CADA casilla para poder elegir un punto al azar dentro de ELLA (no del
+  // mapa entero), así el edificio de la casilla 7 cae dentro de la casilla
+  // 7, nunca en otra.
+  const cellsByTile = Array.from({ length: tileCount }, () => ({ land: [], coast: [] }));
+  for (let ry = 0; ry < rows; ry++) {
+    for (let rx = 0; rx < cols; rx++) {
+      const id = cellTileIds[ry * cols + rx];
+      if (id === OCEAN) continue;
+      cellsByTile[id].land.push({ x: rx, y: ry });
+      if (isCoastCell(rx, ry)) cellsByTile[id].coast.push({ x: rx, y: ry });
+    }
+  }
+  for (let tileId = 0; tileId < tileCount; tileId++) {
+    const cells = cellsByTile[tileId];
+    for (const { type, chance, terrain } of PROBABILISTIC_KINDS) {
+      if (Math.random() >= chance) continue;
+      const candidates = terrain === 'coast' ? cells.coast : cells.land;
+      tryPlaceFromCandidates(type, candidates, STRUCTURE_MIN_GAP[type]);
+    }
+  }
+
+  // 2) Resto de decoración (paisaje, conteo fijo por partida) — mismo
+  // anti-solape global de arriba (placedAll ya tiene dentro los
+  // castillos/aldeas/puertos recién colocados).
+  for (const { type, count, terrain, minGap } of FIXED_COUNT_KINDS) {
     for (let n = 0; n < count; n++) {
       let best = null;
       for (let attempt = 0; attempt < DECOR_MAX_TRIES; attempt++) {
-        const x = Math.floor(Math.random() * currentSource.cols);
-        const y = Math.floor(Math.random() * currentSource.rows);
+        const x = Math.floor(Math.random() * cols);
+        const y = Math.floor(Math.random() * rows);
         if (!matchesTerrain(terrain, x, y)) continue;
-        best = { x, y }; // vale como plan B aunque quede pegado a otro
-        if (placed.every((p) => (p.x - x) ** 2 + (p.y - y) ** 2 >= minGapSq)) break;
+        best = { x, y };
+        if (!overlapsAny(x, y, minGap)) break;
       }
       if (!best) continue; // no hay sitio de ese terreno (mapa raro): se deja fuera
-      placed.push(best);
-      decorations.push({ type, x: best.x, y: best.y });
+      place(type, best.x, best.y, minGap);
     }
   }
 

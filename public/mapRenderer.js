@@ -98,11 +98,7 @@
   // amarillo dibujado a mano). El ancho va en pixeles de MUNDO, igual que
   // `DECOR_SPRITES` mas abajo — a proposito algo mas pequeño que `village`
   // (90 ahi): 67.5 = 75% de 90, tal y como se pidio.
-  // INDUSTRY_STEP_WORLD tambien en pixeles de mundo: es la separacion entre
-  // industrias de la misma casilla cuando hay varias.
   const INDUSTRY_SPRITE_WORLD_WIDTH = 67.5;
-  const INDUSTRY_STEP_WORLD = 30;
-  const INDUSTRY_PER_ROW = 4;
   const industrySpriteImg = new Image();
   industrySpriteImg.src = '/sprites/industry.png';
   industrySpriteImg.addEventListener('error', () => {
@@ -110,14 +106,10 @@
   });
 
   // Edificios de tropa (!levas/!arqueros/!caballeros, ver
-  // rules/troopBuildings.js): mismo mecanismo que paintIndustryMarkers (uno
-  // por edificio en pie, en cuadricula sobre el centroide de SU casilla),
-  // pero cada tipo en su propia "columna" (LANE_OFFSET en X) para no
-  // amontonarse con las industrias ni entre ellos.
-  const TROOP_BUILDING_SPRITE_WORLD_WIDTH = 46;
-  const TROOP_BUILDING_STEP_WORLD = 22;
-  const TROOP_BUILDING_PER_ROW = 3;
-  const TROOP_BUILDING_LANE_OFFSET = 60;
+  // rules/troopBuildings.js): mismo tamaño de referencia que village (90),
+  // un poco mas pequeño. La posicion ya NO es una cuadricula fija: ver
+  // MARKER_SCATTER_* y scatterPosition() mas abajo.
+  const TROOP_BUILDING_SPRITE_WORLD_WIDTH = 80;
   function loadBuildingSprite(fileName) {
     const img = new Image();
     img.src = `/sprites/${fileName}.png`;
@@ -431,12 +423,72 @@
       const ctx = markersEl.getContext('2d');
       ctx.clearRect(0, 0, markersEl.width, markersEl.height);
       if (showLabels) paintTileLabels(ctx, tiles);
-      paintIndustryMarkers(ctx, tiles);
-      paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, -TROOP_BUILDING_LANE_OFFSET);
-      paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, -TROOP_BUILDING_LANE_OFFSET * 2);
-      paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, TROOP_BUILDING_LANE_OFFSET);
+      // Mapa tileId -> posiciones ya ocupadas en ESA casilla, compartido entre
+      // industria y los 3 edificios de tropa (se pintan en este orden, uno
+      // "reserva" hueco para el siguiente) para que no se dibujen unos encima
+      // de otros aunque cada tipo tenga su propia semilla de dispersion.
+      const markerOccupied = new Map();
+      paintIndustryMarkers(ctx, tiles, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, MARKER_SALT_LEVAS, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, MARKER_SALT_ARQUEROS, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, MARKER_SALT_CABALLEROS, markerOccupied);
       paintStructureMarkers(ctx, structures);
       paintCombatBadges(ctx, tiles, factions);
+    }
+
+    // Semillas de hash01 para que cada tipo de marcador tenga su propia
+    // secuencia de dispersion (si no, industria y barraca elegirian el mismo
+    // angulo/radio para su primer marcador y se solaparian siempre).
+    const MARKER_SALT_INDUSTRY = 0;
+    const MARKER_SALT_LEVAS = 1;
+    const MARKER_SALT_ARQUEROS = 2;
+    const MARKER_SALT_CABALLEROS = 3;
+
+    // Radio base (pixeles de mundo) del area donde se dispersan los
+    // marcadores de una misma casilla, en vez de la cuadricula rigida
+    // anterior ("se generan todas casi juntas o en el centro del
+    // territorio"). Crece con la raiz de cuantos marcadores ya hay en la
+    // casilla para que muchos edificios no se amontonen en el mismo circulo.
+    const MARKER_SCATTER_BASE_RADIUS = 55;
+    const MARKER_SCATTER_GROWTH = 18;
+    const MARKER_MIN_GAP = 34; // separacion minima entre dos marcadores cualesquiera de la misma casilla
+    const MARKER_SCATTER_MAX_TRIES = 12;
+
+    function getOccupiedList(markerOccupied, tileId) {
+      let list = markerOccupied.get(tileId);
+      if (!list) {
+        list = [];
+        markerOccupied.set(tileId, list);
+      }
+      return list;
+    }
+
+    /**
+     * Posicion dispersa determinista (offset en pixeles de mundo respecto al
+     * centroide de la casilla) para el marcador `index` del tipo `salt` de la
+     * casilla `tileId`. Angulo y radio salen de hash01() (misma tecnica que
+     * server/mapTemplates.js placeDecorations, radio con sqrt(random) para
+     * cubrir el area de forma uniforme) en vez de Math.random(), para que la
+     * posicion no cambie de un repintado a otro. Reintenta hasta
+     * MARKER_SCATTER_MAX_TRIES veces si el candidato pisa algo ya colocado en
+     * `occupied`; si no encuentra hueco libre se queda con el ultimo intento
+     * (mismo criterio de "mejor esfuerzo" que el anti-solape del servidor).
+     */
+    function scatterPosition(tileId, salt, index, occupied) {
+      const radius = MARKER_SCATTER_BASE_RADIUS + Math.sqrt(occupied.length) * MARKER_SCATTER_GROWTH;
+      const base = tileId * 977 + index * 31;
+      let best = null;
+      for (let attempt = 0; attempt < MARKER_SCATTER_MAX_TRIES; attempt++) {
+        const ang = hash01(base, salt, attempt * 2 + 1) * Math.PI * 2;
+        const r = Math.sqrt(hash01(base, salt, attempt * 2 + 2)) * radius;
+        const x = Math.cos(ang) * r;
+        const y = Math.sin(ang) * r;
+        best = { x, y };
+        const clear = !occupied.some((p) => (p.x - x) ** 2 + (p.y - y) ** 2 < MARKER_MIN_GAP * MARKER_MIN_GAP);
+        if (clear) break;
+      }
+      occupied.push(best);
+      return best;
     }
 
     /**
@@ -453,7 +505,7 @@
      * basta con dibujar en pixeles de MUNDO tal cual — el propio navegador
      * escala con el zoom, igual que hace con el resto del raster.
      */
-    function paintIndustryMarkers(ctx, tiles) {
+    function paintIndustryMarkers(ctx, tiles, markerOccupied) {
       if (!industrySpriteImg.complete || !industrySpriteImg.naturalWidth) return;
       const drawW = INDUSTRY_SPRITE_WORLD_WIDTH;
       const drawH = drawW * (industrySpriteImg.naturalHeight / industrySpriteImg.naturalWidth);
@@ -462,14 +514,11 @@
         if (count <= 0) return;
         const c = layout.centroids[t.id];
         if (!c) return;
+        const occupied = getOccupiedList(markerOccupied, t.id);
         for (let i = 0; i < count; i++) {
-          // Cuadricula compacta centrada en el centroide: primero se llena una
-          // fila de INDUSTRY_PER_ROW y se va bajando, para que 10 industrias
-          // en una casilla no se solapen en el mismo pixel.
-          const col = i % INDUSTRY_PER_ROW;
-          const row = Math.floor(i / INDUSTRY_PER_ROW);
-          const cx = c.x * BLOCK_PX + (col - (INDUSTRY_PER_ROW - 1) / 2) * INDUSTRY_STEP_WORLD;
-          const cy = c.y * BLOCK_PX + (row + 1) * INDUSTRY_STEP_WORLD;
+          const p = scatterPosition(t.id, MARKER_SALT_INDUSTRY, i, occupied);
+          const cx = c.x * BLOCK_PX + p.x;
+          const cy = c.y * BLOCK_PX + p.y;
           // Anclado por la base (abajo-centro), igual que las decoraciones.
           ctx.drawImage(industrySpriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
         }
@@ -478,11 +527,11 @@
 
     /**
      * Generico para los 3 edificios de tropa (barraca/campo-arqueria/
-     * caballeriza) — misma tecnica de cuadricula que paintIndustryMarkers,
-     * pero desplazada `laneDx` pixeles de mundo a un lado del centroide para
-     * que las 3 columnas (mas la de industria, sin desplazar) no se pisen.
+     * caballeriza) — igual que paintIndustryMarkers pero con su propia
+     * semilla `salt` de dispersion (ver scatterPosition) para que cada tipo
+     * caiga en un sitio distinto de la casilla en vez de agruparse.
      */
-    function paintBuildingMarkers(ctx, tiles, tileField, spriteImg, laneDx) {
+    function paintBuildingMarkers(ctx, tiles, tileField, spriteImg, salt, markerOccupied) {
       if (!spriteImg.complete || !spriteImg.naturalWidth) return;
       const drawW = TROOP_BUILDING_SPRITE_WORLD_WIDTH;
       const drawH = drawW * (spriteImg.naturalHeight / spriteImg.naturalWidth);
@@ -491,11 +540,11 @@
         if (count <= 0) return;
         const c = layout.centroids[t.id];
         if (!c) return;
+        const occupied = getOccupiedList(markerOccupied, t.id);
         for (let i = 0; i < count; i++) {
-          const col = i % TROOP_BUILDING_PER_ROW;
-          const row = Math.floor(i / TROOP_BUILDING_PER_ROW);
-          const cx = c.x * BLOCK_PX + laneDx + (col - (TROOP_BUILDING_PER_ROW - 1) / 2) * TROOP_BUILDING_STEP_WORLD;
-          const cy = c.y * BLOCK_PX + (row + 1) * TROOP_BUILDING_STEP_WORLD;
+          const p = scatterPosition(t.id, salt, i, occupied);
+          const cx = c.x * BLOCK_PX + p.x;
+          const cy = c.y * BLOCK_PX + p.y;
           ctx.drawImage(spriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
         }
       });
