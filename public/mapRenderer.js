@@ -98,11 +98,7 @@
   // amarillo dibujado a mano). El ancho va en pixeles de MUNDO, igual que
   // `DECOR_SPRITES` mas abajo — a proposito algo mas pequeño que `village`
   // (90 ahi): 67.5 = 75% de 90, tal y como se pidio.
-  // INDUSTRY_STEP_WORLD tambien en pixeles de mundo: es la separacion entre
-  // industrias de la misma casilla cuando hay varias.
   const INDUSTRY_SPRITE_WORLD_WIDTH = 67.5;
-  const INDUSTRY_STEP_WORLD = 30;
-  const INDUSTRY_PER_ROW = 4;
   const industrySpriteImg = new Image();
   industrySpriteImg.src = '/sprites/industry.png';
   industrySpriteImg.addEventListener('error', () => {
@@ -110,14 +106,10 @@
   });
 
   // Edificios de tropa (!levas/!arqueros/!caballeros, ver
-  // rules/troopBuildings.js): mismo mecanismo que paintIndustryMarkers (uno
-  // por edificio en pie, en cuadricula sobre el centroide de SU casilla),
-  // pero cada tipo en su propia "columna" (LANE_OFFSET en X) para no
-  // amontonarse con las industrias ni entre ellos.
-  const TROOP_BUILDING_SPRITE_WORLD_WIDTH = 46;
-  const TROOP_BUILDING_STEP_WORLD = 22;
-  const TROOP_BUILDING_PER_ROW = 3;
-  const TROOP_BUILDING_LANE_OFFSET = 60;
+  // rules/troopBuildings.js): mismo tamaño de referencia que village (90),
+  // un poco mas pequeño. La posicion ya NO es una cuadricula fija: ver
+  // MARKER_SCATTER_* y scatterPosition() mas abajo.
+  const TROOP_BUILDING_SPRITE_WORLD_WIDTH = 80;
   function loadBuildingSprite(fileName) {
     const img = new Image();
     img.src = `/sprites/${fileName}.png`;
@@ -425,18 +417,78 @@
       // animan a 60fps, y `markersEl` es del tamaño del mundo entero —
       // limpiarlo y repintarlo en cada frame seria carisimo. Aqui solo se le
       // pasa a esa capa el estado nuevo para que recalcule a donde va cada uno.
-      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX });
+      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX, structures });
 
       if (!markersEl) return;
       const ctx = markersEl.getContext('2d');
       ctx.clearRect(0, 0, markersEl.width, markersEl.height);
       if (showLabels) paintTileLabels(ctx, tiles);
-      paintIndustryMarkers(ctx, tiles);
-      paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, -TROOP_BUILDING_LANE_OFFSET);
-      paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, -TROOP_BUILDING_LANE_OFFSET * 2);
-      paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, TROOP_BUILDING_LANE_OFFSET);
+      // Mapa tileId -> posiciones ya ocupadas en ESA casilla, compartido entre
+      // industria y los 3 edificios de tropa (se pintan en este orden, uno
+      // "reserva" hueco para el siguiente) para que no se dibujen unos encima
+      // de otros aunque cada tipo tenga su propia semilla de dispersion.
+      const markerOccupied = new Map();
+      paintIndustryMarkers(ctx, tiles, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, MARKER_SALT_LEVAS, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, MARKER_SALT_ARQUEROS, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, MARKER_SALT_CABALLEROS, markerOccupied);
       paintStructureMarkers(ctx, structures);
       paintCombatBadges(ctx, tiles, factions);
+    }
+
+    // Semillas de hash01 para que cada tipo de marcador tenga su propia
+    // secuencia de dispersion (si no, industria y barraca elegirian el mismo
+    // angulo/radio para su primer marcador y se solaparian siempre).
+    const MARKER_SALT_INDUSTRY = 0;
+    const MARKER_SALT_LEVAS = 1;
+    const MARKER_SALT_ARQUEROS = 2;
+    const MARKER_SALT_CABALLEROS = 3;
+
+    // Radio base (pixeles de mundo) del area donde se dispersan los
+    // marcadores de una misma casilla, en vez de la cuadricula rigida
+    // anterior ("se generan todas casi juntas o en el centro del
+    // territorio"). Crece con la raiz de cuantos marcadores ya hay en la
+    // casilla para que muchos edificios no se amontonen en el mismo circulo.
+    const MARKER_SCATTER_BASE_RADIUS = 55;
+    const MARKER_SCATTER_GROWTH = 18;
+    const MARKER_MIN_GAP = 34; // separacion minima entre dos marcadores cualesquiera de la misma casilla
+    const MARKER_SCATTER_MAX_TRIES = 12;
+
+    function getOccupiedList(markerOccupied, tileId) {
+      let list = markerOccupied.get(tileId);
+      if (!list) {
+        list = [];
+        markerOccupied.set(tileId, list);
+      }
+      return list;
+    }
+
+    /**
+     * Posicion dispersa determinista (offset en pixeles de mundo respecto al
+     * centroide de la casilla) para el marcador `index` del tipo `salt` de la
+     * casilla `tileId`. Angulo y radio salen de hash01() (misma tecnica que
+     * server/mapTemplates.js placeDecorations, radio con sqrt(random) para
+     * cubrir el area de forma uniforme) en vez de Math.random(), para que la
+     * posicion no cambie de un repintado a otro. Reintenta hasta
+     * MARKER_SCATTER_MAX_TRIES veces si el candidato pisa algo ya colocado en
+     * `occupied`; si no encuentra hueco libre se queda con el ultimo intento
+     * (mismo criterio de "mejor esfuerzo" que el anti-solape del servidor).
+     */
+    function scatterPosition(tileId, salt, index, occupied) {
+      const radius = MARKER_SCATTER_BASE_RADIUS + Math.sqrt(occupied.length) * MARKER_SCATTER_GROWTH;
+      const base = tileId * 977 + index * 31;
+      let best = null;
+      for (let attempt = 0; attempt < MARKER_SCATTER_MAX_TRIES; attempt++) {
+        const ang = hash01(base, salt, attempt * 2 + 1) * Math.PI * 2;
+        const r = Math.sqrt(hash01(base, salt, attempt * 2 + 2)) * radius;
+        const x = Math.cos(ang) * r;
+        const y = Math.sin(ang) * r;
+        best = { x, y };
+        const clear = !occupied.some((p) => (p.x - x) ** 2 + (p.y - y) ** 2 < MARKER_MIN_GAP * MARKER_MIN_GAP);
+        if (clear) break;
+      }
+      occupied.push(best);
+      return best;
     }
 
     /**
@@ -453,7 +505,7 @@
      * basta con dibujar en pixeles de MUNDO tal cual — el propio navegador
      * escala con el zoom, igual que hace con el resto del raster.
      */
-    function paintIndustryMarkers(ctx, tiles) {
+    function paintIndustryMarkers(ctx, tiles, markerOccupied) {
       if (!industrySpriteImg.complete || !industrySpriteImg.naturalWidth) return;
       const drawW = INDUSTRY_SPRITE_WORLD_WIDTH;
       const drawH = drawW * (industrySpriteImg.naturalHeight / industrySpriteImg.naturalWidth);
@@ -462,14 +514,11 @@
         if (count <= 0) return;
         const c = layout.centroids[t.id];
         if (!c) return;
+        const occupied = getOccupiedList(markerOccupied, t.id);
         for (let i = 0; i < count; i++) {
-          // Cuadricula compacta centrada en el centroide: primero se llena una
-          // fila de INDUSTRY_PER_ROW y se va bajando, para que 10 industrias
-          // en una casilla no se solapen en el mismo pixel.
-          const col = i % INDUSTRY_PER_ROW;
-          const row = Math.floor(i / INDUSTRY_PER_ROW);
-          const cx = c.x * BLOCK_PX + (col - (INDUSTRY_PER_ROW - 1) / 2) * INDUSTRY_STEP_WORLD;
-          const cy = c.y * BLOCK_PX + (row + 1) * INDUSTRY_STEP_WORLD;
+          const p = scatterPosition(t.id, MARKER_SALT_INDUSTRY, i, occupied);
+          const cx = c.x * BLOCK_PX + p.x;
+          const cy = c.y * BLOCK_PX + p.y;
           // Anclado por la base (abajo-centro), igual que las decoraciones.
           ctx.drawImage(industrySpriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
         }
@@ -478,11 +527,11 @@
 
     /**
      * Generico para los 3 edificios de tropa (barraca/campo-arqueria/
-     * caballeriza) — misma tecnica de cuadricula que paintIndustryMarkers,
-     * pero desplazada `laneDx` pixeles de mundo a un lado del centroide para
-     * que las 3 columnas (mas la de industria, sin desplazar) no se pisen.
+     * caballeriza) — igual que paintIndustryMarkers pero con su propia
+     * semilla `salt` de dispersion (ver scatterPosition) para que cada tipo
+     * caiga en un sitio distinto de la casilla en vez de agruparse.
      */
-    function paintBuildingMarkers(ctx, tiles, tileField, spriteImg, laneDx) {
+    function paintBuildingMarkers(ctx, tiles, tileField, spriteImg, salt, markerOccupied) {
       if (!spriteImg.complete || !spriteImg.naturalWidth) return;
       const drawW = TROOP_BUILDING_SPRITE_WORLD_WIDTH;
       const drawH = drawW * (spriteImg.naturalHeight / spriteImg.naturalWidth);
@@ -491,11 +540,11 @@
         if (count <= 0) return;
         const c = layout.centroids[t.id];
         if (!c) return;
+        const occupied = getOccupiedList(markerOccupied, t.id);
         for (let i = 0; i < count; i++) {
-          const col = i % TROOP_BUILDING_PER_ROW;
-          const row = Math.floor(i / TROOP_BUILDING_PER_ROW);
-          const cx = c.x * BLOCK_PX + laneDx + (col - (TROOP_BUILDING_PER_ROW - 1) / 2) * TROOP_BUILDING_STEP_WORLD;
-          const cy = c.y * BLOCK_PX + (row + 1) * TROOP_BUILDING_STEP_WORLD;
+          const p = scatterPosition(t.id, salt, i, occupied);
+          const cx = c.x * BLOCK_PX + p.x;
+          const cy = c.y * BLOCK_PX + p.y;
           ctx.drawImage(spriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
         }
       });
@@ -511,7 +560,11 @@
      */
     function paintStructureMarkers(ctx, structures) {
       if (!structures || !structures.length || !layout) return;
-      structures.forEach((s) => {
+      // Las ya conquistadas viajan en `structures` (ver getPublicState()) solo
+      // para que la capa de aldeanos sepa DONDE dibujarlos (ver
+      // drawSiteWalkers) — aqui, en la chapa de guarnicion/ataque/defensa, no
+      // hay nada que enseñar de ellas (guarnicion a 0), asi que se omiten.
+      structures.filter((s) => !s.conquered).forEach((s) => {
         const c = layout.centroids[s.tileId];
         if (!c) return;
         const cx = c.x * BLOCK_PX;
@@ -1005,9 +1058,36 @@
   const cavalryTroopImg = loadSprite('troop-cavalry');
   const TROOP_SPRITE_WORLD_W = 12;
   const CAVALRY_TROOP_SPRITE_WORLD_W = 14;
-  const TROOP_TRAIL_SAMPLE_MS = 110;
-  const TROOP_FOLLOWER_LAG_MS = 450;
-  const TROOP_FOLLOWER_LAG_STEP_MS = 220;
+  // Cono de posiciones detras del jugador donde se colocan sus tropas (ver
+  // syncFollowerCone()/stepFollowerCone() mas abajo) — reemplaza a la
+  // antigua fila india que seguia el rastro exacto del jugador, "poco
+  // organica" segun se pidio. Cada tropa tiene su propio angulo dentro del
+  // cono y su propia velocidad de "alcance" (TROOP_FOLLOWER_EASE_MIN/MAX),
+  // sorteados una vez al aparecer, para que no se muevan todas a la vez.
+  const TROOP_FOLLOWER_CONE_HALF_ANGLE = (50 * Math.PI) / 180; // +-50 grados respecto a "justo detras"
+  const TROOP_FOLLOWER_BASE_DIST = 20; // px de mundo por detras del jugador
+  const TROOP_FOLLOWER_DIST_JITTER = 14; // variacion de esa distancia, para no formar un arco perfecto
+  const TROOP_FOLLOWER_EASE_MIN = 2.2; // "que tan rapido alcanza su sitio" (1/s), cada tropa el suyo
+  const TROOP_FOLLOWER_EASE_MAX = 4.5;
+
+  // Aldeanos (ver docs/ACCIONES.md): pasean alrededor de un castillo/aldea/
+  // puerto ya conquistado y alrededor de la capital de cada faccion — ver
+  // syncSiteWalkers()/stepSiteWalkers()/drawSiteWalkers() dentro de
+  // createObjectLayer. Mismo tamaño que `guardia` (la guarnicion a la que
+  // sustituyen al conquistar).
+  const aldeanoSpriteImg = loadSprite('aldeano');
+  const ALDEANO_SPRITE_WORLD_W = 13;
+  // Capital de faccion: placeholder gris que se tiñe del color de la
+  // faccion en tiempo real (ver drawTintedSprite), igual que el marcador de
+  // jugador.
+  const capitalSpriteImg = loadSprite('capital');
+  const CAPITAL_SPRITE_WORLD_W = 60;
+  // Radio de paseo (px de mundo) alrededor de un castillo/aldea/puerto/
+  // capital para su guarnicion/aldeanos — mucho mas pequeño que el de un
+  // jugador paseando por su territorio: son NPCs "de guardia", no viajan.
+  const SITE_WANDER_RADIUS = 46;
+  const SITE_WALK_SPEED = 34;
+  const SITE_PAUSE_MS = 1100;
 
   // ===========================================================================
   // Caminantes: el marcador de cada jugador vivo, que se mueve por el mapa.
@@ -1055,6 +1135,12 @@
   // Por debajo de esta escala no se escriben los nombres: a vista de planeta
   // se solapan todos y dibujar texto es, de largo, lo mas caro de esta capa.
   const WALKER_NAME_MIN_SCALE = 0.5;
+  // Circulito del color de la faccion a la izquierda del nombre (sustituye
+  // al tinte semitransparente que antes llevaba el propio sprite del
+  // jugador, ver drawWalkers()) — tamaño en pixeles de PANTALLA, igual que
+  // el nombre, para que se lea igual de lejos que de cerca.
+  const WALKER_DOT_DIAMETER = 9;
+  const WALKER_DOT_GAP = 4;
   // Icono junto al nombre segun la orden que tenga puesta esa ronda (ver
   // walker.action, que ya se usaba para decidir a donde caminar — aqui solo
   // se reutiliza para pintarlo). Sin entrada = sin icono (paseando, sin
@@ -1097,6 +1183,12 @@
     let walkerWorld = null;
     let walkerLoopRunning = false;
     let lastFrameAt = 0;
+
+    // Guarnicion de castillo/aldea/puerto (mientras no esten conquistados) y
+    // aldeanos (ya conquistados, o alrededor de la capital de cada faccion)
+    // — ver syncSiteWalkers()/stepSiteWalkers()/drawSiteWalkers() mas abajo.
+    // siteKey -> { home: {x,y}, factionColor, list: [{spriteKey,x,y,tx,ty,dir,pauseUntil,hopSeed}] }
+    const siteWalkers = new Map();
 
     // Easter egg: una unica vaca vagando por tierra, con un acompañante que
     // la sigue a corta distancia — ver stepCow()/drawCow() y
@@ -1193,10 +1285,11 @@
      * recalcula el destino de cada uno segun el comando que tenga escrito.
      * Se llama en cada `state:*`, no en cada frame.
      */
-    function setWalkerWorld({ tiles, factions, players, layout, blockPx }) {
+    function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures }) {
       if (!layout) return;
       walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1 };
       if (!cow) spawnCow();
+      syncSiteWalkers(structures || [], factions || []);
 
       const alive = new Set();
       const byFaction = new Map();
@@ -1230,11 +1323,17 @@
               path: [], // tramos pendientes de la ruta actual, ver setRoute()
               action: null, actionTarget: null,
               dir: 'right', // que sprite le toca (soldier-left/right), ver stepWalkers()
+              facingAngle: 0, // hacia donde mira (radianes) — el cono de tropas se coloca DETRAS de esto, ver stepFollowerCone()
               aiTroops: 0,
               archerTroops: 0,
               cavalryTroops: 0,
-              trail: [], // rastro de posiciones para las tropas que le sigan, ver stepWalkers()
-              lastTrailSampleAt: 0,
+              // Posicion propia de cada tropa que le sigue, ver
+              // syncFollowerCone()/stepFollowerCone() — sustituye a la
+              // antigua fila india por rastro (trailPositionAt): ahora cada
+              // una vive en un punto del cono de detras del jugador y va
+              // "alcanzándolo" a su propio ritmo, para que no se muevan
+              // todas sincronizadas.
+              followers: { aiTroops: [], archerTroops: [], cavalryTroops: [] },
             };
             walkers.set(p.userId, walker);
           }
@@ -1245,6 +1344,9 @@
           walker.aiTroops = p.aiTroops || 0; // cuantos acompañantes le siguen, ver drawWalkers()
           walker.archerTroops = p.archerTroops || 0;
           walker.cavalryTroops = p.cavalryTroops || 0;
+          syncFollowerCone(walker.followers.aiTroops, walker.aiTroops, walker.x, walker.y);
+          syncFollowerCone(walker.followers.archerTroops, walker.archerTroops, walker.x, walker.y);
+          syncFollowerCone(walker.followers.cavalryTroops, walker.cavalryTroops, walker.x, walker.y);
 
           // Solo se recalcula el destino si la orden ha cambiado; si no, se
           // deja que termine de andar hacia donde ya iba (si no, cada `state:*`
@@ -1510,6 +1612,177 @@
       // Sin sitio al que ir sin mojarse (islote de una sola casilla, esquina
       // muy estrecha...): se queda quieto hasta el proximo intento.
       return null;
+    }
+
+    // -----------------------------------------------------------------------
+    // Guarnicion/aldeanos "de guardia": un grupito de caminantes ambientales
+    // atado a un sitio fijo (un castillo/aldea/puerto o la capital de una
+    // faccion), a diferencia de los caminantes de jugador (que recorren todo
+    // su territorio). Ver docs/ACCIONES.md.
+    //
+    //   - Estructura SIN conquistar: la guarnicion neutral pasea con el
+    //     mismo placeholder que las tropas de un jugador (troop/
+    //     troop-archer/troop-cavalry, ver rules/structures.js aiTroops/
+    //     archerTroops/cavalryTroops), un puñado por tipo presente (no todos
+    //     a la vez: con guarniciones de 10-15 no cabrian, es solo "un par
+    //     paseando" para dar la sensacion de que hay alguien).
+    //   - Estructura YA conquistada: 3 aldeanos (aldeano.png).
+    //   - Capital de cada faccion: capitalVillagerCount aldeanos (4-8,
+    //     sorteado una vez en el servidor al crear la partida).
+    // -----------------------------------------------------------------------
+
+    /** Cuantos caminantes de que tipo le tocan a un sitio, sin listar posiciones todavia. */
+    function desiredSiteSpecs(structures, factions) {
+      const sites = new Map(); // siteKey -> { tileId, factionColor, specs: [{spriteKey, n}] }
+
+      (structures || []).forEach((s) => {
+        const specs = [];
+        if (!s.conquered) {
+          // Un par por tipo presente en la guarnicion (tope 3, para no
+          // amontonar 15 sprites encima de un castillo grande).
+          if (s.aiTroops > 0) specs.push({ spriteKey: 'troop', n: Math.min(3, Math.max(1, Math.ceil(s.aiTroops / 4))) });
+          if (s.archerTroops > 0) specs.push({ spriteKey: 'troop-archer', n: Math.min(3, Math.max(1, Math.ceil(s.archerTroops / 4))) });
+          if (s.cavalryTroops > 0) specs.push({ spriteKey: 'troop-cavalry', n: Math.min(3, Math.max(1, Math.ceil(s.cavalryTroops / 4))) });
+        } else {
+          specs.push({ spriteKey: 'aldeano', n: 3 });
+        }
+        if (specs.length) sites.set(`struct:${s.tileId}`, { tileId: s.tileId, factionColor: null, specs });
+      });
+
+      (factions || []).forEach((f) => {
+        if (f.capitalTileId == null) return;
+        sites.set(`capital:${f.number}`, {
+          tileId: f.capitalTileId,
+          factionColor: f.color,
+          specs: [{ spriteKey: 'aldeano', n: Math.max(1, f.capitalVillagerCount || 0) }],
+        });
+      });
+
+      return sites;
+    }
+
+    /**
+     * Ajusta `siteWalkers` a lo que toca AHORA (guarnicion/aldeanos por
+     * sitio), dando de alta/baja solo lo que cambio — igual que los
+     * caminantes de jugador, nunca se reposiciona a uno que ya estaba
+     * paseando, para que una estructura conquistada a mitad de partida no
+     * "teletransporte" a nadie: los soldados barbaros que sobran se borran y
+     * los aldeanos nuevos aparecen cerca de la casa, sin más.
+     */
+    function syncSiteWalkers(structures, factions) {
+      const desired = desiredSiteSpecs(structures, factions);
+
+      for (const key of [...siteWalkers.keys()]) {
+        if (!desired.has(key)) siteWalkers.delete(key);
+      }
+
+      desired.forEach((site, key) => {
+        const home = tileCenter(site.tileId);
+        if (!home) return;
+        let group = siteWalkers.get(key);
+        if (!group) { group = { home, factionColor: site.factionColor, list: [] }; siteWalkers.set(key, group); }
+        group.home = home;
+        group.factionColor = site.factionColor;
+
+        const wantCounts = new Map();
+        site.specs.forEach(({ spriteKey, n }) => wantCounts.set(spriteKey, (wantCounts.get(spriteKey) || 0) + n));
+        const haveCounts = new Map();
+        group.list.forEach((w) => haveCounts.set(w.spriteKey, (haveCounts.get(w.spriteKey) || 0) + 1));
+
+        for (const spriteKey of new Set([...haveCounts.keys(), ...wantCounts.keys()])) {
+          let have = haveCounts.get(spriteKey) || 0;
+          const want = wantCounts.get(spriteKey) || 0;
+          while (have > want) {
+            const idx = group.list.findIndex((w) => w.spriteKey === spriteKey);
+            if (idx === -1) break;
+            group.list.splice(idx, 1);
+            have--;
+          }
+          while (have < want) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = SITE_WANDER_RADIUS * Math.random();
+            group.list.push({
+              spriteKey,
+              x: home.x + Math.cos(angle) * dist,
+              y: home.y + Math.sin(angle) * dist,
+              tx: home.x, ty: home.y,
+              dir: 'right', pauseUntil: 0, hopSeed: Math.random() * Math.PI * 2,
+            });
+            have++;
+          }
+        }
+      });
+    }
+
+    /** Siguiente sitio al que vagar, igual que cowWanderTarget() pero atado a un radio pequeño alrededor de `home`. */
+    function siteWanderTarget(home, w) {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = SITE_WANDER_RADIUS * (0.3 + Math.random() * 0.7);
+        const x = home.x + Math.cos(angle) * dist;
+        const y = home.y + Math.sin(angle) * dist;
+        if (pathStaysOnLand(w.x, w.y, x, y)) return { x, y };
+      }
+      return null;
+    }
+
+    function stepSiteWalkers(dt, now) {
+      siteWalkers.forEach((group) => {
+        group.list.forEach((w) => {
+          const dx = w.tx - w.x, dy = w.ty - w.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist <= WALK_ARRIVE_DIST) {
+            if (now >= w.pauseUntil) {
+              const next = siteWanderTarget(group.home, w);
+              if (next) { w.tx = next.x; w.ty = next.y; }
+              w.pauseUntil = now + SITE_PAUSE_MS * (0.5 + Math.random());
+            }
+          } else {
+            const step = Math.min(dist, SITE_WALK_SPEED * dt);
+            w.x += (dx / dist) * step;
+            w.y += (dy / dist) * step;
+            if (dx > WALKER_DIR_THRESHOLD) w.dir = 'right';
+            else if (dx < -WALKER_DIR_THRESHOLD) w.dir = 'left';
+          }
+        });
+      });
+    }
+
+    const SITE_WALKER_SPRITES = { troop: [troopImg, TROOP_SPRITE_WORLD_W], 'troop-archer': [archerTroopImg, TROOP_SPRITE_WORLD_W], 'troop-cavalry': [cavalryTroopImg, CAVALRY_TROOP_SPRITE_WORLD_W], aldeano: [aldeanoSpriteImg, ALDEANO_SPRITE_WORLD_W] };
+
+    /** Dibuja la capital (si el sitio tiene `factionColor`, tinta como un marcador de jugador) y los caminantes de cada sitio. */
+    function drawSiteWalkers(w, h) {
+      if (!siteWalkers.size) return;
+      const { x: vx, y: vy, scale } = currentView;
+      const margin = OBJ_VIEWPORT_MARGIN_PX / scale;
+      const wx0 = (0 - vx) / scale - margin, wx1 = (w - vx) / scale + margin;
+      const wy0 = (0 - vy) / scale - margin, wy1 = (h - vy) / scale + margin;
+      const t = performance.now() / 1000;
+
+      siteWalkers.forEach((group) => {
+        const { home } = group;
+        if (group.factionColor && capitalSpriteImg.complete && capitalSpriteImg.naturalWidth &&
+            home.x >= wx0 && home.x <= wx1 && home.y >= wy0 && home.y <= wy1) {
+          const cw = CAPITAL_SPRITE_WORLD_W * scale;
+          const chh = cw * (capitalSpriteImg.naturalHeight / capitalSpriteImg.naturalWidth);
+          drawTintedSprite(capitalSpriteImg, home.x * scale + vx - cw / 2, home.y * scale + vy - chh, cw, chh, group.factionColor, 0.65);
+        }
+
+        group.list.forEach((walker) => {
+          if (walker.x < wx0 || walker.x > wx1 || walker.y < wy0 || walker.y > wy1) return;
+          const spec = SITE_WALKER_SPRITES[walker.spriteKey];
+          if (!spec) return;
+          const [img, worldW] = spec;
+          if (!img.complete || !img.naturalWidth) return;
+          const drawW = worldW * scale;
+          const drawH = drawW * (img.naturalHeight / img.naturalWidth);
+          const moving = Math.hypot(walker.tx - walker.x, walker.ty - walker.y) > WALK_ARRIVE_DIST;
+          const hop = moving ? Math.abs(Math.sin(t * HOP_SPEED + walker.hopSeed)) * HOP_HEIGHT : 0;
+          const sx = walker.x * scale + vx;
+          const sy = (walker.y - hop) * scale + vy;
+          ctx.drawImage(img, sx - drawW / 2, sy - drawH, drawW, drawH);
+        });
+      });
     }
 
     // -----------------------------------------------------------------------
@@ -1786,22 +2059,60 @@
       return null; // territorio partido en trozos sin conexion por tierra
     }
 
+    /**
+     * Da de alta/baja tropas en el cono de `list` hasta que tenga `count`
+     * elementos — igual filosofia que los caminantes de sitio (nunca se
+     * reposiciona a una tropa que ya estaba ahi, las nuevas aparecen ya
+     * cerca del jugador). El angulo/distancia/velocidad de cada una se
+     * sortea UNA vez al nacer, no cada frame, para que su comportamiento sea
+     * consistente en el tiempo (una tropa "nerviosa" lo es siempre, no solo
+     * a veces) aunque distinto entre tropas — de ahi lo "organico".
+     */
+    function syncFollowerCone(list, count, leaderX, leaderY) {
+      while (list.length > count) list.pop();
+      while (list.length < count) {
+        list.push({
+          x: leaderX, y: leaderY,
+          angleOffset: (Math.random() * 2 - 1) * TROOP_FOLLOWER_CONE_HALF_ANGLE,
+          distFactor: 1 + ((Math.random() * 2 - 1) * TROOP_FOLLOWER_DIST_JITTER) / TROOP_FOLLOWER_BASE_DIST,
+          ease: TROOP_FOLLOWER_EASE_MIN + Math.random() * (TROOP_FOLLOWER_EASE_MAX - TROOP_FOLLOWER_EASE_MIN),
+          hopSeed: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+
+    /**
+     * Mueve las tropas de `w` hacia su sitio dentro del cono de detras del
+     * jugador (`w.facingAngle + PI`, ver stepWalkers()) — no en linea recta
+     * ni por su rastro exacto, sino con un suavizado exponencial
+     * independiente por tropa (`ease`, sorteado en syncFollowerCone) para
+     * que "se mueven igual que el jugador pero no sincronizadas", tal y
+     * como se pidió.
+     */
+    function stepFollowerCone(w, dt) {
+      const behindAngle = w.facingAngle + Math.PI;
+      for (const type of ['aiTroops', 'archerTroops', 'cavalryTroops']) {
+        const list = w.followers[type];
+        for (const f of list) {
+          const dist = TROOP_FOLLOWER_BASE_DIST * f.distFactor;
+          const targetAngle = behindAngle + f.angleOffset;
+          const targetX = w.x + Math.cos(targetAngle) * dist;
+          const targetY = w.y + Math.sin(targetAngle) * dist;
+          const k = 1 - Math.exp(-f.ease * dt);
+          f.x += (targetX - f.x) * k;
+          f.y += (targetY - f.y) * k;
+        }
+      }
+    }
+
     /** Avanza todos los caminantes `dt` segundos hacia su destino. */
     function stepWalkers(dt, now) {
       if (!walkerWorld) return;
       walkers.forEach((w) => {
-        // Rastro para las tropas que le sigan (ver drawWalkers()) — se
-        // apunta SIEMPRE, se mueva o no, para que un caminante parado
-        // tambien deje "sitio donde esperar" a sus tropas. Va antes de los
+        // Las tropas del cono se mueven SIEMPRE, se mueva o no el jugador
+        // (para que "salten"/se acomoden incluso parado) — va antes de los
         // `return` de mas abajo a proposito, para que nunca se salte.
-        if (now - w.lastTrailSampleAt >= TROOP_TRAIL_SAMPLE_MS) {
-          w.trail.push({ x: w.x, y: w.y, t: now });
-          w.lastTrailSampleAt = now;
-          const totalFollowers = (w.aiTroops || 0) + (w.archerTroops || 0) + (w.cavalryTroops || 0);
-          const maxLagNeeded = TROOP_FOLLOWER_LAG_MS + Math.max(0, totalFollowers - 1) * TROOP_FOLLOWER_LAG_STEP_MS;
-          const cutoff = now - maxLagNeeded - 500;
-          while (w.trail.length > 2 && w.trail[0].t < cutoff) w.trail.shift();
-        }
+        stepFollowerCone(w, dt);
 
         const dx = w.tx - w.x;
         const dy = w.ty - w.y;
@@ -1832,24 +2143,16 @@
         const step = Math.min(dist, speed * dt);
         w.x += (dx / dist) * step;
         w.y += (dy / dist) * step;
+        // Hacia donde mira de verdad (radianes) — el cono de tropas se
+        // coloca detras de esto (ver stepFollowerCone()), no solo del
+        // sentido horizontal de dir.
+        w.facingAngle = Math.atan2(dy, dx);
         // Sprite de izquierda/derecha segun el sentido horizontal del ultimo
         // paso — con umbral, para que un tramo casi vertical no lo haga
         // parpadear entre los dos sprites.
         if (dx > WALKER_DIR_THRESHOLD) w.dir = 'right';
         else if (dx < -WALKER_DIR_THRESHOLD) w.dir = 'left';
       });
-    }
-
-    /** Punto del rastro de hace `lagMs` — mismo truco que el acompañante de la vaca (ver stepCow()). */
-    function trailPositionAt(trail, lagMs, now) {
-      if (!trail.length) return null;
-      const targetT = now - lagMs;
-      let point = trail[0];
-      for (const p of trail) {
-        if (p.t > targetT) break;
-        point = p;
-      }
-      return point;
     }
 
     /**
@@ -1882,7 +2185,7 @@
 
       if (showNames) {
         ctx.font = `${WALKER_NAME_PX}px system-ui, sans-serif`;
-        ctx.textAlign = 'center';
+        ctx.textAlign = 'left'; // el circulito de color va a la izquierda del nombre, ver mas abajo
         ctx.textBaseline = 'bottom';
       }
 
@@ -1905,48 +2208,66 @@
         const sy = (walker.y - hop) * scale + vy;
 
         // Tropas de IA: se dibujan ANTES que al jugador, para que quede
-        // claro que van detras/debajo de su "general" — siguen el rastro
-        // real, no la posicion actual (ver trailPositionAt()). Los 3 tipos
-        // (soldado/arquero/caballero, ver rules/troopBuildings.js) forman
-        // UNA sola fila india: el indice de retraso sigue subiendo de un
-        // tipo al siguiente en vez de reiniciarse, para que no se
-        // superpongan al dibujarse los tres a la vez.
+        // claro que van detras/debajo de su "general" — cada una en su
+        // propio punto del cono de detras (ver stepFollowerCone()), no en
+        // una fila india siguiendo su rastro exacto.
         if (walker.aiTroops > 0 || walker.archerTroops > 0 || walker.cavalryTroops > 0) {
-          const nowMs = t * 1000;
-          let followerIndex = 0;
           const followerGroups = [
-            { count: walker.aiTroops, img: troopImg, worldW: TROOP_SPRITE_WORLD_W },
-            { count: walker.archerTroops, img: archerTroopImg, worldW: TROOP_SPRITE_WORLD_W },
-            { count: walker.cavalryTroops, img: cavalryTroopImg, worldW: CAVALRY_TROOP_SPRITE_WORLD_W },
+            { list: walker.followers.aiTroops, img: troopImg, worldW: TROOP_SPRITE_WORLD_W },
+            { list: walker.followers.archerTroops, img: archerTroopImg, worldW: TROOP_SPRITE_WORLD_W },
+            { list: walker.followers.cavalryTroops, img: cavalryTroopImg, worldW: CAVALRY_TROOP_SPRITE_WORLD_W },
           ];
           for (const group of followerGroups) {
-            if (group.count <= 0) continue;
-            if (!group.img.complete || !group.img.naturalWidth) { followerIndex += group.count; continue; }
+            if (!group.list.length) continue;
+            if (!group.img.complete || !group.img.naturalWidth) continue;
             const tw = group.worldW * scale;
             const th = tw * (group.img.naturalHeight / group.img.naturalWidth);
-            for (let i = 0; i < group.count; i++) {
-              const lag = TROOP_FOLLOWER_LAG_MS + followerIndex * TROOP_FOLLOWER_LAG_STEP_MS;
-              followerIndex++;
-              const pos = trailPositionAt(walker.trail, lag, nowMs) || { x: walker.x, y: walker.y };
-              const tsx = pos.x * scale + vx;
-              const tsy = pos.y * scale + vy;
+            for (const f of group.list) {
+              // Brinco propio, algo mas bajo que el del jugador para
+              // diferenciarlos — con su propia semilla, para que no salten
+              // todas a la vez.
+              const fhop = Math.abs(Math.sin(t * HOP_SPEED + f.hopSeed)) * HOP_HEIGHT * 0.6;
+              const tsx = f.x * scale + vx;
+              const tsy = (f.y - fhop) * scale + vy;
               ctx.drawImage(group.img, tsx - tw / 2, tsy - th, tw, th);
             }
           }
         }
 
-        // Anclado por la base (abajo-centro), como el resto de sprites del mapa.
-        drawTintedSprite(img, sx - drawW / 2, sy - drawH, drawW, drawH, walker.color, 0.65);
+        // Anclado por la base (abajo-centro), como el resto de sprites del
+        // mapa — SIN teñir: el color de facción ya no va sobre el sprite
+        // (antes un tinte semitransparente), ahora es el circulito junto
+        // al nombre de mas abajo.
+        ctx.drawImage(img, sx - drawW / 2, sy - drawH, drawW, drawH);
 
         if (showNames) {
+          // Circulito del color de la facción a la IZQUIERDA del nombre,
+          // que a su vez lleva el icono de accion a la derecha — todo el
+          // grupo (circulo + nombre + icono) centrado sobre el caminante.
+          const label = walker.username + (ACTION_ICONS[walker.action] || '');
+          const textW = ctx.measureText(label).width;
+          const totalW = WALKER_DOT_DIAMETER + WALKER_DOT_GAP + textW;
+          const labelY = sy - drawH - 3;
+          const groupLeft = sx - totalW / 2;
+          const dotCx = groupLeft + WALKER_DOT_DIAMETER / 2;
+          const dotCy = labelY - WALKER_NAME_PX * 0.32;
+
+          ctx.beginPath();
+          ctx.arc(dotCx, dotCy, WALKER_DOT_DIAMETER / 2, 0, Math.PI * 2);
+          ctx.fillStyle = walker.color;
+          ctx.fill();
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = 'rgba(6,18,26,.85)';
+          ctx.stroke();
+
           // Sombra fina detras del nombre: sobre terreno claro (desierto,
           // nieve) el texto blanco solo se perdia del todo.
-          const label = walker.username + (ACTION_ICONS[walker.action] || '');
+          const textX = groupLeft + WALKER_DOT_DIAMETER + WALKER_DOT_GAP;
           ctx.lineWidth = 3;
           ctx.strokeStyle = 'rgba(6,18,26,.85)';
-          ctx.strokeText(label, sx, sy - drawH - 3);
+          ctx.strokeText(label, textX, labelY);
           ctx.fillStyle = '#f5fbff';
-          ctx.fillText(label, sx, sy - drawH - 3);
+          ctx.fillText(label, textX, labelY);
         }
       });
     }
@@ -1964,7 +2285,7 @@
 
     /** Hay algo que necesite el bucle de animacion corriendo ahora mismo. */
     function needsAnimationLoop() {
-      return walkers.size > 0 || cow != null || clouds.length > 0;
+      return walkers.size > 0 || siteWalkers.size > 0 || cow != null || clouds.length > 0;
     }
 
     /**
@@ -1986,6 +2307,7 @@
         const dt = Math.min(0.1, (now - lastFrameAt) / 1000); // techo por si la pestaña estuvo en segundo plano
         lastFrameAt = now;
         stepWalkers(dt, now);
+        stepSiteWalkers(dt, now);
         stepCow(dt, now);
         stepClouds(dt, now);
         drawObjectLayer();
@@ -2071,6 +2393,7 @@
       // ULTIMAS de todas, por encima de todo, como corresponde al cielo.
       drawDecorations(w, h);
       drawTerrainObjects(w, h);
+      drawSiteWalkers(w, h);
       drawCow(w, h);
       drawWalkers(w, h);
       drawClouds(w, h);
