@@ -6,6 +6,7 @@ const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElim
 const { towerDefenseBonus } = require('./towers');
 const { specialTroopCombatBonus } = require('./industry');
 const { wonderDefenseBonus } = require('./wonders');
+const { museumDefenseBonus } = require('./bosses');
 
 /**
  * Resuelve todo el combate de la ronda a la vez: agrupa los ataques que recibe
@@ -18,8 +19,8 @@ const { wonderDefenseBonus } = require('./wonders');
  * `!defender` en la Fase de Accion, cada uno aportando su propia tirada
  * (ver COMBAT_RANDOM_MIN/MAX en rules/shared.js).
  *
- * Tres excepciones a lo anterior, todas sumadas tal cual (sin combatModifier)
- * al final del calculo correspondiente:
+ * Cuatro excepciones a lo anterior, todas sumadas tal cual (sin
+ * combatModifier) al final del calculo correspondiente:
  * - Las torres (`!torre`, ver rules/towers.js) dan +0.5 de defensa pasiva
  *   CADA UNA, siempre, aunque nadie vote `!defender` esa ronda.
  * - Las tropas especiales del castillo de nivel 4 de industria (ver
@@ -29,6 +30,8 @@ const { wonderDefenseBonus } = require('./wonders');
  * - Las maravillas de tipo 'defense' (Ruinas de Numancia/Kebab/Contrato
  *   indefinido, ver rules/wonders.js) dan +4 de defensa pasiva cada una
  *   MIENTRAS la facción posea la casilla en la que salieron.
+ * - Los museos (trofeo de `!boss`, ver rules/bosses.js) dan +2 de defensa
+ *   pasiva cada uno, sin tope.
  */
 function resolveCombat(match, context) {
   const incomingByDefender = groupIncomingAttacks(match, context);
@@ -54,7 +57,8 @@ function resolveCombat(match, context) {
       sumRandomPower(match, defenderUserIds, 'defense') * combatModifier(match, defenderNumber, 'defense') +
       towerDefenseBonus(match, defenderFaction) +
       specialTroopCombatBonus(defenderFaction) +
-      wonderDefenseBonus(match, defenderFaction);
+      wonderDefenseBonus(match, defenderFaction) +
+      museumDefenseBonus(defenderFaction);
 
     if (attackPower > defensePower) {
       // Gana el ataque: baja la faccion defensora y conquista territorio.

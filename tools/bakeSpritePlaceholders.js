@@ -339,6 +339,22 @@ const SPRITES = {
     c.rect(12, 0, 10, 8, stone, 2);  // cabeza
   },
 
+  // MUSEO: trofeo por derrotar un boss (ver docs/ACCIONES.md sección 31,
+  // `!boss`, rules/bosses.js) — se coloca junto a la capital de quien lo
+  // mató, igual mecanismo de anillo que `estatua` (dungeon), pero un
+  // edificio con columnas en vez de una figura, para distinguir de un
+  // vistazo qué trofeo es cada uno. SIN teñir de color de facción, mismo
+  // criterio que `estatua`: es un monumento compartido, no "de" nadie.
+  museo: (c) => {
+    const stone = [196, 188, 168];
+    const dark = [110, 102, 84];
+    c.rect(2, 14, 36, 26, stone, 2, dark);    // cuerpo del edificio
+    c.triangle(0, 14, 40, 14, 20, 0, stone, dark); // fronton triangular
+    c.rect(8, 20, 4, 18, dark, 0);            // columna
+    c.rect(18, 20, 4, 18, dark, 0);           // columna
+    c.rect(28, 20, 4, 18, dark, 0);           // columna
+  },
+
   // GUARNICION NEUTRAL (ver docs/ACCIONES.md seccion 20, rules/structures.js):
   // la IA que defiende castillo/aldea/puerto antes de que alguien conquiste
   // con !conquista. Mismo tamaño que `troop` (14x22, sin variante de
@@ -491,6 +507,42 @@ const SPRITES = {
     c.rect(10, 10, 20, 14, [238, 234, 220], 1, [180, 176, 160]);
   },
 
+  // BOSSES (ver docs/ACCIONES.md sección 31, rules/bosses.js, `!boss`): 3
+  // placeholders grandes fijos, "como la vaca y el que la persigue" pero
+  // mucho más grandes — cada uno con su propia silueta de monstruo para
+  // distinguirse de un vistazo (5-10 de ataque/defensa, sorteado por
+  // instancia, se pinta encima de la cabeza). Sin variante de sentido
+  // izquierda/derecha a propósito (mismo criterio que la vaca: no se pidió).
+  ogro: (c) => { // humanoide grandote, verdoso, un solo garrote
+    const skin = [108, 132, 76];
+    c.rect(14, 4, 24, 14, skin, 2, [48, 60, 32]);   // cabeza
+    c.rect(6, 16, 40, 30, skin, 2, [48, 60, 32]);   // torso ancho
+    c.rect(2, 18, 8, 26, skin, 2, [48, 60, 32]);    // brazo izquierdo
+    c.rect(46, 14, 9, 20, [120, 92, 60], 2, [56, 40, 24]); // garrote (brazo derecho)
+    c.rect(10, 46, 12, 14, skin, 2, [48, 60, 32]);  // pierna izquierda
+    c.rect(30, 46, 12, 14, skin, 2, [48, 60, 32]);  // pierna derecha
+  },
+  troll: (c) => { // encorvado, gris azulado, brazos largos hasta el suelo
+    const skin = [110, 118, 128];
+    c.rect(16, 8, 20, 16, skin, 2, [46, 50, 58]);   // cabeza pequeña
+    c.rect(4, 20, 40, 28, skin, 2, [46, 50, 58]);   // torso encorvado, ancho
+    c.rect(0, 22, 7, 38, skin, 2, [46, 50, 58]);    // brazo izquierdo, largo
+    c.rect(41, 22, 7, 38, skin, 2, [46, 50, 58]);   // brazo derecho, largo
+    c.rect(12, 48, 10, 12, skin, 2, [46, 50, 58]);  // pierna izquierda
+    c.rect(26, 48, 10, 12, skin, 2, [46, 50, 58]);  // pierna derecha
+  },
+  behemot: (c) => { // cuadrupedo grande, oscuro, con cuernos
+    const skin = [66, 52, 42];
+    c.rect(4, 20, 44, 26, skin, 2, [28, 20, 16]);   // cuerpo grande
+    c.rect(40, 8, 16, 18, skin, 2, [28, 20, 16]);   // cabeza adelantada
+    c.triangle(40, 8, 44, 8, 38, 0, [200, 196, 188], [90, 86, 78]);  // cuerno izq.
+    c.triangle(52, 8, 56, 8, 58, 0, [200, 196, 188], [90, 86, 78]);  // cuerno der.
+    c.rect(8, 44, 8, 14, skin, 2, [28, 20, 16]);    // pata trasera
+    c.rect(20, 44, 8, 14, skin, 2, [28, 20, 16]);   // pata
+    c.rect(34, 44, 8, 14, skin, 2, [28, 20, 16]);   // pata
+    c.rect(46, 44, 8, 14, skin, 2, [28, 20, 16]);   // pata delantera
+  },
+
   // NUBES DEL CIELO (decorativo, ver docs/ACCIONES.md seccion 15): 3 tamaños
   // para que no se vean todas iguales al agruparse. Blancas y opacas aqui a
   // proposito — la transparencia final ("muy transparentes" segun se pidio)
@@ -526,13 +578,14 @@ const SIZES = {
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
   troop: [14, 22], 'troop-archer': [14, 22], 'troop-cavalry': [16, 26],
   barbaro: [14, 22], 'barbaro-arquero': [14, 22], 'barbaro-caballero': [16, 26],
-  orco: [24, 30], goblin: [11, 17], estatua: [34, 48],
+  orco: [24, 30], goblin: [11, 17], estatua: [34, 48], museo: [40, 40],
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
   torre: [20, 30], 'torre-obras': [20, 30],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
   'castillo-especial': [48, 40], 'tropa-especial': [14, 22],
   'wonder-guggenheim': [44, 40], 'wonder-numancia': [40, 40], 'wonder-moncloa': [44, 40],
   'wonder-spacex': [40, 42], 'wonder-kebab': [40, 40], 'wonder-contrato': [40, 40],
+  ogro: [56, 60], troll: [48, 60], behemot: [64, 58],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };
 

@@ -1,5 +1,7 @@
 'use strict';
 
+const { museumLevaBonus } = require('./bosses');
+
 // Tropas de IA: cada casilla que controla una facción genera 1 tropa por
 // ronda, que se reparte entre sus jugadores vivos — no vota nadie, es
 // automático, igual que las mejoras de industria (ver rules/industry.js).
@@ -52,11 +54,15 @@ function distributeTroops(match, faction, count, fieldName) {
   }
 }
 
-/** 1 tropa (soldado) nueva por cada casilla que controle la facción esta ronda, para cada facción viva. */
+/**
+ * 1 tropa (soldado) nueva por cada casilla que controle la facción esta
+ * ronda, para cada facción viva — MÁS 1 por cada museo que tenga (trofeo de
+ * boss, ver rules/bosses.js sección 31), acumulable sin tope.
+ */
 function resolveAiTroops(match) {
   for (const faction of match.factions) {
     if (faction.territoryIds.length === 0) continue;
-    distributeTroops(match, faction, faction.territoryIds.length, 'aiTroops');
+    distributeTroops(match, faction, faction.territoryIds.length + museumLevaBonus(faction), 'aiTroops');
   }
 }
 

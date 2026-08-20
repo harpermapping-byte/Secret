@@ -31,6 +31,12 @@ const ACTION_DUNGEON = 'DUNGEON';
 // terminada, máximo 10 por facción. Ver rules/towers.js y
 // docs/ACCIONES.md sección 28.
 const ACTION_TOWER = 'TORRE';
+// Ataca a un boss (placeholder grande, ataque/defensa 5-10) que esté
+// vagando por TU territorio — solo aparecen si el admin los activó (1 a 3
+// por mapa). Al derrotarlo, la facción gana un museo junto a su capital
+// (+1 leva/ronda, +1 industria/ronda, +2 defensa base, cada uno acumulable).
+// Ver rules/bosses.js y docs/ACCIONES.md sección 31.
+const ACTION_BOSS = 'BOSS';
 
 // En que fase es valido cada tipo de accion.
 const VALID_PHASE_BY_ACTION = {
@@ -47,6 +53,7 @@ const VALID_PHASE_BY_ACTION = {
   [ACTION_CONQUISTA]: PHASE_ACTION,
   [ACTION_DUNGEON]: PHASE_ACTION,
   [ACTION_TOWER]: PHASE_ACTION,
+  [ACTION_BOSS]: PHASE_ACTION,
 };
 
 const JOIN_RE = /^!faccion(\d+)$/i;
@@ -62,6 +69,7 @@ const CABALLEROS_RE = /^!caballeros$/i;
 const CONQUISTA_RE = /^!conquista$/i;
 const DUNGEON_RE = /^!dungeon$/i;
 const TOWER_RE = /^!torre$/i;
+const BOSS_RE = /^!boss$/i;
 
 /**
  * Convierte un mensaje de chat en { type, targetFactionNumber } o null si no es un comando reconocido.
@@ -99,6 +107,8 @@ function parseCommand(rawText) {
 
   if (TOWER_RE.test(text)) return { type: ACTION_TOWER, targetFactionNumber: null };
 
+  if (BOSS_RE.test(text)) return { type: ACTION_BOSS, targetFactionNumber: null };
+
   return null;
 }
 
@@ -116,6 +126,7 @@ module.exports = {
   ACTION_CONQUISTA,
   ACTION_DUNGEON,
   ACTION_TOWER,
+  ACTION_BOSS,
   VALID_PHASE_BY_ACTION,
   parseCommand,
 };
