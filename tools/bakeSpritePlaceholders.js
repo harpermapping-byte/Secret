@@ -321,6 +321,34 @@ const SPRITES = {
     c.rect(0, 2, 36, 12, [90, 100, 116], 2, [40, 44, 54]);  // tejado azulado
   },
 
+  // ALDEANO: aparece paseando alrededor de un castillo/aldea/puerto YA
+  // CONQUISTADO (sustituye a la guarnicion neutral, ver `guardia` mas
+  // arriba) y alrededor de la CAPITAL de cada faccion (ver `capital` mas
+  // abajo) — mismo mecanismo de "acompañante paseando" que las tropas de IA,
+  // mismo tamaño que `guardia`/`troop` (14x22, sin variante de sentido), tono
+  // calido/trigo para leerse claramente como "civil" y no como tropa.
+  aldeano: (c) => {
+    c.rect(4, 2, 6, 6, [196, 158, 96], 1);
+    c.rect(2, 8, 10, 13, [196, 158, 96], 1);
+  },
+
+  // CAPITAL DE FACCION: placeholder representativo (ver docs/ACCIONES.md),
+  // uno de los territorios iniciales de cada faccion lo lleva desde que
+  // empieza la partida, con aldeanos paseando alrededor. Gris neutro a
+  // proposito (como `soldier-right`/`knight-right`): el juego lo tiñe del
+  // color de la faccion en tiempo real (ver drawTintedSprite), asi que un
+  // unico PNG sirve para todas. Torreon con bandera, mas grande que
+  // `castle` para distinguirse de un vistazo. 44x56.
+  capital: (c) => {
+    const body = [214, 214, 214];
+    const dark = [150, 150, 150];
+    c.rect(6, 20, 32, 34, body, 2);        // cuerpo del torreon
+    c.rect(2, 8, 12, 18, dark, 2);         // torre izquierda
+    c.rect(30, 8, 12, 18, dark, 2);        // torre derecha
+    c.rect(16, 2, 3, 14, [110, 110, 110], 0); // asta de la bandera
+    c.triangle(19, 2, 19, 12, 34, 7, body, dark); // bandera
+  },
+
   // NUBES DEL CIELO (decorativo, ver docs/ACCIONES.md seccion 15): 3 tamaños
   // para que no se vean todas iguales al agruparse. Blancas y opacas aqui a
   // proposito — la transparencia final ("muy transparentes" segun se pidio)
@@ -356,7 +384,7 @@ const SIZES = {
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
   troop: [14, 22], 'troop-archer': [14, 22], 'troop-cavalry': [16, 26],
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
-  guardia: [14, 22],
+  guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };
 

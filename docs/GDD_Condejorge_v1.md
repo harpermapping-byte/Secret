@@ -131,6 +131,8 @@ Los castillos, aldeas y puertos que decoran el mapa empiezan sin dueño, con una
 
 Votando `!conquista` atacas, junto con el resto de tu facción que también lo vote esa ronda, a UNA estructura elegida al azar entre las que estén dentro de tu propio territorio y todavía tengan guarnición — no se puede elegir cuál. Tu fuerza de ataque se calcula igual que en un `!ataque` normal (tirada + tus propias tropas); la guarnición no tira dado, solo suma su fuerza fija. Si ganáis, la estructura queda conquistada para siempre y empieza a producir para tu facción: castillo +1 caballero de IA/ronda, aldea +2 levas/ronda, puerto +1 de industria/ronda — y si más adelante pierdes ese terreno, la producción se la lleva quien te lo conquiste a ti, igual que con cualquier otro edificio. Si perdéis el asalto, los que votaron sufren bajas según lo grande que fuera la diferencia de fuerza.
 
+Mientras una estructura no está conquistada, su guarnición se ve paseando alrededor (los mismos placeholders que las tropas de un jugador); en cuanto se conquista, esos mismos puestos pasan a ser aldeanos. Cada facción también tiene, desde que empieza la partida, una **capital** representativa en una de sus casillas iniciales, con sus propios aldeanos paseando alrededor — de momento puramente decorativa, sin efecto de juego.
+
 ### Combate
 Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa).
 

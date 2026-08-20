@@ -417,7 +417,7 @@
       // animan a 60fps, y `markersEl` es del tamaño del mundo entero —
       // limpiarlo y repintarlo en cada frame seria carisimo. Aqui solo se le
       // pasa a esa capa el estado nuevo para que recalcule a donde va cada uno.
-      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX });
+      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX, structures });
 
       if (!markersEl) return;
       const ctx = markersEl.getContext('2d');
@@ -560,7 +560,11 @@
      */
     function paintStructureMarkers(ctx, structures) {
       if (!structures || !structures.length || !layout) return;
-      structures.forEach((s) => {
+      // Las ya conquistadas viajan en `structures` (ver getPublicState()) solo
+      // para que la capa de aldeanos sepa DONDE dibujarlos (ver
+      // drawSiteWalkers) — aqui, en la chapa de guarnicion/ataque/defensa, no
+      // hay nada que enseñar de ellas (guarnicion a 0), asi que se omiten.
+      structures.filter((s) => !s.conquered).forEach((s) => {
         const c = layout.centroids[s.tileId];
         if (!c) return;
         const cx = c.x * BLOCK_PX;
@@ -1058,6 +1062,25 @@
   const TROOP_FOLLOWER_LAG_MS = 450;
   const TROOP_FOLLOWER_LAG_STEP_MS = 220;
 
+  // Aldeanos (ver docs/ACCIONES.md): pasean alrededor de un castillo/aldea/
+  // puerto ya conquistado y alrededor de la capital de cada faccion — ver
+  // syncSiteWalkers()/stepSiteWalkers()/drawSiteWalkers() dentro de
+  // createObjectLayer. Mismo tamaño que `guardia` (la guarnicion a la que
+  // sustituyen al conquistar).
+  const aldeanoSpriteImg = loadSprite('aldeano');
+  const ALDEANO_SPRITE_WORLD_W = 13;
+  // Capital de faccion: placeholder gris que se tiñe del color de la
+  // faccion en tiempo real (ver drawTintedSprite), igual que el marcador de
+  // jugador.
+  const capitalSpriteImg = loadSprite('capital');
+  const CAPITAL_SPRITE_WORLD_W = 60;
+  // Radio de paseo (px de mundo) alrededor de un castillo/aldea/puerto/
+  // capital para su guarnicion/aldeanos — mucho mas pequeño que el de un
+  // jugador paseando por su territorio: son NPCs "de guardia", no viajan.
+  const SITE_WANDER_RADIUS = 46;
+  const SITE_WALK_SPEED = 34;
+  const SITE_PAUSE_MS = 1100;
+
   // ===========================================================================
   // Caminantes: el marcador de cada jugador vivo, que se mueve por el mapa.
   //
@@ -1146,6 +1169,12 @@
     let walkerWorld = null;
     let walkerLoopRunning = false;
     let lastFrameAt = 0;
+
+    // Guarnicion de castillo/aldea/puerto (mientras no esten conquistados) y
+    // aldeanos (ya conquistados, o alrededor de la capital de cada faccion)
+    // — ver syncSiteWalkers()/stepSiteWalkers()/drawSiteWalkers() mas abajo.
+    // siteKey -> { home: {x,y}, factionColor, list: [{spriteKey,x,y,tx,ty,dir,pauseUntil,hopSeed}] }
+    const siteWalkers = new Map();
 
     // Easter egg: una unica vaca vagando por tierra, con un acompañante que
     // la sigue a corta distancia — ver stepCow()/drawCow() y
@@ -1242,10 +1271,11 @@
      * recalcula el destino de cada uno segun el comando que tenga escrito.
      * Se llama en cada `state:*`, no en cada frame.
      */
-    function setWalkerWorld({ tiles, factions, players, layout, blockPx }) {
+    function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures }) {
       if (!layout) return;
       walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1 };
       if (!cow) spawnCow();
+      syncSiteWalkers(structures || [], factions || []);
 
       const alive = new Set();
       const byFaction = new Map();
@@ -1559,6 +1589,177 @@
       // Sin sitio al que ir sin mojarse (islote de una sola casilla, esquina
       // muy estrecha...): se queda quieto hasta el proximo intento.
       return null;
+    }
+
+    // -----------------------------------------------------------------------
+    // Guarnicion/aldeanos "de guardia": un grupito de caminantes ambientales
+    // atado a un sitio fijo (un castillo/aldea/puerto o la capital de una
+    // faccion), a diferencia de los caminantes de jugador (que recorren todo
+    // su territorio). Ver docs/ACCIONES.md.
+    //
+    //   - Estructura SIN conquistar: la guarnicion neutral pasea con el
+    //     mismo placeholder que las tropas de un jugador (troop/
+    //     troop-archer/troop-cavalry, ver rules/structures.js aiTroops/
+    //     archerTroops/cavalryTroops), un puñado por tipo presente (no todos
+    //     a la vez: con guarniciones de 10-15 no cabrian, es solo "un par
+    //     paseando" para dar la sensacion de que hay alguien).
+    //   - Estructura YA conquistada: 3 aldeanos (aldeano.png).
+    //   - Capital de cada faccion: capitalVillagerCount aldeanos (4-8,
+    //     sorteado una vez en el servidor al crear la partida).
+    // -----------------------------------------------------------------------
+
+    /** Cuantos caminantes de que tipo le tocan a un sitio, sin listar posiciones todavia. */
+    function desiredSiteSpecs(structures, factions) {
+      const sites = new Map(); // siteKey -> { tileId, factionColor, specs: [{spriteKey, n}] }
+
+      (structures || []).forEach((s) => {
+        const specs = [];
+        if (!s.conquered) {
+          // Un par por tipo presente en la guarnicion (tope 3, para no
+          // amontonar 15 sprites encima de un castillo grande).
+          if (s.aiTroops > 0) specs.push({ spriteKey: 'troop', n: Math.min(3, Math.max(1, Math.ceil(s.aiTroops / 4))) });
+          if (s.archerTroops > 0) specs.push({ spriteKey: 'troop-archer', n: Math.min(3, Math.max(1, Math.ceil(s.archerTroops / 4))) });
+          if (s.cavalryTroops > 0) specs.push({ spriteKey: 'troop-cavalry', n: Math.min(3, Math.max(1, Math.ceil(s.cavalryTroops / 4))) });
+        } else {
+          specs.push({ spriteKey: 'aldeano', n: 3 });
+        }
+        if (specs.length) sites.set(`struct:${s.tileId}`, { tileId: s.tileId, factionColor: null, specs });
+      });
+
+      (factions || []).forEach((f) => {
+        if (f.capitalTileId == null) return;
+        sites.set(`capital:${f.number}`, {
+          tileId: f.capitalTileId,
+          factionColor: f.color,
+          specs: [{ spriteKey: 'aldeano', n: Math.max(1, f.capitalVillagerCount || 0) }],
+        });
+      });
+
+      return sites;
+    }
+
+    /**
+     * Ajusta `siteWalkers` a lo que toca AHORA (guarnicion/aldeanos por
+     * sitio), dando de alta/baja solo lo que cambio — igual que los
+     * caminantes de jugador, nunca se reposiciona a uno que ya estaba
+     * paseando, para que una estructura conquistada a mitad de partida no
+     * "teletransporte" a nadie: los soldados barbaros que sobran se borran y
+     * los aldeanos nuevos aparecen cerca de la casa, sin más.
+     */
+    function syncSiteWalkers(structures, factions) {
+      const desired = desiredSiteSpecs(structures, factions);
+
+      for (const key of [...siteWalkers.keys()]) {
+        if (!desired.has(key)) siteWalkers.delete(key);
+      }
+
+      desired.forEach((site, key) => {
+        const home = tileCenter(site.tileId);
+        if (!home) return;
+        let group = siteWalkers.get(key);
+        if (!group) { group = { home, factionColor: site.factionColor, list: [] }; siteWalkers.set(key, group); }
+        group.home = home;
+        group.factionColor = site.factionColor;
+
+        const wantCounts = new Map();
+        site.specs.forEach(({ spriteKey, n }) => wantCounts.set(spriteKey, (wantCounts.get(spriteKey) || 0) + n));
+        const haveCounts = new Map();
+        group.list.forEach((w) => haveCounts.set(w.spriteKey, (haveCounts.get(w.spriteKey) || 0) + 1));
+
+        for (const spriteKey of new Set([...haveCounts.keys(), ...wantCounts.keys()])) {
+          let have = haveCounts.get(spriteKey) || 0;
+          const want = wantCounts.get(spriteKey) || 0;
+          while (have > want) {
+            const idx = group.list.findIndex((w) => w.spriteKey === spriteKey);
+            if (idx === -1) break;
+            group.list.splice(idx, 1);
+            have--;
+          }
+          while (have < want) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = SITE_WANDER_RADIUS * Math.random();
+            group.list.push({
+              spriteKey,
+              x: home.x + Math.cos(angle) * dist,
+              y: home.y + Math.sin(angle) * dist,
+              tx: home.x, ty: home.y,
+              dir: 'right', pauseUntil: 0, hopSeed: Math.random() * Math.PI * 2,
+            });
+            have++;
+          }
+        }
+      });
+    }
+
+    /** Siguiente sitio al que vagar, igual que cowWanderTarget() pero atado a un radio pequeño alrededor de `home`. */
+    function siteWanderTarget(home, w) {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = SITE_WANDER_RADIUS * (0.3 + Math.random() * 0.7);
+        const x = home.x + Math.cos(angle) * dist;
+        const y = home.y + Math.sin(angle) * dist;
+        if (pathStaysOnLand(w.x, w.y, x, y)) return { x, y };
+      }
+      return null;
+    }
+
+    function stepSiteWalkers(dt, now) {
+      siteWalkers.forEach((group) => {
+        group.list.forEach((w) => {
+          const dx = w.tx - w.x, dy = w.ty - w.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist <= WALK_ARRIVE_DIST) {
+            if (now >= w.pauseUntil) {
+              const next = siteWanderTarget(group.home, w);
+              if (next) { w.tx = next.x; w.ty = next.y; }
+              w.pauseUntil = now + SITE_PAUSE_MS * (0.5 + Math.random());
+            }
+          } else {
+            const step = Math.min(dist, SITE_WALK_SPEED * dt);
+            w.x += (dx / dist) * step;
+            w.y += (dy / dist) * step;
+            if (dx > WALKER_DIR_THRESHOLD) w.dir = 'right';
+            else if (dx < -WALKER_DIR_THRESHOLD) w.dir = 'left';
+          }
+        });
+      });
+    }
+
+    const SITE_WALKER_SPRITES = { troop: [troopImg, TROOP_SPRITE_WORLD_W], 'troop-archer': [archerTroopImg, TROOP_SPRITE_WORLD_W], 'troop-cavalry': [cavalryTroopImg, CAVALRY_TROOP_SPRITE_WORLD_W], aldeano: [aldeanoSpriteImg, ALDEANO_SPRITE_WORLD_W] };
+
+    /** Dibuja la capital (si el sitio tiene `factionColor`, tinta como un marcador de jugador) y los caminantes de cada sitio. */
+    function drawSiteWalkers(w, h) {
+      if (!siteWalkers.size) return;
+      const { x: vx, y: vy, scale } = currentView;
+      const margin = OBJ_VIEWPORT_MARGIN_PX / scale;
+      const wx0 = (0 - vx) / scale - margin, wx1 = (w - vx) / scale + margin;
+      const wy0 = (0 - vy) / scale - margin, wy1 = (h - vy) / scale + margin;
+      const t = performance.now() / 1000;
+
+      siteWalkers.forEach((group) => {
+        const { home } = group;
+        if (group.factionColor && capitalSpriteImg.complete && capitalSpriteImg.naturalWidth &&
+            home.x >= wx0 && home.x <= wx1 && home.y >= wy0 && home.y <= wy1) {
+          const cw = CAPITAL_SPRITE_WORLD_W * scale;
+          const chh = cw * (capitalSpriteImg.naturalHeight / capitalSpriteImg.naturalWidth);
+          drawTintedSprite(capitalSpriteImg, home.x * scale + vx - cw / 2, home.y * scale + vy - chh, cw, chh, group.factionColor, 0.65);
+        }
+
+        group.list.forEach((walker) => {
+          if (walker.x < wx0 || walker.x > wx1 || walker.y < wy0 || walker.y > wy1) return;
+          const spec = SITE_WALKER_SPRITES[walker.spriteKey];
+          if (!spec) return;
+          const [img, worldW] = spec;
+          if (!img.complete || !img.naturalWidth) return;
+          const drawW = worldW * scale;
+          const drawH = drawW * (img.naturalHeight / img.naturalWidth);
+          const moving = Math.hypot(walker.tx - walker.x, walker.ty - walker.y) > WALK_ARRIVE_DIST;
+          const hop = moving ? Math.abs(Math.sin(t * HOP_SPEED + walker.hopSeed)) * HOP_HEIGHT : 0;
+          const sx = walker.x * scale + vx;
+          const sy = (walker.y - hop) * scale + vy;
+          ctx.drawImage(img, sx - drawW / 2, sy - drawH, drawW, drawH);
+        });
+      });
     }
 
     // -----------------------------------------------------------------------
@@ -2013,7 +2214,7 @@
 
     /** Hay algo que necesite el bucle de animacion corriendo ahora mismo. */
     function needsAnimationLoop() {
-      return walkers.size > 0 || cow != null || clouds.length > 0;
+      return walkers.size > 0 || siteWalkers.size > 0 || cow != null || clouds.length > 0;
     }
 
     /**
@@ -2035,6 +2236,7 @@
         const dt = Math.min(0.1, (now - lastFrameAt) / 1000); // techo por si la pestaña estuvo en segundo plano
         lastFrameAt = now;
         stepWalkers(dt, now);
+        stepSiteWalkers(dt, now);
         stepCow(dt, now);
         stepClouds(dt, now);
         drawObjectLayer();
@@ -2120,6 +2322,7 @@
       // ULTIMAS de todas, por encima de todo, como corresponde al cielo.
       drawDecorations(w, h);
       drawTerrainObjects(w, h);
+      drawSiteWalkers(w, h);
       drawCow(w, h);
       drawWalkers(w, h);
       drawClouds(w, h);
