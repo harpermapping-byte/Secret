@@ -285,7 +285,7 @@
     lastState = state;
     document.getElementById('phase').textContent = state.phase ? `Fase: ${phaseLabel(state.phase)} (ronda ${state.round})` : 'Esperando a que el admin configure la partida...';
 
-    mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || [], state.structures || []);
+    mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || [], state.structures || [], state.wonders || [], state.bosses || []);
     CondejorgeFactionCards.renderFactionCards(document.getElementById('factionsPanelCards'), state);
     handleFactionsPanelAutoOpen(state);
     renderRoster(state);
@@ -544,6 +544,7 @@
       summarySection('Bajas', (byKind.casualties || []).map((c) => casualtyLine(state, c))),
       summarySection('Eliminaciones', (byKind.eliminations || []).map((e) => eliminationLine(state, e))),
       summarySection('Estructuras conquistadas', (byKind.structureConquests || []).map((c) => structureConquestLine(state, c))),
+      summarySection('Bosses derrotados', (byKind.bossKills || []).map((c) => bossKillLine(state, c))),
     ].join('');
   }
 
@@ -612,6 +613,13 @@
   /** `!conquista` ganado esta ronda (ver rules/structures.js) — la guarnición neutral cayó. */
   function structureConquestLine(state, c) {
     return `${fchip(state, c.factionNumber)} conquistó ${STRUCTURE_LABELS[c.structureType] || c.structureType} en la casilla ${c.tileId}`;
+  }
+
+  const BOSS_LABELS = { ogro: 'un ogro 👹', troll: 'un troll 🧌', behemot: 'un behemot 🐗' };
+
+  /** `!boss` ganado esta ronda (ver rules/bosses.js sección 31) — gana un museo (+1 leva/ronda, +1 industria/ronda, +2 defensa base). */
+  function bossKillLine(state, c) {
+    return `${fchip(state, c.factionNumber)} derrotó a ${BOSS_LABELS[c.bossKey] || c.bossKey} en la casilla ${c.tileId} — gana un museo 🏛️ (+1 leva/ronda, +1 industria/ronda, +2 defensa base)`;
   }
 
   // ---------------------------------------------------------------------
@@ -695,6 +703,7 @@
     { cmd: '!conquista', phase: 'Acción', short: 'Ataca a una estructura neutral de tu territorio (castillo/aldea/puerto).', desc: 'Conquista al azar una estructura neutral (castillo 🏰, aldea 🏘️ o puerto ⚓) que esté dentro de tu propio territorio y todavía tenga guarnición — no puedes elegir cuál, el juego elige una entre las disponibles. Si varios de tu facción votan !conquista la misma ronda, todos atacan juntos a esa única estructura. Sobre cada estructura sin conquistar verás un marcador con la guarnición que tiene (soldados/arqueros/caballeros de IA) y su ataque/defensa ya calculados, para saber si te conviene intentarlo. Si ganáis, la estructura pasa a producir para tu facción para siempre (castillo +1 caballero de IA/ronda, aldea +2 levas/ronda, puerto +1 de industria/ronda) — y si luego pierdes ese terreno, se lo lleva quien te lo conquiste a ti. Si perdéis el asalto, los que votaron sufren bajas según lo fuerte que fuera la guarnición.' },
     { cmd: '!dungeon', phase: 'Acción', short: 'Ataca a un dungeon (orcos/goblins) de tu territorio — solo si el admin los activó.', desc: 'Ataca a un dungeon 💀 (guarnición de orcos y goblins, ver marcador sobre él) que esté dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 5 por mapa). Misma mecánica de grupo que !conquista: todos los que voten !dungeon esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no. Si lo derrotáis, la guarnición desaparece para siempre y tu facción gana una estatua junto a su capital (con sus propios aldeanos alrededor) — a diferencia de castillo/aldea/puerto, un dungeon no da producción para la casilla.' },
     { cmd: '!torre', phase: 'Acción', short: 'Construye una torre 🗼 en 2 rondas: +0.5 de defensa pasiva, máx. 10 por facción.', desc: 'Empiezas a construir una torre 🗼 en un terreno al azar de tu facción. Esta ronda queda "en obras" (sin efecto todavía); a la ronda siguiente se termina sola, sin que tengas que volver a votar. Cada torre terminada da +0.5 de defensa pasiva a tu facción PARA SIEMPRE, incluso si nadie escribe !defender esa ronda — es la única excepción a "el territorio no se defiende solo". Máximo 10 torres por facción (contando las que están en obras). Si te conquistan el terreno donde está, la torre se la lleva quien te lo conquiste, esté terminada o a medias.' },
+    { cmd: '!boss', phase: 'Acción', short: 'Ataca a un boss de tu territorio — solo si el admin los activó.', desc: 'Ataca a un boss (un ogro 👹, un troll 🧌 o un behemot 🐗, según cuál haya salido) que esté vagando dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 3 por mapa, cada uno atado a la casilla en la que salió). Misma mecánica de grupo que !conquista/!dungeon: todos los que voten !boss esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no — su ataque y su defensa (entre 5 y 10, sorteado por partida) se ven encima de su cabeza. Si lo derrotáis, tu facción gana un museo 🏛️ junto a su capital: +1 leva/ronda, +1 industria/ronda y +2 de defensa base, PARA SIEMPRE — si matas más de un boss, se crea otro museo más, y los bonos se suman.' },
   ];
 
   function openCommands() {
