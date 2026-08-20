@@ -209,6 +209,12 @@ function generateMap({ tileCount, factionCount, mode, mapKey, dungeonsEnabled })
       leviesCount: 0,
       archeryCount: 0,
       cavalryCount: 0,
+      // Torres (!torre, ver rules/towers.js sección 28): mismo mecanismo
+      // que industryCount, vive en la CASILLA. towerCount = terminadas
+      // (dan +0.5 de defensa pasiva cada una); towerBuildingCount = en
+      // obras, se promociona sola la ronda siguiente sin volver a votar.
+      towerCount: 0,
+      towerBuildingCount: 0,
     });
   }
 

@@ -373,6 +373,27 @@ const SPRITES = {
     c.rect(0, 2, 36, 12, [90, 100, 116], 2, [40, 44, 54]);  // tejado azulado
   },
 
+  // TORRE EN OBRAS (!torre, ver rules/towers.js seccion 28): placeholder de
+  // la ronda "en construccion" antes de que se promocione sola a torre
+  // terminada la ronda siguiente. Andamiaje de madera sin tejado, para
+  // distinguirse de un vistazo de la torre ya acabada de abajo. 20x30.
+  'torre-obras': (c) => {
+    c.rect(6, 10, 8, 20, [176, 132, 90], 1, [72, 46, 20]);  // cuerpo a medias
+    c.rect(2, 6, 2, 24, [120, 90, 56], 0);                  // andamio izquierdo
+    c.rect(16, 6, 2, 24, [120, 90, 56], 0);                 // andamio derecho
+    c.rect(2, 18, 16, 2, [120, 90, 56], 0);                 // travesaño
+  },
+
+  // TORRE TERMINADA (!torre): da +0.5 de defensa pasiva por unidad, hasta 10
+  // por faccion — se pinta cerca de la capital como el resto de marcadores
+  // de defensa. Piedra gris con tejado conico, para leerse claramente como
+  // "defensivo" junto a barraca/campo-arqueria/caballeriza. 20x30.
+  torre: (c) => {
+    c.rect(4, 12, 12, 18, [140, 136, 128], 2, [64, 62, 56]); // cuerpo de piedra
+    c.rect(2, 4, 16, 10, [96, 60, 52], 2, [50, 30, 26]);     // tejado conico
+    c.rect(8, 0, 4, 6, [96, 60, 52], 0);                     // remate
+  },
+
   // ALDEANO: aparece paseando alrededor de un castillo/aldea/puerto YA
   // CONQUISTADO (sustituye a la guarnicion neutral, ver `guardia` mas
   // arriba) y alrededor de la CAPITAL de cada faccion (ver `capital` mas
@@ -438,6 +459,7 @@ const SIZES = {
   barbaro: [14, 22], 'barbaro-arquero': [14, 22], 'barbaro-caballero': [16, 26],
   orco: [24, 30], goblin: [11, 17], estatua: [34, 48],
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
+  torre: [20, 30], 'torre-obras': [20, 30],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };

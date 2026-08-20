@@ -3,6 +3,7 @@
 const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
 const { sumRandomPower, applyCasualties, applyTroopCascadeDamage } = require('./shared');
 const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
+const { towerDefenseBonus } = require('./towers');
 
 /**
  * Resuelve todo el combate de la ronda a la vez: agrupa los ataques que recibe
@@ -14,6 +15,11 @@ const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElim
  * casillas que tenga. Toda la defensa sale de los usuarios que escriben
  * `!defender` en la Fase de Accion, cada uno aportando su propia tirada
  * (ver COMBAT_RANDOM_MIN/MAX en rules/shared.js).
+ *
+ * UNICA excepcion a lo anterior: las torres (`!torre`, ver rules/towers.js)
+ * dan +0.5 de defensa pasiva CADA UNA, siempre, aunque nadie vote
+ * `!defender` esa ronda — se suma tal cual (sin combatModifier) al final del
+ * calculo de `defensePower`.
  */
 function resolveCombat(match, context) {
   const incomingByDefender = groupIncomingAttacks(match, context);
@@ -29,7 +35,9 @@ function resolveCombat(match, context) {
     // Cada tirada depende de QUIEN vota (soldado o caballero, ver rules/shared.js),
     // no solo de cuantos son.
     const attackPower = sumRandomPower(match, attackerUserIds, 'attack') * combatModifier(match, defenderNumber, 'attack');
-    const defensePower = sumRandomPower(match, defenderUserIds, 'defense') * combatModifier(match, defenderNumber, 'defense');
+    const defensePower =
+      sumRandomPower(match, defenderUserIds, 'defense') * combatModifier(match, defenderNumber, 'defense') +
+      towerDefenseBonus(match, defenderFaction);
 
     if (attackPower > defensePower) {
       // Gana el ataque: baja la faccion defensora y conquista territorio.

@@ -26,6 +26,11 @@ const ACTION_CONQUISTA = 'CONQUISTA';
 // la recompensa es distinta: una estatua junto a tu capital, no producción
 // para la casilla). Ver rules/structures.js y docs/ACCIONES.md sección 27.
 const ACTION_DUNGEON = 'DUNGEON';
+// Construye una torre (2 rondas: esta ronda queda "en obras", la siguiente
+// se termina sola, sin volver a votar) — +0.5 de defensa pasiva por torre
+// terminada, máximo 10 por facción. Ver rules/towers.js y
+// docs/ACCIONES.md sección 28.
+const ACTION_TOWER = 'TORRE';
 
 // En que fase es valido cada tipo de accion.
 const VALID_PHASE_BY_ACTION = {
@@ -41,6 +46,7 @@ const VALID_PHASE_BY_ACTION = {
   [ACTION_CABALLEROS]: PHASE_ACTION,
   [ACTION_CONQUISTA]: PHASE_ACTION,
   [ACTION_DUNGEON]: PHASE_ACTION,
+  [ACTION_TOWER]: PHASE_ACTION,
 };
 
 const JOIN_RE = /^!faccion(\d+)$/i;
@@ -55,6 +61,7 @@ const ARQUEROS_RE = /^!arqueros$/i;
 const CABALLEROS_RE = /^!caballeros$/i;
 const CONQUISTA_RE = /^!conquista$/i;
 const DUNGEON_RE = /^!dungeon$/i;
+const TOWER_RE = /^!torre$/i;
 
 /**
  * Convierte un mensaje de chat en { type, targetFactionNumber } o null si no es un comando reconocido.
@@ -90,6 +97,8 @@ function parseCommand(rawText) {
 
   if (DUNGEON_RE.test(text)) return { type: ACTION_DUNGEON, targetFactionNumber: null };
 
+  if (TOWER_RE.test(text)) return { type: ACTION_TOWER, targetFactionNumber: null };
+
   return null;
 }
 
@@ -106,6 +115,7 @@ module.exports = {
   ACTION_CABALLEROS,
   ACTION_CONQUISTA,
   ACTION_DUNGEON,
+  ACTION_TOWER,
   VALID_PHASE_BY_ACTION,
   parseCommand,
 };

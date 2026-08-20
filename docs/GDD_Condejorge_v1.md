@@ -138,12 +138,17 @@ Configurable sí/no en la Fase 0 (panel de admin). Si está activado, aparecen d
 
 Votando `!dungeon` atacas, junto con el resto de tu facción, a un dungeon que esté dentro de tu propio territorio — comando aparte de `!conquista` porque la recompensa es distinta. Mismo combate bidireccional que `!conquista`: tu ataque decide si lo derrotas, el ataque de la guarnición contra tu defensa os causa bajas siempre, ganéis o no. Al derrotarlo, la guarnición desaparece para siempre y tu facción gana una **estatua** nueva junto a su capital (no producción para la casilla) — con sus propios 4 aldeanos paseando alrededor, igual que la capital. Varias estatuas se reparten en anillo alrededor de la capital sin amontonarse, así que la capital "va creciendo" visiblemente según se derrotan más dungeons.
 
+### Torres: `!torre`
+Disponible desde el principio, sin toggle de admin. Construcción en **dos rondas**: votar `!torre` levanta un placeholder "en obras" en un terreno al azar de tu facción esa misma ronda; a la ronda siguiente se termina solo, sin volver a votar. Máximo **10 torres por facción**, contando las terminadas y las en obras a la vez.
+
+Cada torre terminada da **+0.5 de defensa pasiva** a su facción, para siempre — y esta es la única excepción a "el territorio no se defiende solo" (ver Combate más abajo): el bonus de las torres se suma SIEMPRE, aunque nadie escriba `!defender` esa ronda, y se acumula con la defensa que sí aporte la gente cuando la haya. Si el terreno donde está la torre cambia de dueño (terminada o a medias), la torre se la lleva quien lo conquiste, igual que cualquier otro edificio.
+
 ### Combate
 Cuando una facción recibe ataques de una o varias facciones en la misma ronda, **todos se resuelven juntos, no en secuencia** (evita que "quien ataca primero" se coma toda la defensa).
 
 **Cada usuario aporta una tirada propia**, no un valor fijo: quien escribe `!ataque` suma entre **0.7 y 1.3** de ataque (al azar, incluidos los extremos), y quien escribe `!defender` suma entre **0.7 y 1.3** de defensa — un **caballero** (mejora de industria 1/3, ver arriba) tira entre **0.9 y 1.4** en los dos casos. La fuerza de cada bando es la suma de sus tiradas, así que dos combates con el mismo número de gente no salen iguales — un 1 contra 1 lo puede ganar cualquiera de los dos.
 
-**El territorio no se defiende solo.** Una facción a la que nadie defiende esa ronda entra al combate con **0 de defensa**, por muchas casillas que tenga: toda la defensa sale de los `!defender` de esa ronda.
+**El territorio no se defiende solo.** Una facción a la que nadie defiende esa ronda entra al combate con **0 de defensa** (más el bonus fijo de sus torres terminadas si tiene alguna, ver `!torre` más arriba — es la única excepción), por muchas casillas que tenga: el resto de la defensa sale de los `!defender` de esa ronda.
 
 La defensa reduce el ataque entrante; lo que sobra causa bajas — pero antes de matar JUGADORES, ese daño se reparte primero entre las tropas de IA del bando perdedor, en orden **caballero → arquero → leva** (un tipo sin nada de defensa, como el arquero defendiendo, muere entero gratis sin gastar nada del daño). Solo lo que sobra de esa cascada de tropas mata jugadores de verdad, con la prioridad de siempre: **inactivos → usuarios en `!industria` → atacantes propios → defensores** (los defensores son los últimos en caer, ya que su rol es bloquear). El territorio conquistado se elige al azar entre las casillas fronterizas del perdedor que tocan al ganador. Visualmente, los atacantes se mueven hacia la casilla de destino y los defensores se reparten entre los distintos frentes activos de su facción.
 
