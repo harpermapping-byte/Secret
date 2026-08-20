@@ -20,6 +20,7 @@ const { resolveAiTroops } = require('./rules/troops');
 const { resolveTroopBuildings } = require('./rules/troopBuildings');
 const { resolveConquista, resolveDungeon, structureAttackPower, structureDefensePower } = require('./rules/structures');
 const { resolveTowers, towerDefenseBonus } = require('./rules/towers');
+const { resolveBoss, museumDefenseBonus } = require('./rules/bosses');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
@@ -34,6 +35,7 @@ const {
   ACTION_CONQUISTA,
   ACTION_DUNGEON,
   ACTION_TOWER,
+  ACTION_BOSS,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -117,6 +119,11 @@ function createMatch(config) {
     // SPECIAL_TROOP_CAP), cada una aportando 0.4 fijo de ataque y defensa.
     specialCastleBuilt: false,
     specialTroopCount: 0,
+    // Museos (trofeo de `!boss`, ver rules/bosses.js sección 31): uno por
+    // cada boss derrotado, sin tope — cada uno da +1 leva/ronda, +1
+    // industria/ronda, +2 de defensa base, acumulables. Igual mecanismo
+    // visual que las estatuas de dungeon (anillo alrededor de la capital).
+    bossTrophies: 0,
     killsCaused: 0,
     // Miembros que tenia la faccion al cerrar el reclutamiento. Se rellena en
     // closeRecruitment(); antes de eso vale 0 y los umbrales de industria caen
@@ -124,7 +131,7 @@ function createMatch(config) {
     rosterSize: 0,
   }));
 
-  const { tiles, mapLayout, structures } = generateMap({
+  const { tiles, mapLayout, structures, wonders, bosses } = generateMap({
     tileCount: normalizedConfig.map.tileCount,
     factionCount: factions.length,
     mode: normalizedConfig.map.mode,
@@ -132,6 +139,12 @@ function createMatch(config) {
     // Dungeons solo se generan si el admin los activó en el panel (ver
     // futureFeatures.dungeons más abajo) — 1 a 5 al azar por partida.
     dungeonsEnabled: normalizedConfig.futureFeatures.dungeons,
+    // Maravillas (ver futureFeatures.wonders más abajo, docs/ACCIONES.md
+    // sección 30) — 2 a 6 al azar por partida, sin repetir ninguna.
+    wondersEnabled: normalizedConfig.futureFeatures.wonders,
+    // Bosses (ver futureFeatures.bosses más abajo, docs/ACCIONES.md
+    // sección 31) — 1 a 3 al azar por partida, sin repetir ninguno.
+    bossesEnabled: normalizedConfig.futureFeatures.bosses,
   });
 
   for (const tile of tiles) {
@@ -161,6 +174,17 @@ function createMatch(config) {
     // eso vive aquí y no dentro de `mapLayout` — viaja en cada
     // `state:public`/`state:admin`, no solo una vez.
     structures,
+    // Maravillas (ver rules/wonders.js, docs/ACCIONES.md sección 30):
+    // estática igual que `structures`/`mapLayout` en cuanto a POSICIÓN (nunca
+    // cambia de sitio ni de tipo en toda la partida) pero su DUEÑO no se
+    // guarda aquí — se consulta en vivo a partir de `tile.ownerFactionNumber`
+    // (ver wonderIndustryBonus()/wonderDefenseBonus()), así que basta con
+    // `!ataque`/`!expansion` normales para "conquistarla", sin código propio.
+    wonders,
+    // Bosses (ver rules/bosses.js, docs/ACCIONES.md sección 31): SÍ es
+    // estado mutable (`defeated` se pone a true al derrotarlo con `!boss`,
+    // igual mecanismo que la guarnición de `structures`), por eso vive aquí.
+    bosses,
     players: new Map(),
     round: 0,
     roundActions: new Map(),
@@ -198,10 +222,11 @@ function normalizeConfig(config) {
       // tierra real se reparten territorios/decoraciones.
       key: config.map?.key || DEFAULT_MAP_KEY,
     },
-    // Casillas del panel de admin (ver docs/ACCIONES.md): `dungeons` YA
-    // tiene efecto real (createMatch() se lo pasa a generateMap(), ver
-    // dungeonsEnabled más arriba) — wonders/bosses/weather/randomEvents
-    // siguen sin implementar, solo se guardan para cuando se hagan.
+    // Casillas del panel de admin (ver docs/ACCIONES.md): `dungeons`,
+    // `wonders` y `bosses` YA tienen efecto real (createMatch() se lo pasa a
+    // generateMap(), ver dungeonsEnabled/wondersEnabled/bossesEnabled más
+    // arriba) — weather/randomEvents siguen sin implementar, solo se
+    // guardan para cuando se hagan.
     futureFeatures: {
       wonders: !!config.futureFeatures?.wonders,
       dungeons: !!config.futureFeatures?.dungeons,
@@ -415,6 +440,7 @@ function resolveRound() {
   resolveCombat(match, context);
   resolveConquista(match, context);
   resolveDungeon(match, context);
+  resolveBoss(match, context);
   resolveTowers(match, context);
   resolveIndustry(match, context);
   resolveAiTroops(match);
@@ -477,6 +503,7 @@ function tallyActions() {
       [ACTION_CONQUISTA]: [],
       [ACTION_DUNGEON]: [],
       [ACTION_TOWER]: [],
+      [ACTION_BOSS]: [],
     });
     activePlayerCountByFaction.set(faction.number, 0);
   }
@@ -511,7 +538,7 @@ function tallyActions() {
     forceInactive: new Set(),
     // Sucesos de la ronda que van llenando resolveExpansion/resolveCombat/resolveIndustry a medida
     // que ocurren, para poder construir despues el resumen por fases (ver docs/ACCIONES.md seccion 6).
-    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [] },
+    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [], bossKills: [] },
   };
 }
 
@@ -537,6 +564,7 @@ function buildRoundSummary(context) {
   if (context.roundEvents.industryUnlocks.length > 0) blocks.push({ kind: 'industryUnlocks', data: context.roundEvents.industryUnlocks });
   if (context.roundEvents.eliminations.length > 0) blocks.push({ kind: 'eliminations', data: context.roundEvents.eliminations });
   if (context.roundEvents.structureConquests.length > 0) blocks.push({ kind: 'structureConquests', data: context.roundEvents.structureConquests });
+  if (context.roundEvents.bossKills.length > 0) blocks.push({ kind: 'bossKills', data: context.roundEvents.bossKills });
 
   const casualties = [...match.players.values()]
     .filter((p) => p.diedOnRound === match.round)
@@ -612,6 +640,8 @@ function getPublicState() {
       factions: [],
       tiles: [],
       structures: [],
+      wonders: [],
+      bosses: [],
       players: [],
       summaryBlocks: [],
       winnerFactionNumber: null,
@@ -651,8 +681,19 @@ function getPublicState() {
       // rules/combat.js). El cliente la pinta junto a la capital como el
       // resto de stats de defensa.
       towerDefenseBonus: towerDefenseBonus(match, f),
+      // Museos (trofeo de `!boss`, ver rules/bosses.js sección 31): cuantos
+      // tiene esta facción (`bossTrophies`, uno por boss derrotado) y su
+      // bono de defensa pasiva TOTAL (+2 cada uno, se suma igual que
+      // towerDefenseBonus arriba). El cliente los pinta junto a la capital
+      // con el mismo mecanismo de anillo que las estatuas de dungeon.
+      bossTrophies: f.bossTrophies,
+      museumDefenseBonus: museumDefenseBonus(f),
       killsCaused: f.killsCaused,
-      wondersCount: 0, // reservado para v2 (maravillas), ver docs/GDD "Alcance de v1 vs futuro"
+      // Cuantas maravillas posee esta facción AHORA MISMO (ver
+      // rules/wonders.js sección 30) — se cuenta en vivo a partir de quién
+      // controla la casilla de cada una, igual que su bono de industria/
+      // defensa; usado en la clasificación (leaderboard).
+      wondersCount: match.wonders.filter((w) => match.tiles[w.tileId].ownerFactionNumber === f.number).length,
       // Recuento EN VIVO de la fase de accion en curso (ver countLiveActions):
       // cuanta gente de esta faccion esta defendiendo, y cuantos atacantes
       // tiene encima ahora mismo. El mapa los pinta como escudo verde / espada
@@ -708,6 +749,36 @@ function getPublicState() {
         defensePower: Number(structureDefensePower(s).toFixed(2)),
       };
     }),
+    // Maravillas (ver rules/wonders.js, docs/ACCIONES.md sección 30):
+    // posición y bono fijos toda la partida, `ownerFactionNumber` se calcula
+    // aquí en vivo a partir de quién controla `tileId` ahora mismo — no hace
+    // falta ningún comando para "conquistarlas", basta con poseer la
+    // casilla (`!ataque`/`!expansion` normales).
+    wonders: match.wonders.map((w) => ({
+      tileId: w.tileId,
+      x: w.x,
+      y: w.y,
+      key: w.key,
+      name: w.name,
+      icon: w.icon,
+      bonusType: w.bonusType,
+      bonusAmount: w.bonusAmount,
+      ownerFactionNumber: match.tiles[w.tileId].ownerFactionNumber,
+    })),
+    // Bosses (ver rules/bosses.js, docs/ACCIONES.md sección 31): posición y
+    // tipo fijos toda la partida, `defeated` es lo único mutable — el
+    // cliente deja de pintarlo (y de contarlo como "vagando por el mapa")
+    // en cuanto lo ve a true.
+    bosses: match.bosses.map((b) => ({
+      tileId: b.tileId,
+      x: b.x,
+      y: b.y,
+      key: b.key,
+      attackPower: b.attackPower,
+      defensePower: b.defensePower,
+      defeated: b.defeated,
+      defeatedByFactionNumber: b.defeatedByFactionNumber,
+    })),
     players: [...match.players.values()].map((p) => {
       // Que esta haciendo este jugador AHORA MISMO, para que el mapa pueda
       // animar su marcador segun el comando que haya escrito (irse a la

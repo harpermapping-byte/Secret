@@ -138,10 +138,12 @@
 
     <label title="Si se activa, aparecen de 1 a 5 dungeons al azar en el mapa (guarnición de orcos/goblins) — atacables con !dungeon dentro de tu propio territorio. Al derrotarlos, la facción gana una estatua junto a su capital."><input type="checkbox" id="ffDungeons" style="width:auto" /> Dungeons (!dungeon)</label>
 
+    <label title="Si se activa, aparecen de 2 a 6 maravillas al azar en el mapa (Guggenheim, Ruinas de Numancia, La Moncloa, plataforma SpaceX, Kebab, Contrato indefinido — nunca se repite ninguna), cada una con su nombre y su bono (+4 industria/ronda o +4 defensa base) encima. No hace falta ningún comando: se poseen simplemente teniendo el terreno en el que salieron."><input type="checkbox" id="ffWonders" style="width:auto" /> Maravillas</label>
+
+    <label title="Si se activa, aparecen de 1 a 3 bosses al azar en el mapa (ogro/troll/behemot, nunca se repite ninguno), vagando dentro de la casilla en la que salieron, con su ataque/defensa (5-10) encima de la cabeza — atacables con !boss dentro de tu propio territorio. Al derrotarlos, la facción gana un museo junto a su capital (+1 leva/ronda, +1 industria/ronda, +2 defensa base, acumulable por cada boss derrotado)."><input type="checkbox" id="ffBosses" style="width:auto" /> Bosses (!boss)</label>
+
     <h3>Próximamente (sin efecto todavía)</h3>
     <div class="row" style="flex-wrap:wrap; gap:4px 16px">
-      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffWonders" style="width:auto" /> Maravillas</label>
-      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffBosses" style="width:auto" /> Bosses</label>
       <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffWeather" style="width:auto" /> Clima</label>
       <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:13px; flex:0 0 auto"><input type="checkbox" id="ffRandomEvents" style="width:auto" /> Eventos aleatorios</label>
     </div>
@@ -371,7 +373,7 @@
     document.getElementById('pauseBtn').disabled = !!state.timerPaused;
     document.getElementById('resumeBtn').disabled = !state.timerPaused;
 
-    mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || []);
+    mapCtrl.setTiles(state.tiles || [], state.factions || [], state.players || [], undefined, state.wonders || [], state.bosses || []);
     CondejorgeFactionCards.renderFactionCards(document.getElementById('factionCards'), state);
     renderBotStatus(state.botStatus);
     renderChatLog(state.chatLog);
