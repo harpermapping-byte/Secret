@@ -121,6 +121,12 @@
   const barracaSpriteImg = loadBuildingSprite('barraca');
   const campoArqueriaSpriteImg = loadBuildingSprite('campo-arqueria');
   const caballerizaSpriteImg = loadBuildingSprite('caballeriza');
+  // Torres (!torre, ver rules/towers.js seccion 28): mismo mecanismo de
+  // scatter que barraca/campo-arqueria/caballeriza, dos sprites — una para
+  // `towerBuildingCount` (en obras, todavia sin dar defensa) y otra para
+  // `towerCount` (terminada, +0.5 de defensa pasiva cada una).
+  const torreObrasSpriteImg = loadBuildingSprite('torre-obras');
+  const torreSpriteImg = loadBuildingSprite('torre');
 
   // Marcador de guarnición neutral sobre castillo/aldea/puerto todavía sin
   // conquistar (!conquista, ver rules/structures.js y docs/ACCIONES.md
@@ -435,6 +441,8 @@
       paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, MARKER_SALT_LEVAS, markerOccupied);
       paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, MARKER_SALT_ARQUEROS, markerOccupied);
       paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, MARKER_SALT_CABALLEROS, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'towerBuildingCount', torreObrasSpriteImg, MARKER_SALT_TORRE_OBRAS, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'towerCount', torreSpriteImg, MARKER_SALT_TORRE, markerOccupied);
       paintStructureMarkers(ctx, structures);
       paintCombatBadges(ctx, tiles, factions);
     }
@@ -446,6 +454,8 @@
     const MARKER_SALT_LEVAS = 1;
     const MARKER_SALT_ARQUEROS = 2;
     const MARKER_SALT_CABALLEROS = 3;
+    const MARKER_SALT_TORRE_OBRAS = 4;
+    const MARKER_SALT_TORRE = 5;
 
     // Radio base (pixeles de mundo) del area donde se dispersan los
     // marcadores de una misma casilla, en vez de la cuadricula rigida
@@ -1179,7 +1189,7 @@
   // "ganar terreno" se usa una banderita, no un icono de ataque a distancia.
   const ACTION_ICONS = {
     ATTACK: ' ⚔️', DEFEND: ' 🛡️', INDUSTRY: ' ⚒️', EXPAND: ' 🚩',
-    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎', CONQUISTA: ' 🗡️', DUNGEON: ' 💀',
+    LEVAS: ' 🏕️', ARQUEROS: ' 🏹', CABALLEROS: ' 🐎', CONQUISTA: ' 🗡️', DUNGEON: ' 💀', TORRE: ' 🗼',
   };
 
   /** Hash determinista 2D -> [0,1) — variacion "de sabor" (angulo de rama, tono de roca...) sin gastar bytes extra por objeto en el fichero, ver cabecera de tools/generateWorldObjects.js. */

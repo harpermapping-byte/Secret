@@ -19,6 +19,7 @@ const { resolveIndustry, resolveIndustryImmunity, industryThresholdsFor } = requ
 const { resolveAiTroops } = require('./rules/troops');
 const { resolveTroopBuildings } = require('./rules/troopBuildings');
 const { resolveConquista, resolveDungeon, structureAttackPower, structureDefensePower } = require('./rules/structures');
+const { resolveTowers, towerDefenseBonus } = require('./rules/towers');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
@@ -32,6 +33,7 @@ const {
   ACTION_CABALLEROS,
   ACTION_CONQUISTA,
   ACTION_DUNGEON,
+  ACTION_TOWER,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -405,6 +407,7 @@ function resolveRound() {
   resolveCombat(match, context);
   resolveConquista(match, context);
   resolveDungeon(match, context);
+  resolveTowers(match, context);
   resolveIndustry(match, context);
   resolveAiTroops(match);
   resolveTroopBuildings(match, context);
@@ -465,6 +468,7 @@ function tallyActions() {
       [ACTION_CABALLEROS]: [],
       [ACTION_CONQUISTA]: [],
       [ACTION_DUNGEON]: [],
+      [ACTION_TOWER]: [],
     });
     activePlayerCountByFaction.set(faction.number, 0);
   }
@@ -626,6 +630,12 @@ function getPublicState() {
       capitalTileId: f.capitalTileId,
       capitalVillagerCount: f.capitalVillagerCount,
       dungeonTrophies: f.dungeonTrophies,
+      // Defensa pasiva TOTAL que dan las torres terminadas de esta faccion
+      // (0.5 cada una, ver rules/towers.js) — se suma SIEMPRE al calculo de
+      // combate, aunque nadie vote !defender esta ronda (ver resolveCombat en
+      // rules/combat.js). El cliente la pinta junto a la capital como el
+      // resto de stats de defensa.
+      towerDefenseBonus: towerDefenseBonus(match, f),
       killsCaused: f.killsCaused,
       wondersCount: 0, // reservado para v2 (maravillas), ver docs/GDD "Alcance de v1 vs futuro"
       // Recuento EN VIVO de la fase de accion en curso (ver countLiveActions):
@@ -648,6 +658,8 @@ function getPublicState() {
       leviesCount: t.leviesCount,
       archeryCount: t.archeryCount,
       cavalryCount: t.cavalryCount,
+      towerCount: t.towerCount,
+      towerBuildingCount: t.towerBuildingCount,
     })),
     // TODAS las estructuras, conquistadas o no (antes se omitían las ya
     // conquistadas porque su guarnición está a 0 y no había nada más que
