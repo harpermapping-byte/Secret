@@ -422,6 +422,33 @@ const SPRITES = {
     c.triangle(19, 2, 19, 12, 34, 7, body, dark); // bandera
   },
 
+  // CASTILLO ESPECIAL (nivel 4 de industria, ver rules/industry.js seccion
+  // 29): aparece UNA vez junto a la capital de la faccion que llega a ese
+  // nivel — placeholder gris neutro, TEÑIDO del color de la faccion en
+  // tiempo real igual que `capital` (drawTintedSprite), no un color fijo,
+  // asi que un unico PNG sirve para todas. Mas ancho y bajo que la capital
+  // (perfil "de fortaleza", no de torreon) para distinguirse de un vistazo.
+  // Sin aldeanos alrededor (solo tropa-especial, ver mas abajo). 48x40.
+  'castillo-especial': (c) => {
+    const body = [214, 214, 214];
+    const dark = [150, 150, 150];
+    c.rect(2, 16, 44, 24, body, 2);       // muralla
+    c.rect(4, 4, 12, 16, dark, 2);        // torreon izquierdo
+    c.rect(32, 4, 12, 16, dark, 2);       // torreon derecho
+    c.rect(18, 10, 12, 10, dark, 2);      // torreon central
+    c.rect(22, 2, 4, 10, [110, 110, 110], 0); // asta de bandera central
+  },
+
+  // TROPA ESPECIAL (producida por el castillo especial de arriba, ver
+  // rules/industry.js): 0.4 de ataque Y defensa fijos cada una, tope 10 por
+  // faccion. Mismo tamaño que `troop`/`guardia` (14x22), tono dorado/morado
+  // para leerse claramente como "de elite", distinto de las tropas normales
+  // del jugador y de la guarnicion barbara.
+  'tropa-especial': (c) => {
+    c.rect(4, 2, 6, 6, [196, 168, 64], 1);
+    c.rect(2, 8, 10, 13, [108, 72, 148], 1);
+  },
+
   // NUBES DEL CIELO (decorativo, ver docs/ACCIONES.md seccion 15): 3 tamaños
   // para que no se vean todas iguales al agruparse. Blancas y opacas aqui a
   // proposito — la transparencia final ("muy transparentes" segun se pidio)
@@ -461,6 +488,7 @@ const SIZES = {
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
   torre: [20, 30], 'torre-obras': [20, 30],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
+  'castillo-especial': [48, 40], 'tropa-especial': [14, 22],
   'cloud-1': [46, 20], 'cloud-2': [68, 28], 'cloud-3': [96, 38],
 };
 

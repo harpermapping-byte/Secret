@@ -109,6 +109,14 @@ function createMatch(config) {
     // sus propios aldeanos paseando alrededor — el cliente decide DONDE
     // colocar cada una (aqui solo se cuenta cuantas hay).
     dungeonTrophies: 0,
+    // Castillo especial del nivel 4 de industria (ver rules/industry.js):
+    // `specialCastleBuilt` se pone a true la ronda en que se desbloquea (el
+    // cliente lo usa para saber si ya hay que pintar el castillo junto a la
+    // capital) y `specialTroopCount` son sus tropas especiales AHORA MISMO
+    // (2 al construirse, +1/ronda despues, tope 10 — ver
+    // SPECIAL_TROOP_CAP), cada una aportando 0.4 fijo de ataque y defensa.
+    specialCastleBuilt: false,
+    specialTroopCount: 0,
     killsCaused: 0,
     // Miembros que tenia la faccion al cerrar el reclutamiento. Se rellena en
     // closeRecruitment(); antes de eso vale 0 y los umbrales de industria caen
@@ -630,6 +638,13 @@ function getPublicState() {
       capitalTileId: f.capitalTileId,
       capitalVillagerCount: f.capitalVillagerCount,
       dungeonTrophies: f.dungeonTrophies,
+      // Castillo especial del nivel 4 de industria (ver rules/industry.js):
+      // el cliente pinta el edificio junto a la capital en cuanto
+      // `specialCastleBuilt` es true, con `specialTroopCount` tropas
+      // especiales paseando alrededor (sin aldeanos, a diferencia de la
+      // capital y de los trofeos de dungeon).
+      specialCastleBuilt: f.specialCastleBuilt,
+      specialTroopCount: f.specialTroopCount,
       // Defensa pasiva TOTAL que dan las torres terminadas de esta faccion
       // (0.5 cada una, ver rules/towers.js) — se suma SIEMPRE al calculo de
       // combate, aunque nadie vote !defender esta ronda (ver resolveCombat en
