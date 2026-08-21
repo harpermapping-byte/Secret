@@ -75,6 +75,25 @@
   const MAX_SCALE = 2.5; // zoom moderado: lo justo para ver bien un territorio y sus vecinos, no arte de detalle
   const FOCUS_SCALE = MAX_SCALE; // zoom que usa focusOnPlayer() al saltar al marcador de un jugador
 
+  // Tamaños de sprite: TODOS viven en public/spriteSizes.js (cargado antes
+  // que este archivo, ver <script> en index.html/admin/index.html) para que
+  // cambiar cuánto mide un edificio/tropa en el mapa sea editar un único
+  // número ahí, sin tocar nada de aquí. `spriteSize()` es el único punto que
+  // lee de esa tabla — con un valor de reserva por si `spriteSizes.js` no
+  // llegó a cargar (o alguien añade un sprite nuevo sin darlo de alta ahí
+  // todavía), para que el mapa nunca se quede sin dibujar algo por esto.
+  const SPRITE_SIZES = window.SPRITE_SIZES || {};
+  function spriteSize(key, fallback) {
+    const v = SPRITE_SIZES[key];
+    return typeof v === 'number' ? v : fallback;
+  }
+  /** Igual que spriteSize() pero para las dos entradas que llevan ancho Y alto fijos (soldier/knight), ver spriteSizes.js. */
+  function spriteSizeWH(key, fallbackW, fallbackH) {
+    const v = SPRITE_SIZES[key];
+    if (v && typeof v.width === 'number' && typeof v.height === 'number') return [v.width, v.height];
+    return [fallbackW, fallbackH];
+  }
+
   // Clasificacion de cada celda del raster, precomputada UNA vez por
   // `mapLayout` (no depende de quien sea el dueño de cada casilla, solo de la
   // geometria fija tierra/oceano/fronteras) — ver computeCellRenderKind().
@@ -98,7 +117,7 @@
   // amarillo dibujado a mano). El ancho va en pixeles de MUNDO, igual que
   // `DECOR_SPRITES` mas abajo — a proposito algo mas pequeño que `village`
   // (90 ahi): 67.5 = 75% de 90, tal y como se pidio.
-  const INDUSTRY_SPRITE_WORLD_WIDTH = 67.5;
+  const INDUSTRY_SPRITE_WORLD_WIDTH = spriteSize('industry', 67.5);
   const industrySpriteImg = new Image();
   industrySpriteImg.src = '/sprites/industry.png';
   industrySpriteImg.addEventListener('error', () => {
@@ -109,7 +128,9 @@
   // rules/troopBuildings.js): mismo tamaño de referencia que village (90),
   // un poco mas pequeño. La posicion ya NO es una cuadricula fija: ver
   // MARKER_SCATTER_* y scatterPosition() mas abajo.
-  const TROOP_BUILDING_SPRITE_WORLD_WIDTH = 80;
+  const BARRACA_SPRITE_WORLD_W = spriteSize('barraca', 80);
+  const CAMPO_ARQUERIA_SPRITE_WORLD_W = spriteSize('campo-arqueria', 80);
+  const CABALLERIZA_SPRITE_WORLD_W = spriteSize('caballeriza', 80);
   function loadBuildingSprite(fileName) {
     const img = new Image();
     img.src = `/sprites/${fileName}.png`;
@@ -127,6 +148,8 @@
   // `towerCount` (terminada, +0.5 de defensa pasiva cada una).
   const torreObrasSpriteImg = loadBuildingSprite('torre-obras');
   const torreSpriteImg = loadBuildingSprite('torre');
+  const TORRE_OBRAS_SPRITE_WORLD_W = spriteSize('torre-obras', 80);
+  const TORRE_SPRITE_WORLD_W = spriteSize('torre', 80);
 
   // Maravillas (ver docs/ACCIONES.md sección 30, rules/wonders.js): 6 fijas,
   // cada una con su propio placeholder — se cargan todas de una vez en un
@@ -134,14 +157,13 @@
   // switch largo. SIN teñir de color de facción (landmark del mapa, no "de"
   // nadie, aunque quien posea la casilla se lleve el bono).
   const WONDER_SPRITES = {
-    guggenheim: loadBuildingSprite('wonder-guggenheim'),
-    numancia: loadBuildingSprite('wonder-numancia'),
-    moncloa: loadBuildingSprite('wonder-moncloa'),
-    spacex: loadBuildingSprite('wonder-spacex'),
-    kebab: loadBuildingSprite('wonder-kebab'),
-    contrato: loadBuildingSprite('wonder-contrato'),
+    guggenheim: [loadBuildingSprite('wonder-guggenheim'), spriteSize('wonder-guggenheim', 60)],
+    numancia: [loadBuildingSprite('wonder-numancia'), spriteSize('wonder-numancia', 60)],
+    moncloa: [loadBuildingSprite('wonder-moncloa'), spriteSize('wonder-moncloa', 60)],
+    spacex: [loadBuildingSprite('wonder-spacex'), spriteSize('wonder-spacex', 60)],
+    kebab: [loadBuildingSprite('wonder-kebab'), spriteSize('wonder-kebab', 60)],
+    contrato: [loadBuildingSprite('wonder-contrato'), spriteSize('wonder-contrato', 60)],
   };
-  const WONDER_SPRITE_WORLD_W = 60;
   const WONDER_MARKER_OFFSET_Y = 78; // px de mundo por encima del sprite, para el nombre+bono
 
   // Marcador de guarnición neutral sobre castillo/aldea/puerto todavía sin
@@ -458,11 +480,11 @@
       // de otros aunque cada tipo tenga su propia semilla de dispersion.
       const markerOccupied = new Map();
       paintIndustryMarkers(ctx, tiles, markerOccupied);
-      paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, MARKER_SALT_LEVAS, markerOccupied);
-      paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, MARKER_SALT_ARQUEROS, markerOccupied);
-      paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, MARKER_SALT_CABALLEROS, markerOccupied);
-      paintBuildingMarkers(ctx, tiles, 'towerBuildingCount', torreObrasSpriteImg, MARKER_SALT_TORRE_OBRAS, markerOccupied);
-      paintBuildingMarkers(ctx, tiles, 'towerCount', torreSpriteImg, MARKER_SALT_TORRE, markerOccupied);
+      paintBuildingMarkers(ctx, tiles, 'leviesCount', barracaSpriteImg, MARKER_SALT_LEVAS, markerOccupied, BARRACA_SPRITE_WORLD_W);
+      paintBuildingMarkers(ctx, tiles, 'archeryCount', campoArqueriaSpriteImg, MARKER_SALT_ARQUEROS, markerOccupied, CAMPO_ARQUERIA_SPRITE_WORLD_W);
+      paintBuildingMarkers(ctx, tiles, 'cavalryCount', caballerizaSpriteImg, MARKER_SALT_CABALLEROS, markerOccupied, CABALLERIZA_SPRITE_WORLD_W);
+      paintBuildingMarkers(ctx, tiles, 'towerBuildingCount', torreObrasSpriteImg, MARKER_SALT_TORRE_OBRAS, markerOccupied, TORRE_OBRAS_SPRITE_WORLD_W);
+      paintBuildingMarkers(ctx, tiles, 'towerCount', torreSpriteImg, MARKER_SALT_TORRE, markerOccupied, TORRE_SPRITE_WORLD_W);
       paintStructureMarkers(ctx, structures);
       paintWonderMarkers(ctx, wonders, factions);
       paintCombatBadges(ctx, tiles, factions);
@@ -565,9 +587,9 @@
      * semilla `salt` de dispersion (ver scatterPosition) para que cada tipo
      * caiga en un sitio distinto de la casilla en vez de agruparse.
      */
-    function paintBuildingMarkers(ctx, tiles, tileField, spriteImg, salt, markerOccupied) {
+    function paintBuildingMarkers(ctx, tiles, tileField, spriteImg, salt, markerOccupied, worldW) {
       if (!spriteImg.complete || !spriteImg.naturalWidth) return;
-      const drawW = TROOP_BUILDING_SPRITE_WORLD_WIDTH;
+      const drawW = worldW;
       const drawH = drawW * (spriteImg.naturalHeight / spriteImg.naturalWidth);
       tiles.forEach((t) => {
         const count = t[tileField] || 0;
@@ -652,11 +674,13 @@
         const cx = w.x * BLOCK_PX;
         const baseY = w.y * BLOCK_PX; // el sprite se ancla por su base aqui, igual que el resto de decoracion
 
-        const sprite = WONDER_SPRITES[w.key];
-        if (sprite && sprite.complete && sprite.naturalWidth) {
-          const sw = WONDER_SPRITE_WORLD_W;
-          const sh = sw * (sprite.naturalHeight / sprite.naturalWidth);
-          ctx.drawImage(sprite, cx - sw / 2, baseY - sh, sw, sh);
+        const spec = WONDER_SPRITES[w.key];
+        if (spec) {
+          const [sprite, sw] = spec;
+          if (sprite.complete && sprite.naturalWidth) {
+            const sh = sw * (sprite.naturalHeight / sprite.naturalWidth);
+            ctx.drawImage(sprite, cx - sw / 2, baseY - sh, sw, sh);
+          }
         }
 
         const bonusIcon = w.bonusType === 'industry' ? '⚒️' : '🛡️';
@@ -1067,14 +1091,14 @@
   // mas estrecho encaja sin cambiar este archivo.
   // ===========================================================================
   const DECOR_SPRITES = {
-    castle: { worldWidth: 150 },
-    port: { worldWidth: 115 },
-    village: { worldWidth: 90 },
-    tree: { worldWidth: 55 },
-    'ship-small': { worldWidth: 95 },
-    'ship-big': { worldWidth: 140 },
-    whale: { worldWidth: 130 },
-    kraken: { worldWidth: 320 },
+    castle: { worldWidth: spriteSize('castle', 150) },
+    port: { worldWidth: spriteSize('port', 115) },
+    village: { worldWidth: spriteSize('village', 90) },
+    tree: { worldWidth: spriteSize('tree', 55) },
+    'ship-small': { worldWidth: spriteSize('ship-small', 95) },
+    'ship-big': { worldWidth: spriteSize('ship-big', 140) },
+    whale: { worldWidth: spriteSize('whale', 130) },
+    kraken: { worldWidth: spriteSize('kraken', 320) },
   };
 
   // Por debajo de esta escala de mapa no se dibuja decoracion: a vista de
@@ -1115,15 +1139,13 @@
   // mueve cada caminante (ver stepWalkers()). El ancho/alto van en pixeles de
   // MUNDO — igual que DECOR_SPRITES — porque esta capa SI escala con el zoom.
   const soldierImages = { right: loadSprite('soldier-right'), left: loadSprite('soldier-left') };
-  const WALKER_SPRITE_WORLD_W = 22;
-  const WALKER_SPRITE_WORLD_H = 36;
+  const [WALKER_SPRITE_WORLD_W, WALKER_SPRITE_WORLD_H] = spriteSizeWH('soldier', 22, 36);
 
   // Caballero (mejora de industria nivel 1/3, ver docs/ACCIONES.md sección
   // 16): mismo mecanismo de sprite por sentido que el soldado, pero con su
   // propio par de imágenes y "algo más grande, no mucho" como se pidió.
   const knightImages = { right: loadSprite('knight-right'), left: loadSprite('knight-left') };
-  const KNIGHT_SPRITE_WORLD_W = 26;
-  const KNIGHT_SPRITE_WORLD_H = 42;
+  const [KNIGHT_SPRITE_WORLD_W, KNIGHT_SPRITE_WORLD_H] = spriteSizeWH('knight', 26, 42);
   // Se mueve mas rapido que un soldado a pie ("simula un caballo") — se
   // aplica como multiplicador sobre las dos velocidades normales (paseo y
   // marcha) en vez de un numero fijo, para que la diferencia se note en los
@@ -1143,8 +1165,8 @@
   // caballo), igual que el caballero de verdad es mas grande que el soldado.
   const archerTroopImg = loadSprite('troop-archer');
   const cavalryTroopImg = loadSprite('troop-cavalry');
-  const TROOP_SPRITE_WORLD_W = 12;
-  const CAVALRY_TROOP_SPRITE_WORLD_W = 14;
+  const TROOP_SPRITE_WORLD_W = spriteSize('troop', 12);
+  const CAVALRY_TROOP_SPRITE_WORLD_W = spriteSize('troop-cavalry', 14);
   // Cono de posiciones detras del jugador donde se colocan sus tropas (ver
   // syncFollowerCone()/stepFollowerCone() mas abajo) — reemplaza a la
   // antigua fila india que seguia el rastro exacto del jugador, "poco
@@ -1163,33 +1185,38 @@
   // createObjectLayer. Mismo tamaño que `guardia` (la guarnicion a la que
   // sustituyen al conquistar).
   const aldeanoSpriteImg = loadSprite('aldeano');
-  const ALDEANO_SPRITE_WORLD_W = 13;
+  const ALDEANO_SPRITE_WORLD_W = spriteSize('aldeano', 13);
   // Guarnición neutral paseando (castillo/aldea/puerto SIN conquistar,
   // sección 23): sprite PROPIO, distinto del de las tropas del propio
   // jugador (antes reutilizaban troop/troop-archer/troop-cavalry, lo que
   // impedía re-skinearlos por separado como "bárbaros" — se pidió
-  // expresamente separarlos). Mismos tamaños que su equivalente de tropa.
+  // expresamente separarlos). Tamaños por defecto iguales a su equivalente
+  // de tropa, pero con su propia entrada en spriteSizes.js por si hace
+  // falta ajustarlos por separado.
   const barbaroImg = loadSprite('barbaro');
   const barbaroArcherImg = loadSprite('barbaro-arquero');
   const barbaroCavalryImg = loadSprite('barbaro-caballero');
+  const BARBARO_SPRITE_WORLD_W = spriteSize('barbaro', 12);
+  const BARBARO_ARQUERO_SPRITE_WORLD_W = spriteSize('barbaro-arquero', 12);
+  const BARBARO_CABALLERO_SPRITE_WORLD_W = spriteSize('barbaro-caballero', 14);
   // Capital de faccion: placeholder gris que se tiñe del color de la
   // faccion en tiempo real (ver drawTintedSprite), igual que el marcador de
   // jugador.
   const capitalSpriteImg = loadSprite('capital');
-  const CAPITAL_SPRITE_WORLD_W = 60;
+  const CAPITAL_SPRITE_WORLD_W = spriteSize('capital', 60);
   // Dungeon (ver docs/ACCIONES.md sección 27, !dungeon): guarnición de
   // orcos (más grandes) y goblins (más pequeños) paseando alrededor,
   // número SIEMPRE fijo (2 orcos + 4 goblins) a diferencia de castillo/
   // aldea/puerto (que escalan con la guarnición real).
   const orcoImg = loadSprite('orco');
   const goblinImg = loadSprite('goblin');
-  const ORCO_SPRITE_WORLD_W = 18;
-  const GOBLIN_SPRITE_WORLD_W = 11;
+  const ORCO_SPRITE_WORLD_W = spriteSize('orco', 18);
+  const GOBLIN_SPRITE_WORLD_W = spriteSize('goblin', 11);
   // Trofeo por derrotar un dungeon: una estatua junto a la capital de la
   // facción que lo mató, con sus propios aldeanos alrededor (igual que la
   // capital) — ver desiredSiteSpecs().
   const estatuaImg = loadSprite('estatua');
-  const ESTATUA_SPRITE_WORLD_W = 34;
+  const ESTATUA_SPRITE_WORLD_W = spriteSize('estatua', 34);
   const ESTATUA_RING_RADIUS = 75; // px de mundo de la capital, fuera de su sprite (60px de ancho)
   const ESTATUA_ANGLE_STEP = (137.5 * Math.PI) / 180; // angulo dorado: buen reparto en anillo sea cual sea el numero de estatuas
   // Trofeo por derrotar un boss (ver docs/ACCIONES.md sección 31, !boss):
@@ -1197,7 +1224,7 @@
   // que la estatua de arriba) pero en un anillo más ancho para no
   // solaparse si la facción tiene trofeos de los dos tipos a la vez.
   const museoImg = loadSprite('museo');
-  const MUSEO_SPRITE_WORLD_W = 40;
+  const MUSEO_SPRITE_WORLD_W = spriteSize('museo', 40);
   const MUSEO_RING_RADIUS = ESTATUA_RING_RADIUS + 40;
   // Castillo especial del nivel 4 de industria (ver rules/industry.js): UNA
   // sola vez por facción, a un lado fijo de la capital (no en anillo como
@@ -1205,17 +1232,17 @@
   // propias tropas especiales paseando alrededor y SIN aldeanos.
   const castilloEspecialImg = loadSprite('castillo-especial');
   const tropaEspecialImg = loadSprite('tropa-especial');
-  const CASTILLO_ESPECIAL_SPRITE_WORLD_W = 70;
+  const CASTILLO_ESPECIAL_SPRITE_WORLD_W = spriteSize('castillo-especial', 70);
   const CASTILLO_ESPECIAL_OFFSET_X = 95; // px de mundo, a la derecha de la capital
-  const TROPA_ESPECIAL_SPRITE_WORLD_W = 14;
+  const TROPA_ESPECIAL_SPRITE_WORLD_W = spriteSize('tropa-especial', 14);
   // Bosses (ver docs/ACCIONES.md sección 31, !boss): 3 sprites fijos, uno
   // por tipo — "grandotes", bastante más anchos que la vaca (40) o un
   // troop. Su ataque/defensa (5-10, sorteado por instancia) se pinta encima
   // de la cabeza, ver drawBossWalkers().
   const BOSS_SPRITES = {
-    ogro: [loadSprite('ogro'), 62],
-    troll: [loadSprite('troll'), 54],
-    behemot: [loadSprite('behemot'), 70],
+    ogro: [loadSprite('ogro'), spriteSize('ogro', 62)],
+    troll: [loadSprite('troll'), spriteSize('troll', 54)],
+    behemot: [loadSprite('behemot'), spriteSize('behemot', 70)],
   };
   // Radio de paseo (px de mundo) alrededor de un castillo/aldea/puerto/
   // capital para su guarnicion/aldeanos — mucho mas pequeño que el de un
@@ -1972,9 +1999,9 @@
     }
 
     const SITE_WALKER_SPRITES = {
-      barbaro: [barbaroImg, TROOP_SPRITE_WORLD_W],
-      'barbaro-arquero': [barbaroArcherImg, TROOP_SPRITE_WORLD_W],
-      'barbaro-caballero': [barbaroCavalryImg, CAVALRY_TROOP_SPRITE_WORLD_W],
+      barbaro: [barbaroImg, BARBARO_SPRITE_WORLD_W],
+      'barbaro-arquero': [barbaroArcherImg, BARBARO_ARQUERO_SPRITE_WORLD_W],
+      'barbaro-caballero': [barbaroCavalryImg, BARBARO_CABALLERO_SPRITE_WORLD_W],
       aldeano: [aldeanoSpriteImg, ALDEANO_SPRITE_WORLD_W],
       orco: [orcoImg, ORCO_SPRITE_WORLD_W],
       goblin: [goblinImg, GOBLIN_SPRITE_WORLD_W],
@@ -2149,8 +2176,8 @@
     const COW_FOLLOWER_LAG_MS = 650; // "a poco espacio": cuanto por detras va el acompañante
     const cowFollowerImg = loadSprite('cow-follower');
     const cowImages = { right: loadSprite('cow-right'), left: loadSprite('cow-left') };
-    const COW_SPRITE_WORLD_W = 34;
-    const COW_FOLLOWER_SPRITE_WORLD_W = 15;
+    const COW_SPRITE_WORLD_W = spriteSize('cow', 34);
+    const COW_FOLLOWER_SPRITE_WORLD_W = spriteSize('cow-follower', 15);
 
     /** ¿Hay tierra en este punto del mundo? (cualquier facción o neutral, da igual). */
     function isLandAtWorld(wx, wy) {
