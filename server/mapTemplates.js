@@ -47,6 +47,10 @@
 const { shuffle } = require('./rules/shared');
 const worldLandMaskMod = require('./worldLandMask');
 const iberiaLandMaskMod = require('./iberiaLandMask');
+// Cuanta guarnicion trae castillo/aldea/puerto/dungeon de fabrica y cuanto
+// pega/aguanta un boss — unico sitio a tocar para ajustar balance rapido sin
+// tener que pedirlo, ver server/balanceConfig.js.
+const { STRUCTURE_GARRISON_RANGES, DUNGEON_GARRISON_RANGE, BOSS_POWER_RANGE } = require('./balanceConfig');
 
 const OCEAN = -1; // sentinel en cellTileIds: la celda es oceano, no pertenece a ningun tile
 
@@ -209,6 +213,14 @@ function generateMap({ tileCount, factionCount, mode, mapKey, dungeonsEnabled, w
       leviesCount: 0,
       archeryCount: 0,
       cavalryCount: 0,
+      // En que ronda se construyó cada edificio de tropa de esta casilla
+      // (uno por unidad de leviesCount/archeryCount/cavalryCount, mismo
+      // orden) — solo produce tropas las 3 rondas siguientes a SU
+      // construcción (ver rules/troopBuildings.js, PRODUCTION_ROUNDS), así
+      // que hace falta saber la edad de cada uno, no solo cuántos hay.
+      leviesRounds: [],
+      archeryRounds: [],
+      cavalryRounds: [],
       // Torres (!torre, ver rules/towers.js sección 28): mismo mecanismo
       // que industryCount, vive en la CASILLA. towerCount = terminadas
       // (dan +0.5 de defensa pasiva cada una); towerBuildingCount = en
@@ -341,10 +353,16 @@ const BOSS_TYPES = [
   { key: 'troll' },
   { key: 'behemot' },
 ];
-const BOSS_POWER_RANGE = [5, 10];
 // Separación mínima de un boss — igual de landmark-poco-frecuente que un
 // dungeon/maravilla (1-3 por partida), mismo criterio de tamaño.
 const BOSS_MIN_GAP = 45;
+
+// Easter eggs: dos placeholders decorativos fijos, uno de cada, SIEMPRE en
+// cualquier partida nueva (no dependen de ningún interruptor del admin, a
+// diferencia de dungeon/maravilla/boss) — puro decorado sin efecto de juego,
+// el streamer los sustituirá por su propio arte.
+const EASTER_EGG_TYPES = ['easteregg-ovni', 'easteregg-yeti'];
+const EASTER_EGG_MIN_GAP = 45;
 
 // Cuantos intentos como mucho por elemento antes de rendirse y colocarlo sin
 // respetar la separacion minima. Evita que un mapa con poca costa (o un
@@ -495,6 +513,24 @@ function placeDecorations(cellTileIds, cols, rows, tileCount, dungeonCount = 0, 
     place(`boss:${key}`, best.x, best.y, BOSS_MIN_GAP);
   }
 
+  // 1.8) Easter eggs (dos, fijos, SIEMPRE — a diferencia de dungeon/
+  // maravilla/boss no dependen de ningún interruptor del admin): uno de
+  // cada tipo en tierra al azar, nunca en agua, mismo anti-solape global de
+  // siempre. Puro decorado sin ningún efecto de juego (como un árbol o la
+  // vaca) — el streamer los sustituirá por su propio arte más adelante.
+  for (const type of EASTER_EGG_TYPES) {
+    let best = null;
+    for (let attempt = 0; attempt < DECOR_MAX_TRIES; attempt++) {
+      const x = Math.floor(Math.random() * cols);
+      const y = Math.floor(Math.random() * rows);
+      if (!matchesTerrain('land', x, y)) continue;
+      best = { x, y };
+      if (!overlapsAny(x, y, EASTER_EGG_MIN_GAP)) break;
+    }
+    if (!best) continue; // mapa sin tierra libre (rarisimo): se deja fuera
+    place(type, best.x, best.y, EASTER_EGG_MIN_GAP);
+  }
+
   // 2) Resto de decoración (paisaje, conteo fijo por partida) — mismo
   // anti-solape global de arriba (placedAll ya tiene dentro los
   // castillos/aldeas/puertos/dungeons recién colocados).
@@ -524,24 +560,13 @@ function placeDecorations(cellTileIds, cols, rows, tileCount, dungeonCount = 0, 
 // y una guarnición neutral inicial al azar, distinta por partida ("al
 // colocarse cada partida aleatorio tiene más gracia", tal y como se pidió).
 //
-// Rango [min, max] de cada tropa de guarnición, AMBOS INCLUSIVE, por tipo de
-// estructura. La guarnición usa las MISMAS constantes de bonus de combate que
-// las tropas del jugador (AI_TROOP_COMBAT_BONUS/ARCHER_*/CAVALRY_* en
-// rules/shared.js) — aquí solo se decide CUÁNTAS tropas de cada tipo le
-// tocan a cada estructura, no su fuerza (esa la calcula rules/structures.js).
-const STRUCTURE_GARRISON_RANGES = {
-  castle: { aiTroops: [5, 10], archerTroops: [0, 2], cavalryTroops: [0, 2] },
-  village: { aiTroops: [3, 15], archerTroops: [0, 0], cavalryTroops: [0, 0] },
-  port: { aiTroops: [6, 12], archerTroops: [0, 5], cavalryTroops: [0, 0] },
-};
-
-// Guarnición de un dungeon (orcos/goblins, ver !dungeon sección 27) — un
-// tipo de unidad totalmente aparte de aiTroops/archerTroops/cavalryTroops
-// (ORC_COMBAT_BONUS/GOBLIN_COMBAT_BONUS en rules/shared.js). El número que
-// PASEA alrededor del dungeon es siempre fijo (2 orcos + 4 goblins, ver
-// desiredSiteSpecs() en mapRenderer.js) pero la fuerza de combate real
-// varía un poco por partida, centrada en esos mismos números.
-const DUNGEON_GARRISON_RANGE = { orcCount: [2, 3], goblinCount: [3, 5] };
+// Rangos de guarnición de castillo/aldea/puerto y de dungeon: ver
+// server/balanceConfig.js (STRUCTURE_GARRISON_RANGES/DUNGEON_GARRISON_RANGE,
+// importados arriba) — la guarnición usa las MISMAS constantes de bonus de
+// combate que las tropas del jugador (AI_TROOP_COMBAT_BONUS/ARCHER_*/
+// CAVALRY_* en rules/shared.js, ORC_COMBAT_BONUS/GOBLIN_COMBAT_BONUS para
+// dungeon), aquí solo se decide CUÁNTAS tropas de cada tipo le tocan a cada
+// estructura, no su fuerza (esa la calcula rules/structures.js).
 
 function randomInRange([min, max]) {
   return min + Math.floor(Math.random() * (max - min + 1));

@@ -1,10 +1,9 @@
 'use strict';
 
 const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
-const { sumRandomPower, applyCasualties, applyTroopCascadeDamage } = require('./shared');
+const { sumRandomPower, applyTroopCascadeDamage } = require('./shared');
 const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
 const { towerDefenseBonus } = require('./towers');
-const { specialTroopCombatBonus } = require('./industry');
 const { wonderDefenseBonus } = require('./wonders');
 const { museumDefenseBonus } = require('./bosses');
 
@@ -23,15 +22,22 @@ const { museumDefenseBonus } = require('./bosses');
  * combatModifier) al final del calculo correspondiente:
  * - Las torres (`!torre`, ver rules/towers.js) dan +0.5 de defensa pasiva
  *   CADA UNA, siempre, aunque nadie vote `!defender` esa ronda.
- * - Las tropas especiales del castillo de nivel 4 de industria (ver
- *   rules/industry.js) dan +0.4 fijo tanto atacando como defendiendo, POR
- *   FACCION (cada facción atacante suma solo su propio bonus al ataque
- *   conjunto, no el de las demas que ataquen a la vez al mismo objetivo).
  * - Las maravillas de tipo 'defense' (Ruinas de Numancia/Kebab/Contrato
  *   indefinido, ver rules/wonders.js) dan +4 de defensa pasiva cada una
  *   MIENTRAS la facción posea la casilla en la que salieron.
  * - Los museos (trofeo de `!boss`, ver rules/bosses.js) dan +2 de defensa
  *   pasiva cada uno, sin tope.
+ *
+ * Combate JUGADOR contra JUGADOR (esta función — !dungeon/!boss/!conquista
+ * son combates aparte contra guarnición neutral, con su propia resolución en
+ * rules/structures.js/rules/bosses.js, sin tocar): un jugador NUNCA muere
+ * por quedarse sin tropas ni en ataque ni en defensa — el daño que sobra
+ * tras la cascada de tropas (applyTroopCascadeDamage) simplemente se
+ * descarta, no mata a nadie. Que el atacante GANE la comparación de poder no
+ * basta por sí solo para conquistar: solo se lleva la casilla si además deja
+ * a los defensores (los que votaron `!defender`) sin NINGUNA tropa — si
+ * alguno conserva aunque sea una, la defensa aguanta y el territorio no
+ * cambia de dueño, aunque haya ganado el cálculo de poder por poco.
  */
 function resolveCombat(match, context) {
   const incomingByDefender = groupIncomingAttacks(match, context);
@@ -44,33 +50,43 @@ function resolveCombat(match, context) {
     const totalAttackers = attackerUserIds.length;
     const defenderUserIds = context.votesByFactionAndType.get(defenderNumber)[ACTION_DEFEND];
 
-    // Cada tirada depende de QUIEN vota (soldado o caballero, ver rules/shared.js),
-    // no solo de cuantos son.
-    const attackersSpecialBonus = attackers.reduce(
-      (sum, a) => sum + specialTroopCombatBonus(factionByNumber(match, a.factionNumber)),
-      0
-    );
+    // Cada tirada depende de QUIEN vota (soldado o caballero, ver
+    // rules/shared.js) — incluida su tropa especial si la lleva, ya integrada
+    // en sumRandomPower() como un tipo de tropa más (ver SPECIAL_TROOP_COMBAT_BONUS):
+    // solo cuenta si ESE jugador vota !ataque/!defender, igual que aiTroops/
+    // archerTroops/cavalryTroops.
     const attackPower =
-      sumRandomPower(match, attackerUserIds, 'attack') * combatModifier(match, defenderNumber, 'attack') +
-      attackersSpecialBonus;
+      sumRandomPower(match, attackerUserIds, 'attack') * combatModifier(match, defenderNumber, 'attack');
     const defensePower =
       sumRandomPower(match, defenderUserIds, 'defense') * combatModifier(match, defenderNumber, 'defense') +
       towerDefenseBonus(match, defenderFaction) +
-      specialTroopCombatBonus(defenderFaction) +
       wonderDefenseBonus(match, defenderFaction) +
       museumDefenseBonus(defenderFaction);
 
     if (attackPower > defensePower) {
-      // Gana el ataque: baja la faccion defensora y conquista territorio.
-      // El daño sobrante se reparte primero entre las tropas de IA de los
-      // que votaron !defender (caballero->arquero->leva, ver
-      // applyTroopCascadeDamage en rules/shared.js) antes de matar
-      // jugadores — solo lo que sobra de esa cascada llega a
-      // applyCasualties().
+      // Gana el ataque: el daño se reparte entre las tropas de los que
+      // votaron !defender (caballero->arquero->leva->especial, ver
+      // applyTroopCascadeDamage en rules/shared.js) — lo que sobra de esa
+      // cascada se DESCARTA (ya no mata jugadores, ver cabecera de este
+      // archivo). Solo se conquista si eso deja a los defensores sin
+      // NINGUNA tropa (o si no defendió nadie): si a alguno le queda
+      // aunque sea una, la defensa aguanta pese a haber "ganado" el
+      // cálculo de poder.
       const winningAttacker = attackers.sort((a, b) => b.userIds.length - a.userIds.length)[0];
       const rawDamage = Math.round(attackPower - defensePower);
-      const remainingDamage = applyTroopCascadeDamage(match, defenderUserIds, rawDamage);
-      applyCasualties(match, context, defenderNumber, remainingDamage, winningAttacker.factionNumber);
+      applyTroopCascadeDamage(match, defenderUserIds, rawDamage);
+      const defendersWiped = defenderUserIds.length === 0 || totalRemainingTroops(match, defenderUserIds) === 0;
+
+      if (!defendersWiped) {
+        for (const attacker of attackers) {
+          context.roundEvents.combats.push({
+            attackerFactionNumber: attacker.factionNumber,
+            defenderFactionNumber: defenderNumber,
+            outcome: 'defender_held',
+          });
+        }
+        continue;
+      }
 
       const tile = pickBorderTileToConquer(match, defenderNumber, winningAttacker.factionNumber);
       if (tile) {
@@ -83,9 +99,10 @@ function resolveCombat(match, context) {
         });
       }
 
-      // Si esta bajada de tropas deja a la faccion defensora sin miembros vivos, el resto de su
-      // territorio (la casilla de arriba ya no cuenta, se la quedo el atacante) pasa a neutral de
-      // golpe en vez de quedarse plantado sin dueño util — ver docs/ACCIONES.md seccion 6.
+      // Un jugador ya no muere aquí (ver cabecera), así que esto ya no
+      // dispara nunca la eliminación de la facción por esta vía — se deja
+      // igualmente como red de seguridad ante cualquier otra causa de
+      // muerte que haya podido darse esta misma ronda.
       checkFactionElimination(match, context, defenderNumber, winningAttacker.factionNumber);
 
       match.lastAttackerOf[defenderNumber] = winningAttacker.factionNumber;
@@ -97,16 +114,14 @@ function resolveCombat(match, context) {
         });
       }
     } else {
-      // Empate o gana la defensa: las facciones atacantes sufren bajas
-      // proporcionales a su aporte — igual que arriba, primero cascada de
-      // tropas de los votantes de ESE ataque, solo el resto mata jugadores.
+      // Empate o gana la defensa: las facciones atacantes pierden tropas
+      // proporcionales a su aporte (cascada igual que arriba) — el sobrante
+      // se descarta, ya no mata jugadores.
       const excess = Math.round(defensePower - attackPower);
       for (const attacker of attackers) {
         const share = attacker.userIds.length / totalAttackers;
         const rawDamage = Math.round(excess * share);
-        const remainingDamage = applyTroopCascadeDamage(match, attacker.userIds, rawDamage);
-        applyCasualties(match, context, attacker.factionNumber, remainingDamage, defenderNumber);
-        checkFactionElimination(match, context, attacker.factionNumber, defenderNumber);
+        applyTroopCascadeDamage(match, attacker.userIds, rawDamage);
         context.roundEvents.combats.push({
           attackerFactionNumber: attacker.factionNumber,
           defenderFactionNumber: defenderNumber,
@@ -120,6 +135,17 @@ function resolveCombat(match, context) {
   for (const faction of match.factions) {
     if (!incomingByDefender.has(faction.number)) match.lastAttackerOf[faction.number] = null;
   }
+}
+
+/** Tropas (los 4 tipos juntos) que quedan entre TODOS los `userIds` dados, sumadas. */
+function totalRemainingTroops(match, userIds) {
+  let total = 0;
+  for (const userId of userIds) {
+    const player = match.players.get(userId);
+    if (!player) continue;
+    total += (player.aiTroops || 0) + (player.archerTroops || 0) + (player.cavalryTroops || 0) + (player.specialTroops || 0);
+  }
+  return total;
 }
 
 function groupIncomingAttacks(match, context) {

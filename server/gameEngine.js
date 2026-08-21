@@ -15,12 +15,21 @@ const { generateMap, DEFAULT_MAP_KEY } = require('./mapTemplates');
 const { resolveAlliances } = require('./rules/alliances');
 const { resolveSpecialAbilities } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
-const { resolveIndustry, resolveIndustryImmunity, industryThresholdsFor } = require('./rules/industry');
+const { resolveIndustry, industryThresholdsFor } = require('./rules/industry');
 const { resolveAiTroops } = require('./rules/troops');
 const { resolveTroopBuildings } = require('./rules/troopBuildings');
 const { resolveConquista, resolveDungeon, structureAttackPower, structureDefensePower } = require('./rules/structures');
 const { resolveTowers, towerDefenseBonus } = require('./rules/towers');
 const { resolveBoss, museumDefenseBonus } = require('./rules/bosses');
+const { wonderDefenseBonus } = require('./rules/wonders');
+const {
+  AI_TROOP_COMBAT_BONUS,
+  ARCHER_ATTACK_BONUS,
+  ARCHER_DEFENSE_BONUS,
+  CAVALRY_ATTACK_BONUS,
+  CAVALRY_DEFENSE_BONUS,
+  SPECIAL_TROOP_COMBAT_BONUS,
+} = require('./rules/shared');
 const { resolveExpansion } = require('./rules/expansion');
 const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
 
@@ -92,8 +101,12 @@ function createMatch(config) {
     industryTierIndex: 0,
     industryPenaltyNextRound: false, // armado por Sabotaje esta ronda, se activa en la siguiente
     industryPenaltyActive: false, // Sabotaje activo ESTA ronda (armado la ronda anterior)
-    attackImmuneNextRound: false, // armado por la mejora de industria nivel 4 (tregua), se activa en la siguiente
-    attackImmuneActive: false, // tregua activa ESTA ronda (armada la ronda anterior) — ver resolveIndustryImmunity()
+    // Iglesia (nivel 3 de industria, ver rules/industry.js): efecto
+    // permanente en cuanto se pone a true, sin fase de "armado" — +50 al
+    // limite de tropas de cada jugador de la faccion (ver
+    // effectiveTroopLimit() en rules/shared.js) y el cliente pinta el
+    // edificio junto a la capital.
+    churchBuilt: false,
     specialEnabled: !!f.specialEnabled,
     specialAbility: f.specialAbility || null,
     specialUsed: false,
@@ -114,11 +127,12 @@ function createMatch(config) {
     // Castillo especial del nivel 4 de industria (ver rules/industry.js):
     // `specialCastleBuilt` se pone a true la ronda en que se desbloquea (el
     // cliente lo usa para saber si ya hay que pintar el castillo junto a la
-    // capital) y `specialTroopCount` son sus tropas especiales AHORA MISMO
-    // (2 al construirse, +1/ronda despues, tope 10 — ver
-    // SPECIAL_TROOP_CAP), cada una aportando 0.4 fijo de ataque y defensa.
+    // capital). Las tropas especiales que produce (2 al construirse, +1/ronda
+    // despues, tope 10 por facción) ya NO se guardan aquí — se reparten
+    // directas a `player.specialTroops` (ver rules/industry.js
+    // grantSpecialTroops()), son tropas normales del jugador de ahí en
+    // adelante.
     specialCastleBuilt: false,
-    specialTroopCount: 0,
     // Museos (trofeo de `!boss`, ver rules/bosses.js sección 31): uno por
     // cada boss derrotado, sin tope — cada uno da +1 leva/ronda, +1
     // industria/ronda, +2 de defensa base, acumulables. Igual mecanismo
@@ -324,6 +338,17 @@ function joinFaction(userId, username, factionNumber) {
     aiTroops: existing ? existing.aiTroops : 0,
     archerTroops: existing ? existing.archerTroops : 0,
     cavalryTroops: existing ? existing.cavalryTroops : 0,
+    // Tropa especial del castillo del nivel 4 de industria (ver
+    // rules/industry.js grantSpecialTroops()) — tropa normal del jugador de
+    // ahí en adelante: sigue en su cono de acompañantes, cuenta para su
+    // límite de tropas, muere en combate como cualquier otra (ver
+    // SPECIAL_TROOP_COMBAT_BONUS en rules/shared.js).
+    specialTroops: existing ? existing.specialTroops : 0,
+    // Cuantas tropas (de los 4 tipos juntos) ganó o perdió este jugador la
+    // ULTIMA ronda resuelta, sea por combate o por reclutamiento — ver
+    // snapshot antes/después en resolveRound(). El cliente lo pinta en verde
+    // (+x) o rojo (-x) encima del jugador, junto a su HUD de poder.
+    troopDeltaLastRound: existing ? existing.troopDeltaLastRound : 0,
     diedOnRound: null,
   });
   notifyStateChange();
@@ -409,8 +434,19 @@ function closeActionPhase() {
   resolveRound();
 }
 
+/** Total de tropas de IA (los 4 tipos juntos) que lleva un jugador ahora mismo. */
+function totalAiTroops(player) {
+  return (player.aiTroops || 0) + (player.archerTroops || 0) + (player.cavalryTroops || 0) + (player.specialTroops || 0);
+}
+
 function resolveRound() {
   const context = tallyActions();
+  // Foto de cuantas tropas lleva cada uno ANTES de resolver nada de la
+  // ronda (combate, reclutamiento pasivo, !levas/!arqueros/!caballeros...)
+  // para poder calcular troopDeltaLastRound al final por diferencia — ver
+  // docs/ACCIONES.md, "HUD de poder por jugador".
+  const troopsBefore = new Map();
+  for (const [userId, player] of match.players) troopsBefore.set(userId, totalAiTroops(player));
 
   // El Sabotaje lanzado en una ronda penaliza la industria de la RONDA
   // SIGUIENTE (ver docs/GDD seccion 11 "Sabotaje"), no la ronda en que se
@@ -419,22 +455,12 @@ function resolveRound() {
   // "activa" aqui lo que quedo armado la ronda anterior, y solo despues se
   // deja que resolveSpecialAbilities() pueda armar un sabotaje nuevo para la
   // ronda que viene.
-  // Misma logica para la tregua de la mejora de industria nivel 4: se arma
-  // en la ronda que se desbloquea (attackImmuneNextRound) y se activa aqui,
-  // al empezar a resolver la ronda SIGUIENTE — ver 'tregua' en
-  // rules/industry.js y resolveIndustryImmunity() mas abajo.
   for (const faction of match.factions) {
     faction.industryPenaltyActive = faction.industryPenaltyNextRound;
     faction.industryPenaltyNextRound = false;
-    faction.attackImmuneActive = faction.attackImmuneNextRound;
-    faction.attackImmuneNextRound = false;
   }
 
   resolveAlliances(match, context);
-  // Anula los ataques contra cualquier faccion con la tregua activa esta
-  // ronda — independiente de resolveAlliances() (esa depende de
-  // `alliancesEnabled`; la tregua es automatica y no).
-  resolveIndustryImmunity(match, context);
   resolveSpecialAbilities(match, context);
   context.allInactiveUserIds = new Set([...context.inactiveUserIds, ...context.forceInactive]);
   resolveCombat(match, context);
@@ -446,6 +472,10 @@ function resolveRound() {
   resolveAiTroops(match);
   resolveTroopBuildings(match, context);
   resolveExpansion(match, context);
+
+  for (const [userId, player] of match.players) {
+    player.troopDeltaLastRound = totalAiTroops(player) - (troopsBefore.get(userId) || 0);
+  }
 
   match.summaryBlocks = buildRoundSummary(context);
   enterTransition('summary', match.round, () => {
@@ -668,19 +698,29 @@ function getPublicState() {
       capitalTileId: f.capitalTileId,
       capitalVillagerCount: f.capitalVillagerCount,
       dungeonTrophies: f.dungeonTrophies,
+      // Iglesia del nivel 3 de industria (ver rules/industry.js): el
+      // cliente pinta el edificio junto a la capital en cuanto es true, con
+      // el mismo anillo anti-solape que estatua/museo. El +50 al limite de
+      // tropas ya esta aplicado del lado del servidor (ver
+      // effectiveTroopLimit() en rules/shared.js), esto es solo la señal
+      // visual.
+      churchBuilt: f.churchBuilt,
       // Castillo especial del nivel 4 de industria (ver rules/industry.js):
       // el cliente pinta el edificio junto a la capital en cuanto
-      // `specialCastleBuilt` es true, con `specialTroopCount` tropas
-      // especiales paseando alrededor (sin aldeanos, a diferencia de la
-      // capital y de los trofeos de dungeon).
+      // `specialCastleBuilt` es true — SIN tropas propias alrededor (ya no
+      // son decorativas: siguen a su jugador, ver player.specialTroops más
+      // abajo).
       specialCastleBuilt: f.specialCastleBuilt,
-      specialTroopCount: f.specialTroopCount,
       // Defensa pasiva TOTAL que dan las torres terminadas de esta faccion
       // (0.5 cada una, ver rules/towers.js) — se suma SIEMPRE al calculo de
       // combate, aunque nadie vote !defender esta ronda (ver resolveCombat en
       // rules/combat.js). El cliente la pinta junto a la capital como el
       // resto de stats de defensa.
       towerDefenseBonus: towerDefenseBonus(match, f),
+      // Maravillas de tipo 'defense' (ver rules/wonders.js sección 30): igual
+      // criterio que towerDefenseBonus arriba — se suma en vivo a partir de
+      // qué maravillas posee la facción AHORA MISMO.
+      wonderDefenseBonus: wonderDefenseBonus(match, f),
       // Museos (trofeo de `!boss`, ver rules/bosses.js sección 31): cuantos
       // tiene esta facción (`bossTrophies`, uno por boss derrotado) y su
       // bono de defensa pasiva TOTAL (+2 cada uno, se suma igual que
@@ -803,6 +843,19 @@ function getPublicState() {
         aiTroops: p.aiTroops || 0,
         archerTroops: p.archerTroops || 0,
         cavalryTroops: p.cavalryTroops || 0,
+        // Tropa especial del castillo del nivel 4 de industria (ver
+        // rules/industry.js) — sigue al jugador como cualquier otra, con su
+        // propio sprite ('tropa-especial').
+        specialTroops: p.specialTroops || 0,
+        troopDeltaLastRound: p.troopDeltaLastRound || 0,
+        // Poder de ataque/defensa que aportan SUS tropas ahora mismo — la
+        // misma cuenta que hace sumRandomPower() en rules/shared.js para el
+        // bonus FIJO por tropa (sin la tirada al azar del soldado/caballero
+        // en sí, que solo existe en el instante de un combate real). El
+        // cliente lo pinta encima de su cabeza (HUD de poder), ver
+        // public/mapRenderer.js.
+        attackPower: AI_TROOP_COMBAT_BONUS * (p.aiTroops || 0) + ARCHER_ATTACK_BONUS * (p.archerTroops || 0) + CAVALRY_ATTACK_BONUS * (p.cavalryTroops || 0) + SPECIAL_TROOP_COMBAT_BONUS * (p.specialTroops || 0),
+        defensePower: AI_TROOP_COMBAT_BONUS * (p.aiTroops || 0) + ARCHER_DEFENSE_BONUS * (p.archerTroops || 0) + CAVALRY_DEFENSE_BONUS * (p.cavalryTroops || 0) + SPECIAL_TROOP_COMBAT_BONUS * (p.specialTroops || 0),
         action: action ? action.type : null,
         actionTargetFactionNumber: action ? action.targetFactionNumber ?? null : null,
       };

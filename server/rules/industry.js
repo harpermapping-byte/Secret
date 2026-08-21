@@ -1,7 +1,8 @@
 'use strict';
 
-const { ACTION_INDUSTRY, ACTION_ATTACK } = require('../commands');
+const { ACTION_INDUSTRY } = require('../commands');
 const { shuffle } = require('./shared');
+const { distributeTroops } = require('./troops');
 const { wonderIndustryBonus } = require('./wonders');
 const { museumIndustryBonus } = require('./bosses');
 
@@ -25,8 +26,13 @@ const TIER1_KNIGHT_COUNT = 1;
 // de ataque/defensa FIJO que aporta cada una (simetrico, como un dungeon).
 const SPECIAL_CASTLE_INITIAL_TROOPS = 2;
 const SPECIAL_CASTLE_TROOPS_PER_ROUND = 1;
+// Tope por FACCIÓN (sumando lo que lleve cada jugador), no por jugador — a
+// diferencia de match.config.troopLimitPerPlayer. Las tropas especiales son
+// tropas normales y corrientes del jugador (ver rules/troops.js
+// distributeTroops()/totalTroops()) en cuanto se reparten: siguen a su
+// jugador, mueren en combate como cualquier otra, tal y como se pidió ("que
+// se vuelvan tropas del usuario, no que den vueltas alrededor").
 const SPECIAL_TROOP_CAP = 10;
-const SPECIAL_TROOP_COMBAT_BONUS = 0.4;
 
 /**
  * Las 4 mejoras, en orden fijo. `perPlayer` = industria acumulada necesaria
@@ -53,16 +59,20 @@ const SPECIAL_TROOP_COMBAT_BONUS = 0.4;
  * distintas: mide "como de bien coopera mi gente", no "cuanta gente tengo".
  *
  * Que hace cada nivel, TODO automatico (nadie vota nada para esto, se
- * dispara solo al cruzar el umbral). El nivel 3 ('caballeros_x3', 3 soldados
- * mas a caballero) se ha RETIRADO segun lo pedido — el nivel 4 de siempre
- * ('tregua') baja a ocupar su hueco (mismo umbral perPlayer=15 que tenia
- * antes 'caballeros_x3', el numero de la POSICION no cambia), y el nuevo
- * nivel 4 es 'castillo_especial':
+ * dispara solo al cruzar el umbral). El nivel 3 ya NO es 'tregua' (la
+ * alianza automatica de una ronda con todo el mundo) — se ha sustituido por
+ * 'iglesia' segun lo pedido, mismo umbral de siempre (perPlayer=15, el
+ * numero de la POSICION no cambia):
  *   1 'caballero'         -> 1 soldado al azar de la faccion pasa a caballero
  *   2 'industria_extra'   -> se levantan 3 edificios de industria de golpe
- *   3 'tregua'            -> nadie puede atacar a esta faccion la RONDA
- *                            SIGUIENTE (igual que una alianza automatica con
- *                            todo el mundo, ver resolveIndustryImmunity)
+ *   3 'iglesia'           -> aparece una iglesia junto a la capital de la
+ *                            faccion (placeholder decorativo, ver
+ *                            public/mapRenderer.js, mismo mecanismo de
+ *                            anillo que estatua/museo), que da +50 al
+ *                            limite de tropas de CADA jugador de esa
+ *                            faccion (ver CHURCH_TROOP_LIMIT_BONUS/
+ *                            effectiveTroopLimit() en rules/shared.js) —
+ *                            de forma permanente, mientras dure la partida.
  *   4 'castillo_especial' -> aparece un castillo cerca de la capital de la
  *                            faccion (placeholder decorativo, ver
  *                            public/mapRenderer.js), que trae 2 tropas
@@ -76,7 +86,7 @@ const SPECIAL_TROOP_COMBAT_BONUS = 0.4;
 const INDUSTRY_TIERS = [
   { key: 'caballero', perPlayer: 3 },
   { key: 'industria_extra', perPlayer: 8 },
-  { key: 'tregua', perPlayer: 15 },
+  { key: 'iglesia', perPlayer: 15 },
   { key: 'castillo_especial', perPlayer: 24 },
 ];
 
@@ -118,9 +128,7 @@ function resolveIndustry(match, context) {
     // se comprueba con el flag de ANTES de esta ronda, asi que la ronda en la
     // que se construye (mas abajo, en el bucle de niveles) solo da las 2
     // tropas iniciales — el +1/ronda empieza la ronda SIGUIENTE.
-    if (faction.specialCastleBuilt && faction.specialTroopCount < SPECIAL_TROOP_CAP) {
-      faction.specialTroopCount = Math.min(SPECIAL_TROOP_CAP, faction.specialTroopCount + SPECIAL_CASTLE_TROOPS_PER_ROUND);
-    }
+    if (faction.specialCastleBuilt) grantSpecialTroops(match, faction, SPECIAL_CASTLE_TROOPS_PER_ROUND);
 
     const passive = faction.territoryIds.length * PASSIVE_INDUSTRY_PER_TERRITORY;
     const fromBuildings = countFactionIndustries(match, faction) * INDUSTRY_PER_BUILDING;
@@ -173,6 +181,27 @@ function countFactionIndustries(match, faction) {
   return total;
 }
 
+/** Cuantas tropas especiales lleva la faccion entre TODOS sus jugadores ahora mismo. */
+function factionSpecialTroopTotal(match, faction) {
+  let total = 0;
+  for (const player of match.players.values()) {
+    if (player.factionNumber === faction.number) total += player.specialTroops || 0;
+  }
+  return total;
+}
+
+/**
+ * Reparte `amount` tropas especiales entre los jugadores de la facción (ver
+ * distributeTroops() en rules/troops.js — prioriza a quien tenga menos,
+ * respeta match.config.troopLimitPerPlayer), recortado al hueco que le
+ * quede al TOPE POR FACCIÓN (SPECIAL_TROOP_CAP) — a diferencia de
+ * aiTroops/archerTroops/cavalryTroops, que no tienen tope de facción.
+ */
+function grantSpecialTroops(match, faction, amount) {
+  const room = Math.max(0, SPECIAL_TROOP_CAP - factionSpecialTroopTotal(match, faction));
+  distributeTroops(match, faction, Math.min(amount, room), 'specialTroops');
+}
+
 function applyIndustryTier(match, context, faction, tierKey) {
   context.roundEvents.industryUnlocks.push({ factionNumber: faction.number, tierKey });
   switch (tierKey) {
@@ -182,15 +211,15 @@ function applyIndustryTier(match, context, faction, tierKey) {
       return buildIndustries(match, context, faction, TIER2_AUTO_INDUSTRIES);
     case 'castillo_especial':
       faction.specialCastleBuilt = true;
-      faction.specialTroopCount = Math.min(SPECIAL_TROOP_CAP, faction.specialTroopCount + SPECIAL_CASTLE_INITIAL_TROOPS);
+      grantSpecialTroops(match, faction, SPECIAL_CASTLE_INITIAL_TROOPS);
       return;
-    case 'tregua':
-      // Se activa la RONDA SIGUIENTE, no esta — mismo patron que el Sabotaje
-      // (industryPenaltyNextRound): se arma aqui y gameEngine.js lo "activa"
-      // al principio de resolveRound() de la proxima ronda. Ver
-      // resolveIndustryImmunity() mas abajo, que es quien de verdad anula los
-      // ataques mientras dure.
-      faction.attackImmuneNextRound = true;
+    case 'iglesia':
+      // Efecto permanente y automatico: +50 al limite de tropas de cada
+      // jugador de la faccion desde este momento, ver
+      // effectiveTroopLimit()/CHURCH_TROOP_LIMIT_BONUS en rules/shared.js.
+      // `churchBuilt` es tambien lo que usa el cliente para pintar el
+      // edificio junto a la capital (ver public/mapRenderer.js).
+      faction.churchBuilt = true;
       return;
     default:
       return;
@@ -215,52 +244,14 @@ function upgradeRandomSoldiers(match, faction, count) {
     });
 }
 
-/**
- * Anula los ataques que reciba una faccion con la tregua del nivel 4 activa
- * ESTA ronda (ver 'tregua' en applyIndustryTier) — igual que hace
- * resolveAlliances() con un par aliado, pero sin depender de
- * `match.config.alliancesEnabled`: es una recompensa automatica de
- * industria, no la mecanica de alianzas votadas, asi que funciona aunque el
- * admin las tenga desactivadas en esta partida. Se llama desde
- * gameEngine.js justo despues de resolveAlliances(), con el mismo `context`
- * (los usuarios anulados aqui tambien cuentan como inactivos esta ronda).
- */
-function resolveIndustryImmunity(match, context) {
-  for (const faction of match.factions) {
-    if (!faction.attackImmuneActive) continue;
-    for (const attackerFaction of match.factions) {
-      const attackVotes = context.votesByFactionAndType.get(attackerFaction.number)[ACTION_ATTACK];
-      const userIds = attackVotes.get(faction.number);
-      if (userIds && userIds.length) {
-        userIds.forEach((userId) => context.forceInactive.add(userId));
-        attackVotes.delete(faction.number);
-      }
-    }
-  }
-}
-
-/**
- * Bonus de ataque/defensa FIJO (0.4 cada uno, simetrico) que aportan las
- * tropas especiales del castillo del nivel 4 de industria — se suma tal cual
- * en rules/combat.js, igual que towerDefenseBonus() de rules/towers.js pero
- * afectando a los DOS lados del combate (ataque Y defensa), tal y como se
- * pidio ("0.4 de defensa y ataque").
- */
-function specialTroopCombatBonus(faction) {
-  return (faction.specialTroopCount || 0) * SPECIAL_TROOP_COMBAT_BONUS;
-}
-
 module.exports = {
   resolveIndustry,
-  resolveIndustryImmunity,
-  specialTroopCombatBonus,
   INDUSTRY_TIERS,
   industryThresholdsFor,
   MIN_PLAYERS_FOR_THRESHOLDS,
   PASSIVE_INDUSTRY_PER_TERRITORY,
   INDUSTRY_PER_BUILDING,
   SPECIAL_TROOP_CAP,
-  SPECIAL_TROOP_COMBAT_BONUS,
   SPECIAL_CASTLE_INITIAL_TROOPS,
   SPECIAL_CASTLE_TROOPS_PER_ROUND,
 };

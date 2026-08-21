@@ -31,6 +31,25 @@ const ARCHER_ATTACK_BONUS = 0.2;
 const ARCHER_DEFENSE_BONUS = 0;
 const CAVALRY_ATTACK_BONUS = 0;
 const CAVALRY_DEFENSE_BONUS = 0.2;
+// Tropa especial del castillo especial (nivel 4 de industria, ver
+// rules/industry.js) — ahora es una tropa MÁS del jugador (se reparte con
+// distributeTroops(), sigue en su cono de acompañantes, muere en combate
+// como cualquier otra) en vez de un bono aparte a nivel de facción. Simétrica
+// (ataque Y defensa), el doble de fuerte que un soldado normal: es la más
+// difícil de conseguir (tope de 10 por facción, hace falta llegar al nivel 4
+// de industria), así que aporta más por unidad.
+const SPECIAL_TROOP_COMBAT_BONUS = 0.4;
+
+// Iglesia (nivel 3 de industria, ver rules/industry.js): +50 al límite de
+// tropas de match.config.troopLimitPerPlayer, pero SOLO para los jugadores
+// de la facción que la construyó — ver effectiveTroopLimit() más abajo,
+// único punto que combina los dos números.
+const CHURCH_TROOP_LIMIT_BONUS = 50;
+
+/** Límite real de tropas de un jugador de `faction`: el del panel de admin, +50 si su facción ya tiene iglesia. */
+function effectiveTroopLimit(match, faction) {
+  return match.config.troopLimitPerPlayer + (faction.churchBuilt ? CHURCH_TROOP_LIMIT_BONUS : 0);
+}
 
 // Guarnición de dungeon (ver rules/structures.js sección 27, !dungeon): no
 // son tropas de IA de un jugador, sino la guarnición fija de un dungeon —
@@ -57,6 +76,7 @@ function sumRandomPower(match, userIds, kind) {
     total += AI_TROOP_COMBAT_BONUS * (player?.aiTroops || 0);
     total += (kind === 'attack' ? ARCHER_ATTACK_BONUS : ARCHER_DEFENSE_BONUS) * (player?.archerTroops || 0);
     total += (kind === 'attack' ? CAVALRY_ATTACK_BONUS : CAVALRY_DEFENSE_BONUS) * (player?.cavalryTroops || 0);
+    total += SPECIAL_TROOP_COMBAT_BONUS * (player?.specialTroops || 0);
   }
   return total;
 }
@@ -115,10 +135,15 @@ function applyCasualties(match, context, factionNumber, count, causedByFactionNu
 // JUGADORES via applyCasualties()/applyStructureCasualties(), primero se
 // reparte entre sus tropas de IA, en este orden fijo — caballero, arquero,
 // luego leva — "las de mas rango primero", tal y como se pidio.
+// specialTroops va la ÚLTIMA: son las más difíciles de conseguir (tope de
+// 10 por facción, nivel 4 de industria), así que son las más protegidas —
+// solo mueren si el daño sobrante ya se comió leva/arquero/caballero
+// enteros.
 const TROOP_CASCADE_PRIORITY = [
   { field: 'cavalryTroops', defense: CAVALRY_DEFENSE_BONUS },
   { field: 'archerTroops', defense: ARCHER_DEFENSE_BONUS },
   { field: 'aiTroops', defense: AI_TROOP_COMBAT_BONUS },
+  { field: 'specialTroops', defense: SPECIAL_TROOP_COMBAT_BONUS },
 ];
 
 /**
@@ -193,6 +218,9 @@ module.exports = {
   ARCHER_DEFENSE_BONUS,
   CAVALRY_ATTACK_BONUS,
   CAVALRY_DEFENSE_BONUS,
+  SPECIAL_TROOP_COMBAT_BONUS,
+  CHURCH_TROOP_LIMIT_BONUS,
+  effectiveTroopLimit,
   ORC_COMBAT_BONUS,
   GOBLIN_COMBAT_BONUS,
 };

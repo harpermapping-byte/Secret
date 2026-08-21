@@ -1,6 +1,7 @@
 'use strict';
 
 const { museumLevaBonus } = require('./bosses');
+const { effectiveTroopLimit } = require('./shared');
 
 // Tropas de IA: cada casilla que controla una facción genera 1 tropa por
 // ronda, que se reparte entre sus jugadores vivos — no vota nadie, es
@@ -24,21 +25,21 @@ const { museumLevaBonus } = require('./bosses');
  * !levas/!arqueros/!caballeros (ver rules/troopBuildings.js, los 3 tipos).
  */
 function totalTroops(p) {
-  return (p.aiTroops || 0) + (p.archerTroops || 0) + (p.cavalryTroops || 0);
+  return (p.aiTroops || 0) + (p.archerTroops || 0) + (p.cavalryTroops || 0) + (p.specialTroops || 0);
 }
 
 /**
- * `match.config.troopLimitPerPlayer` (panel de admin, 1-200, por defecto 50):
- * un jugador que ya lleva ese total de tropas (sumando los 3 tipos) deja de
- * poder recibir más — no importa el tipo que le tocara repartir, se le trata
- * como si no existiera para el reparto. Si TODA la facción viva está al
- * límite, esa producción se pierde sin más (no se acumula para después): es
- * justo lo que se pidió — "si no hay más usuario en esa facción no se
- * generarán tropas".
+ * `effectiveTroopLimit()` (panel de admin, 1-200, por defecto 50, +50 si la
+ * facción ya tiene iglesia — ver rules/shared.js): un jugador que ya lleva
+ * ese total de tropas (sumando los 4 tipos) deja de poder recibir más — no
+ * importa el tipo que le tocara repartir, se le trata como si no existiera
+ * para el reparto. Si TODA la facción viva está al límite, esa producción
+ * se pierde sin más (no se acumula para después): es justo lo que se pidió
+ * — "si no hay más usuario en esa facción no se generarán tropas".
  */
 function distributeTroops(match, faction, count, fieldName) {
   if (count <= 0) return;
-  const limit = match.config.troopLimitPerPlayer;
+  const limit = effectiveTroopLimit(match, faction);
   const living = [...match.players.values()].filter(
     (p) => p.alive && p.factionNumber === faction.number && totalTroops(p) < limit
   );
@@ -66,4 +67,4 @@ function resolveAiTroops(match) {
   }
 }
 
-module.exports = { resolveAiTroops, distributeTroops };
+module.exports = { resolveAiTroops, distributeTroops, totalTroops };

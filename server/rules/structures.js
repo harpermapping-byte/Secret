@@ -198,8 +198,12 @@ function conquerStructure(match, structure) {
   structure.cavalryTroops = 0;
 
   const tile = match.tiles[structure.tileId];
-  if (structure.type === 'castle') tile.cavalryCount += 1;
-  else if (structure.type === 'village') tile.leviesCount += 2;
+  // `null` en *Rounds marca un edificio PERMANENTE (nunca expira, a
+  // diferencia de un barraca/campo-arquería/caballeriza votado — ver
+  // PRODUCTION_ROUNDS en rules/troopBuildings.js): conquistar un castillo o
+  // una aldea es un premio duradero, no un chute de 3 rondas.
+  if (structure.type === 'castle') { tile.cavalryCount += 1; tile.cavalryRounds.push(null); }
+  else if (structure.type === 'village') { tile.leviesCount += 2; tile.leviesRounds.push(null, null); }
   else if (structure.type === 'port') tile.industryCount += 2;
 }
 

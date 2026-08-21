@@ -507,8 +507,21 @@
     // casilla para que muchos edificios no se amontonen en el mismo circulo.
     const MARKER_SCATTER_BASE_RADIUS = 55;
     const MARKER_SCATTER_GROWTH = 18;
-    const MARKER_MIN_GAP = 34; // separacion minima entre dos marcadores cualesquiera de la misma casilla
+    // Separacion minima entre dos marcadores: YA NO es un numero fijo (34px
+    // se quedaba corto en cuanto un edificio de tropa se agrando a 80px de
+    // ancho — dos de esos con centros a solo 34px de distancia se pisaban
+    // por completo). Se calcula por PAR de marcadores a partir de la mitad
+    // del ancho de cada uno (ver markerMinGapFor()), igual que hace
+    // server/mapTemplates.js con `overlapsAny()`/`Math.max(minGap, p.minGap)`
+    // — asi que si alguien agranda un edificio en spriteSizes.js, el hueco
+    // que le hace falta para no solaparse crece solo, sin tocar esto.
+    const MARKER_GAP_MARGIN = 6; // px de mundo extra de aire entre dos marcadores, ademas de sus mitades
     const MARKER_SCATTER_MAX_TRIES = 12;
+
+    /** Separacion minima (mitad del ancho + margen) que le hace falta a un marcador de `worldW` de ancho para no pisar a otro. */
+    function markerMinGapFor(worldW) {
+      return worldW / 2 + MARKER_GAP_MARGIN;
+    }
 
     function getOccupiedList(markerOccupied, tileId) {
       let list = markerOccupied.get(tileId);
@@ -530,7 +543,8 @@
      * `occupied`; si no encuentra hueco libre se queda con el ultimo intento
      * (mismo criterio de "mejor esfuerzo" que el anti-solape del servidor).
      */
-    function scatterPosition(tileId, salt, index, occupied) {
+    function scatterPosition(tileId, salt, index, occupied, worldW) {
+      const ownGap = markerMinGapFor(worldW);
       const radius = MARKER_SCATTER_BASE_RADIUS + Math.sqrt(occupied.length) * MARKER_SCATTER_GROWTH;
       const base = tileId * 977 + index * 31;
       let best = null;
@@ -539,8 +553,11 @@
         const r = Math.sqrt(hash01(base, salt, attempt * 2 + 2)) * radius;
         const x = Math.cos(ang) * r;
         const y = Math.sin(ang) * r;
-        best = { x, y };
-        const clear = !occupied.some((p) => (p.x - x) ** 2 + (p.y - y) ** 2 < MARKER_MIN_GAP * MARKER_MIN_GAP);
+        best = { x, y, gap: ownGap };
+        const clear = !occupied.some((p) => {
+          const gap = Math.max(ownGap, p.gap);
+          return (p.x - x) ** 2 + (p.y - y) ** 2 < gap * gap;
+        });
         if (clear) break;
       }
       occupied.push(best);
@@ -572,7 +589,7 @@
         if (!c) return;
         const occupied = getOccupiedList(markerOccupied, t.id);
         for (let i = 0; i < count; i++) {
-          const p = scatterPosition(t.id, MARKER_SALT_INDUSTRY, i, occupied);
+          const p = scatterPosition(t.id, MARKER_SALT_INDUSTRY, i, occupied, drawW);
           const cx = c.x * BLOCK_PX + p.x;
           const cy = c.y * BLOCK_PX + p.y;
           // Anclado por la base (abajo-centro), igual que las decoraciones.
@@ -598,7 +615,7 @@
         if (!c) return;
         const occupied = getOccupiedList(markerOccupied, t.id);
         for (let i = 0; i < count; i++) {
-          const p = scatterPosition(t.id, salt, i, occupied);
+          const p = scatterPosition(t.id, salt, i, occupied, drawW);
           const cx = c.x * BLOCK_PX + p.x;
           const cy = c.y * BLOCK_PX + p.y;
           ctx.drawImage(spriteImg, cx - drawW / 2, cy - drawH, drawW, drawH);
@@ -1094,11 +1111,16 @@
     castle: { worldWidth: spriteSize('castle', 150) },
     port: { worldWidth: spriteSize('port', 115) },
     village: { worldWidth: spriteSize('village', 90) },
+    dungeon: { worldWidth: spriteSize('dungeon', 90) },
     tree: { worldWidth: spriteSize('tree', 55) },
     'ship-small': { worldWidth: spriteSize('ship-small', 95) },
     'ship-big': { worldWidth: spriteSize('ship-big', 140) },
     whale: { worldWidth: spriteSize('whale', 130) },
     kraken: { worldWidth: spriteSize('kraken', 320) },
+    // Easter eggs (dos, fijos, siempre en tierra — ver mapTemplates.js
+    // EASTER_EGG_TYPES): puro decorado, sin efecto de juego.
+    'easteregg-ovni': { worldWidth: spriteSize('easteregg-ovni', 50) },
+    'easteregg-yeti': { worldWidth: spriteSize('easteregg-yeti', 40) },
   };
 
   // Por debajo de esta escala de mapa no se dibuja decoracion: a vista de
@@ -1199,11 +1221,18 @@
   const BARBARO_SPRITE_WORLD_W = spriteSize('barbaro', 12);
   const BARBARO_ARQUERO_SPRITE_WORLD_W = spriteSize('barbaro-arquero', 12);
   const BARBARO_CABALLERO_SPRITE_WORLD_W = spriteSize('barbaro-caballero', 14);
-  // Capital de faccion: placeholder gris que se tiñe del color de la
-  // faccion en tiempo real (ver drawTintedSprite), igual que el marcador de
-  // jugador.
+  // Capital de faccion: edificio NEUTRO (ya no se tiñe — el "cuadrado
+  // transparente" tintado a 65% quedaba lavado y poco legible como color de
+  // facción). Quien es el dueño lo dice el `banner` de al lado, ver abajo.
   const capitalSpriteImg = loadSprite('capital');
-  const CAPITAL_SPRITE_WORLD_W = spriteSize('capital', 60);
+  const CAPITAL_SPRITE_WORLD_W = spriteSize('capital', 120);
+  const CAPITAL_HALF_W = CAPITAL_SPRITE_WORLD_W / 2;
+  // Bandera/banner vertical, a un lado fijo de la capital (sección
+  // siguiente, `BANNER_OFFSET_X`) — ESTE es el que lleva el color de la
+  // facción (tintado a alpha alto, casi opaco, para leerse como color
+  // solido en vez del lavado que daba tintar la capital entera).
+  const bannerImg = loadSprite('banner');
+  const BANNER_SPRITE_WORLD_W = spriteSize('banner', 26);
   // Dungeon (ver docs/ACCIONES.md sección 27, !dungeon): guarnición de
   // orcos (más grandes) y goblins (más pequeños) paseando alrededor,
   // número SIEMPRE fijo (2 orcos + 4 goblins) a diferencia de castillo/
@@ -1217,8 +1246,28 @@
   // capital) — ver desiredSiteSpecs().
   const estatuaImg = loadSprite('estatua');
   const ESTATUA_SPRITE_WORLD_W = spriteSize('estatua', 34);
-  const ESTATUA_RING_RADIUS = 75; // px de mundo de la capital, fuera de su sprite (60px de ancho)
+  // Radio del anillo: fuera del sprite de la capital, DERIVADO de su ancho
+  // real (CAPITAL_HALF_W) en vez de un numero fijo — asi, si alguien agranda
+  // `capital` en spriteSizes.js, el anillo de trofeos se aparta solo y no
+  // se queda pisando el edificio agrandado.
+  const ESTATUA_RING_RADIUS = CAPITAL_HALF_W + 45;
   const ESTATUA_ANGLE_STEP = (137.5 * Math.PI) / 180; // angulo dorado: buen reparto en anillo sea cual sea el numero de estatuas
+  // El anillo YA NO empieza en angulo 0 (a la derecha): ese carril y el de
+  // 180 (izquierda) estan reservados para el castillo especial y el banner
+  // de mas abajo, que van SIEMPRE fijos a un lado. Empezar en 90 (abajo) y
+  // desviar cualquier angulo que caiga demasiado cerca de esos dos carriles
+  // (ver ringSafeAngle()) evita que un trofeo aterrice encima de ellos, sea
+  // cual sea el indice — antes se solapaban de verdad (ver docs/ACCIONES.md
+  // "anti-solape de la capital").
+  const RING_ANGLE_START = Math.PI / 2;
+  const RING_EXCLUDE_RAD = (22 * Math.PI) / 180; // media anchura del carril reservado en cada lado de 0 y 180
+  function ringSafeAngle(index) {
+    let angle = (RING_ANGLE_START + index * ESTATUA_ANGLE_STEP) % (Math.PI * 2);
+    const distToZero = Math.min(angle, Math.PI * 2 - angle);
+    const distToHalf = Math.abs(angle - Math.PI);
+    if (distToZero < RING_EXCLUDE_RAD || distToHalf < RING_EXCLUDE_RAD) angle += RING_EXCLUDE_RAD * 2.2;
+    return angle;
+  }
   // Trofeo por derrotar un boss (ver docs/ACCIONES.md sección 31, !boss):
   // un museo junto a la capital, "igual que el monumento" (mismo mecanismo
   // que la estatua de arriba) pero en un anillo más ancho para no
@@ -1226,6 +1275,12 @@
   const museoImg = loadSprite('museo');
   const MUSEO_SPRITE_WORLD_W = spriteSize('museo', 40);
   const MUSEO_RING_RADIUS = ESTATUA_RING_RADIUS + 40;
+  // Iglesia (nivel 3 de industria, ver rules/industry.js): mismo mecanismo
+  // de anillo que estatua/museo, en un anillo aun mas ancho para no
+  // solaparse si la facción ya tiene trofeos de los otros dos tipos.
+  const iglesiaImg = loadSprite('iglesia');
+  const IGLESIA_SPRITE_WORLD_W = spriteSize('iglesia', 44);
+  const IGLESIA_RING_RADIUS = MUSEO_RING_RADIUS + 40;
   // Castillo especial del nivel 4 de industria (ver rules/industry.js): UNA
   // sola vez por facción, a un lado fijo de la capital (no en anillo como
   // las estatuas, que pueden ser varias — este es siempre uno solo), con sus
@@ -1233,8 +1288,14 @@
   const castilloEspecialImg = loadSprite('castillo-especial');
   const tropaEspecialImg = loadSprite('tropa-especial');
   const CASTILLO_ESPECIAL_SPRITE_WORLD_W = spriteSize('castillo-especial', 70);
-  const CASTILLO_ESPECIAL_OFFSET_X = 95; // px de mundo, a la derecha de la capital
+  // A la derecha de la capital: mitad de la capital + mitad del propio
+  // castillo especial + un margen de aire, asi que aunque cualquiera de los
+  // dos cambie de tamaño en spriteSizes.js siguen sin tocarse.
+  const CASTILLO_ESPECIAL_OFFSET_X = CAPITAL_HALF_W + CASTILLO_ESPECIAL_SPRITE_WORLD_W / 2 + 30;
   const TROPA_ESPECIAL_SPRITE_WORLD_W = spriteSize('tropa-especial', 14);
+  // Banner: a la izquierda de la capital (carril opuesto al castillo
+  // especial), misma logica de offset derivado.
+  const BANNER_OFFSET_X = -(CAPITAL_HALF_W + BANNER_SPRITE_WORLD_W / 2 + 20);
   // Bosses (ver docs/ACCIONES.md sección 31, !boss): 3 sprites fijos, uno
   // por tipo — "grandotes", bastante más anchos que la vaca (40) o un
   // troop. Su ataque/defensa (5-10, sorteado por instancia) se pinta encima
@@ -1303,6 +1364,13 @@
   // el nombre, para que se lea igual de lejos que de cerca.
   const WALKER_DOT_DIAMETER = 9;
   const WALKER_DOT_GAP = 4;
+  // HUD de poder (ver drawWalkers()): una linea mas encima del nombre con
+  // el ataque/defensa que aportan sus tropas, cuantas lleva, y cuanto ganó
+  // (verde) o perdió (rojo) la ULTIMA ronda por combate+reclutamiento —
+  // tamaño de pantalla fijo, igual criterio que WALKER_NAME_PX, y mismo
+  // umbral de zoom que el nombre (a vista de planeta seria ilegible y caro
+  // de dibujar para cada jugador).
+  const WALKER_HUD_PX = 10;
   // Icono junto al nombre segun la orden que tenga puesta esa ronda (ver
   // walker.action, que ya se usaba para decidir a donde caminar — aqui solo
   // se reutiliza para pintarlo). Sin entrada = sin icono (paseando, sin
@@ -1505,7 +1573,7 @@
               // una vive en un punto del cono de detras del jugador y va
               // "alcanzándolo" a su propio ritmo, para que no se muevan
               // todas sincronizadas.
-              followers: { aiTroops: [], archerTroops: [], cavalryTroops: [] },
+              followers: { aiTroops: [], archerTroops: [], cavalryTroops: [], specialTroops: [] },
             };
             walkers.set(p.userId, walker);
           }
@@ -1516,9 +1584,19 @@
           walker.aiTroops = p.aiTroops || 0; // cuantos acompañantes le siguen, ver drawWalkers()
           walker.archerTroops = p.archerTroops || 0;
           walker.cavalryTroops = p.cavalryTroops || 0;
+          walker.specialTroops = p.specialTroops || 0; // tropa especial del castillo de nivel 4, ver rules/industry.js
+          // HUD de poder (ver drawWalkers()): poder de ataque/defensa YA
+          // calculado por el servidor (attackPower/defensePower, misma
+          // formula que sumRandomPower() en rules/shared.js sin la tirada al
+          // azar), numero total de tropas y cuantas gano/perdio la ULTIMA
+          // ronda resuelta (combate + reclutamiento juntos).
+          walker.attackPower = p.attackPower || 0;
+          walker.defensePower = p.defensePower || 0;
+          walker.troopDeltaLastRound = p.troopDeltaLastRound || 0;
           syncFollowerCone(walker.followers.aiTroops, walker.aiTroops, walker.x, walker.y);
           syncFollowerCone(walker.followers.archerTroops, walker.archerTroops, walker.x, walker.y);
           syncFollowerCone(walker.followers.cavalryTroops, walker.cavalryTroops, walker.x, walker.y);
+          syncFollowerCone(walker.followers.specialTroops, walker.specialTroops, walker.x, walker.y);
 
           // Solo se recalcula el destino si la orden ha cambiado; si no, se
           // deja que termine de andar hacia donde ya iba (si no, cada `state:*`
@@ -1853,16 +1931,34 @@
           factionColor: f.color,
           buildingKind: 'capital',
           specs: [{ spriteKey: 'aldeano', n: Math.max(1, f.capitalVillagerCount || 0) }],
+          // Defensa pasiva TOTAL que ya suma resolveCombat() (torres +
+          // maravillas + museos, ver rules/combat.js) — el marcador de al
+          // lado de la capital ensena EXACTAMENTE ese numero, no solo las
+          // torres, para que se sepa de un vistazo cuanto defiende de verdad
+          // aunque nadie vote !defender esta ronda.
+          defenseBonus: (f.towerDefenseBonus || 0) + (f.wonderDefenseBonus || 0) + (f.museumDefenseBonus || 0),
+        });
+
+        // Banner: quien es el dueño de esta capital, en un carril fijo a la
+        // izquierda (ver BANNER_OFFSET_X) — el que lleva el color de la
+        // facción, ya no la capital misma.
+        sites.set(`banner:${f.number}`, {
+          home: { x: home.x + BANNER_OFFSET_X, y: home.y },
+          factionColor: f.color,
+          buildingKind: 'banner',
+          specs: [],
         });
 
         // Trofeos de dungeon (sección 27): una estatua nueva por cada
         // dungeon derrotado, repartidas en un anillo alrededor de la
         // capital (ángulo dorado para que no se amontonen sea cual sea el
-        // número) — "la capital va creciendo según haces cosas", cada una
-        // con sus propios 4 aldeanos alrededor, igual que la capital.
+        // número, desviado de los carriles fijos del banner/castillo
+        // especial — ver ringSafeAngle()) — "la capital va creciendo según
+        // haces cosas", cada una con sus propios 4 aldeanos alrededor,
+        // igual que la capital.
         const trophies = f.dungeonTrophies || 0;
         for (let i = 0; i < trophies; i++) {
-          const angle = i * ESTATUA_ANGLE_STEP;
+          const angle = ringSafeAngle(i);
           sites.set(`trophy:${f.number}:${i}`, {
             home: {
               x: home.x + Math.cos(angle) * ESTATUA_RING_RADIUS,
@@ -1882,7 +1978,7 @@
         // las estatuas si la facción tiene trofeos de los dos tipos a la vez.
         const museums = f.bossTrophies || 0;
         for (let i = 0; i < museums; i++) {
-          const angle = i * ESTATUA_ANGLE_STEP;
+          const angle = ringSafeAngle(i);
           sites.set(`museo:${f.number}:${i}`, {
             home: {
               x: home.x + Math.cos(angle) * MUSEO_RING_RADIUS,
@@ -1894,16 +1990,34 @@
           });
         }
 
+        // Iglesia (nivel 3 de industria, ver rules/industry.js): igual
+        // mecanismo de anillo, en el más ancho de los tres (solo puede
+        // haber una, pero comparte el mismo anti-solape que estatua/museo).
+        if (f.churchBuilt) {
+          const angle = ringSafeAngle(0);
+          sites.set(`iglesia:${f.number}`, {
+            home: {
+              x: home.x + Math.cos(angle) * IGLESIA_RING_RADIUS,
+              y: home.y + Math.sin(angle) * IGLESIA_RING_RADIUS,
+            },
+            factionColor: null,
+            buildingKind: 'iglesia',
+            specs: [],
+          });
+        }
+
         // Castillo especial del nivel 4 de industria (rules/industry.js): UNA
         // sola vez, a un lado fijo de la capital (no en anillo, a diferencia
-        // de las estatuas — solo puede haber uno). Sin aldeanos alrededor,
-        // solo sus propias tropas especiales, tal y como se pidió.
+        // de las estatuas — solo puede haber uno). Sin aldeanos ni tropas
+        // alrededor: las tropas especiales que produce ya NO son decorativas
+        // — se reparten directas a los jugadores (ver player.specialTroops
+        // en drawWalkers()), siguen a SU dueño como cualquier otra tropa.
         if (f.specialCastleBuilt) {
           sites.set(`castillo-especial:${f.number}`, {
             home: { x: home.x + CASTILLO_ESPECIAL_OFFSET_X, y: home.y },
             factionColor: f.color,
             buildingKind: 'castilloEspecial',
-            specs: [{ spriteKey: 'tropa-especial', n: Math.max(1, f.specialTroopCount || 0) }],
+            specs: [],
           });
         }
       });
@@ -1929,10 +2043,11 @@
       desired.forEach((site, key) => {
         const home = site.home;
         let group = siteWalkers.get(key);
-        if (!group) { group = { home, factionColor: site.factionColor, buildingKind: site.buildingKind, list: [] }; siteWalkers.set(key, group); }
+        if (!group) { group = { home, factionColor: site.factionColor, buildingKind: site.buildingKind, defenseBonus: site.defenseBonus, list: [] }; siteWalkers.set(key, group); }
         group.home = home;
         group.factionColor = site.factionColor;
         group.buildingKind = site.buildingKind;
+        group.defenseBonus = site.defenseBonus;
 
         const wantCounts = new Map();
         site.specs.forEach(({ spriteKey, n }) => wantCounts.set(spriteKey, (wantCounts.get(spriteKey) || 0) + n));
@@ -2005,7 +2120,6 @@
       aldeano: [aldeanoSpriteImg, ALDEANO_SPRITE_WORLD_W],
       orco: [orcoImg, ORCO_SPRITE_WORLD_W],
       goblin: [goblinImg, GOBLIN_SPRITE_WORLD_W],
-      'tropa-especial': [tropaEspecialImg, TROPA_ESPECIAL_SPRITE_WORLD_W],
     };
 
     /** Dibuja el edificio del sitio (capital teñida de su facción, o estatua-trofeo sin teñir) y los caminantes de cada sitio. */
@@ -2021,9 +2135,35 @@
         const { home } = group;
         const inView = home.x >= wx0 && home.x <= wx1 && home.y >= wy0 && home.y <= wy1;
         if (inView && group.buildingKind === 'capital' && capitalSpriteImg.complete && capitalSpriteImg.naturalWidth) {
+          // Ya NO se tiñe: edificio neutro, el color de facción lo lleva el
+          // banner de al lado (ver 'banner' mas abajo).
           const cw = CAPITAL_SPRITE_WORLD_W * scale;
           const chh = cw * (capitalSpriteImg.naturalHeight / capitalSpriteImg.naturalWidth);
-          drawTintedSprite(capitalSpriteImg, home.x * scale + vx - cw / 2, home.y * scale + vy - chh, cw, chh, group.factionColor, 0.65);
+          const ccx = home.x * scale + vx, ccy = home.y * scale + vy;
+          ctx.drawImage(capitalSpriteImg, ccx - cw / 2, ccy - chh, cw, chh);
+          // Bono de defensa pasiva total (torres+maravillas+museos, ver
+          // desiredSiteSpecs()) — en tamaño de PANTALLA fijo (no escala con
+          // `scale`), asi que se lee igual de bien a cualquier zoom, y solo
+          // si es mayor que 0 (nada que mostrar todavia no ensucia el mapa).
+          if (group.defenseBonus > 0) {
+            const label = `🛡+${group.defenseBonus.toFixed(1)}`;
+            ctx.font = '12px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            const labelY = ccy - chh - 4;
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(6,18,26,.85)';
+            ctx.strokeText(label, ccx, labelY);
+            ctx.fillStyle = '#bfe8ff';
+            ctx.fillText(label, ccx, labelY);
+          }
+        } else if (inView && group.buildingKind === 'banner' && bannerImg.complete && bannerImg.naturalWidth) {
+          const bw = BANNER_SPRITE_WORLD_W * scale;
+          const bh = bw * (bannerImg.naturalHeight / bannerImg.naturalWidth);
+          // Alpha bien alto (no el 0.65 de antes): la gracia del banner es
+          // leerse como color solido de la facción, no como una silueta gris
+          // lavada de color.
+          drawTintedSprite(bannerImg, home.x * scale + vx - bw / 2, home.y * scale + vy - bh, bw, bh, group.factionColor, 0.92);
         } else if (inView && group.buildingKind === 'estatua' && estatuaImg.complete && estatuaImg.naturalWidth) {
           const ew = ESTATUA_SPRITE_WORLD_W * scale;
           const eh = ew * (estatuaImg.naturalHeight / estatuaImg.naturalWidth);
@@ -2036,6 +2176,22 @@
           const mw = MUSEO_SPRITE_WORLD_W * scale;
           const mh = mw * (museoImg.naturalHeight / museoImg.naturalWidth);
           ctx.drawImage(museoImg, home.x * scale + vx - mw / 2, home.y * scale + vy - mh, mw, mh);
+        } else if (inView && group.buildingKind === 'iglesia' && iglesiaImg.complete && iglesiaImg.naturalWidth) {
+          const gw = IGLESIA_SPRITE_WORLD_W * scale;
+          const gh = gw * (iglesiaImg.naturalHeight / iglesiaImg.naturalWidth);
+          const gx = home.x * scale + vx, gy = home.y * scale + vy;
+          ctx.drawImage(iglesiaImg, gx - gw / 2, gy - gh, gw, gh);
+          // "+50 tropas": para que se sepa de un vistazo el beneficio que da,
+          // igual estilo que el cartel de un boss (sombra oscura + relleno
+          // claro, sin caja).
+          ctx.font = '11px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(6,18,26,.85)';
+          ctx.strokeText('+50 tropas', gx, gy - gh - 4);
+          ctx.fillStyle = '#8be08b';
+          ctx.fillText('+50 tropas', gx, gy - gh - 4);
         }
 
         group.list.forEach((walker) => {
@@ -2586,11 +2742,12 @@
         // claro que van detras/debajo de su "general" — cada una en su
         // propio punto del cono de detras (ver stepFollowerCone()), no en
         // una fila india siguiendo su rastro exacto.
-        if (walker.aiTroops > 0 || walker.archerTroops > 0 || walker.cavalryTroops > 0) {
+        if (walker.aiTroops > 0 || walker.archerTroops > 0 || walker.cavalryTroops > 0 || walker.specialTroops > 0) {
           const followerGroups = [
             { list: walker.followers.aiTroops, img: troopImg, worldW: TROOP_SPRITE_WORLD_W },
             { list: walker.followers.archerTroops, img: archerTroopImg, worldW: TROOP_SPRITE_WORLD_W },
             { list: walker.followers.cavalryTroops, img: cavalryTroopImg, worldW: CAVALRY_TROOP_SPRITE_WORLD_W },
+            { list: walker.followers.specialTroops, img: tropaEspecialImg, worldW: TROPA_ESPECIAL_SPRITE_WORLD_W },
           ];
           for (const group of followerGroups) {
             if (!group.list.length) continue;
@@ -2616,6 +2773,33 @@
         ctx.drawImage(img, sx - drawW / 2, sy - drawH, drawW, drawH);
 
         if (showNames) {
+          // HUD de poder: una linea encima del nombre con ⚔ataque 🛡defensa
+          // 👥tropas, y el delta de la ultima ronda en verde/rojo pegado al
+          // final (nada si no cambio, para no ensuciar el mapa entero de
+          // "+0" cada ronda que nadie pierde ni gana tropas).
+          const hudLabel = `⚔${walker.attackPower.toFixed(1)} 🛡${walker.defensePower.toFixed(1)} 👥${walker.aiTroops + walker.archerTroops + walker.cavalryTroops + walker.specialTroops}`;
+          const delta = walker.troopDeltaLastRound;
+          const deltaLabel = delta > 0 ? ` +${delta}` : delta < 0 ? ` ${delta}` : '';
+          const hudY = sy - drawH - 3 - WALKER_NAME_PX - 2;
+          ctx.font = `${WALKER_HUD_PX}px system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(6,18,26,.85)';
+          const hudW = ctx.measureText(hudLabel).width;
+          const deltaW = deltaLabel ? ctx.measureText(deltaLabel).width : 0;
+          const hudLeft = sx - (hudW + deltaW) / 2;
+          ctx.textAlign = 'left';
+          ctx.strokeText(hudLabel, hudLeft, hudY);
+          ctx.fillStyle = '#f5fbff';
+          ctx.fillText(hudLabel, hudLeft, hudY);
+          if (deltaLabel) {
+            ctx.strokeText(deltaLabel, hudLeft + hudW, hudY);
+            ctx.fillStyle = delta > 0 ? '#7be07b' : '#ff8a8a';
+            ctx.fillText(deltaLabel, hudLeft + hudW, hudY);
+          }
+          ctx.font = `${WALKER_NAME_PX}px system-ui, sans-serif`;
+          ctx.textAlign = 'left'; // el circulito de color va a la izquierda del nombre, ver mas abajo
+
           // Circulito del color de la facción a la IZQUIERDA del nombre,
           // que a su vez lleva el icono de accion a la derecha — todo el
           // grupo (circulo + nombre + icono) centrado sobre el caminante.

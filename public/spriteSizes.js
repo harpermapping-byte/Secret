@@ -49,6 +49,7 @@ window.SPRITE_SIZES = {
   castle: 150,
   port: 115,
   village: 90,
+  dungeon: 90,
   tree: 55,
   'ship-small': 95,
   'ship-big': 140,
@@ -97,12 +98,15 @@ window.SPRITE_SIZES = {
   aldeano: 13,
 
   // ------------------------------------------------------------------
-  // Capital de facción y sus trofeos (estatua de dungeon, museo de boss,
-  // castillo especial del nivel 4 de industria + sus tropas especiales).
+  // Capital de facción y sus trofeos (banner de color, estatua de dungeon,
+  // museo de boss, iglesia del nivel 3 de industria, castillo especial del
+  // nivel 4 + sus tropas especiales).
   // ------------------------------------------------------------------
-  capital: 60,
+  capital: 120,
+  banner: 26,
   estatua: 34,
   museo: 40,
+  iglesia: 44,
   'castillo-especial': 70,
   'tropa-especial': 14,
 
@@ -130,4 +134,11 @@ window.SPRITE_SIZES = {
   // ------------------------------------------------------------------
   cow: 34,
   'cow-follower': 15,
+
+  // ------------------------------------------------------------------
+  // Otros dos easter eggs decorativos (uno de cada, siempre en tierra,
+  // sin efecto de juego) — ver mapTemplates.js EASTER_EGG_TYPES.
+  // ------------------------------------------------------------------
+  'easteregg-ovni': 50,
+  'easteregg-yeti': 40,
 };
