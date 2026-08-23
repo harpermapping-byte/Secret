@@ -2,6 +2,7 @@
 
 const { ACTION_BOSS } = require('../commands');
 const { sumRandomPower, applyTroopCascadeDamage, killPlayer, shuffle } = require('./shared');
+const { checkFactionElimination } = require('./territory');
 
 // Bono pasivo por cada museo (trofeo de boss, ver resolveBoss() más abajo) —
 // TERCER tipo de bono acumulable por facción, junto a torres (rules/towers.js)
@@ -44,7 +45,20 @@ function resolveBoss(match, context) {
     const counterDamage = Math.round(target.attackPower - ourDefense);
     if (counterDamage > 0) {
       const remaining = applyTroopCascadeDamage(match, attackerUserIds, counterDamage);
-      applyBossCasualties(match, attackerUserIds, remaining);
+      const deaths = applyBossCasualties(match, attackerUserIds, remaining);
+      if (deaths > 0) {
+        // Si alguien muere en el intento, el boss NO se queda intacto para
+        // el siguiente ataque: se lleva puesto el daño que sí consiguieron
+        // hacerle (attackPower de este asalto), en ataque y defensa por
+        // igual — "se queda con la vida y defensa restante de esa
+        // batalla", tal y como se pidió. Puede llegar a 0 (entonces
+        // cualquier ataque futuro lo derrota/no contraataca), pero no se
+        // marca defeated=true aquí: eso sigue siendo solo cuando de verdad
+        // se le gana la comparación de poder, arriba.
+        target.defensePower = Math.max(0, target.defensePower - attackPower);
+        target.attackPower = Math.max(0, target.attackPower - attackPower);
+        checkFactionElimination(match, context, faction.number, null);
+      }
     }
   }
 }
@@ -56,13 +70,15 @@ function pickEligibleBoss(match, factionNumber) {
   return eligible[Math.floor(Math.random() * eligible.length)];
 }
 
-/** Baja `count` de los votantes al azar entre ellos mismos — mismo criterio que applyStructureCasualties() en rules/structures.js (sección 23). */
+/** Baja `count` de los votantes al azar entre ellos mismos — mismo criterio que applyStructureCasualties() en rules/structures.js (sección 23). Devuelve cuántos murieron de verdad. */
 function applyBossCasualties(match, userIds, count) {
   const pool = shuffle([...userIds]);
   let remaining = count;
+  let deaths = 0;
   while (remaining > 0 && pool.length > 0) {
-    if (killPlayer(match, pool.pop())) remaining--;
+    if (killPlayer(match, pool.pop())) { remaining--; deaths++; }
   }
+  return deaths;
 }
 
 /** Cuántos museos (trofeos de boss) tiene `faction` ahora mismo — ver bossTrophies en gameEngine.js. */

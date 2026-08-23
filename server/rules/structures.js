@@ -14,6 +14,7 @@ const {
   ORC_COMBAT_BONUS,
   GOBLIN_COMBAT_BONUS,
 } = require('./shared');
+const { checkFactionElimination } = require('./territory');
 
 /**
  * `!conquista` (ver docs/ACCIONES.md sección 20): ataca a UNA estructura
@@ -66,7 +67,16 @@ function resolveConquista(match, context) {
     const counterDamage = Math.round(garrisonAttack - ourDefense);
     if (counterDamage > 0) {
       const remaining = applyTroopCascadeDamage(match, attackerUserIds, counterDamage);
-      applyStructureCasualties(match, attackerUserIds, remaining);
+      const deaths = applyStructureCasualties(match, attackerUserIds, remaining);
+      if (deaths > 0) {
+        // Si alguien muere en el asalto, la guarnición no queda intacta
+        // para el siguiente intento: se lleva puesto el daño que sí le
+        // hicieron (attackPower de este asalto), igual que un boss (ver
+        // rules/bosses.js) — si ya fue conquistada esta misma ronda (arriba)
+        // no hace nada, su guarnición ya está a 0.
+        applyGarrisonCascadeDamage(target, attackPower);
+        checkFactionElimination(match, context, faction.number, null);
+      }
     }
   }
 }
@@ -110,7 +120,11 @@ function resolveDungeon(match, context) {
     const counterDamage = Math.round(garrisonAttack - ourDefense);
     if (counterDamage > 0) {
       const remaining = applyTroopCascadeDamage(match, attackerUserIds, counterDamage);
-      applyStructureCasualties(match, attackerUserIds, remaining);
+      const deaths = applyStructureCasualties(match, attackerUserIds, remaining);
+      if (deaths > 0) {
+        applyGarrisonCascadeDamage(target, attackPower);
+        checkFactionElimination(match, context, faction.number, null);
+      }
     }
   }
 }
@@ -127,8 +141,59 @@ function resolveDungeon(match, context) {
 function applyStructureCasualties(match, userIds, count) {
   const pool = shuffle([...userIds]);
   let remaining = count;
+  let deaths = 0;
   while (remaining > 0 && pool.length > 0) {
-    if (killPlayer(match, pool.pop())) remaining--;
+    if (killPlayer(match, pool.pop())) { remaining--; deaths++; }
+  }
+  return deaths;
+}
+
+// Mismo orden de prioridad que TROOP_CASCADE_PRIORITY (rules/shared.js)
+// pero para los 5 campos de guarnición en vez de tropas de jugador: los que
+// más aguantan (más "defense" por unidad) absorben primero, un tipo con
+// defense 0 (ARCHER_DEFENSE_BONUS) se lleva por delante gratis igual que ahí.
+const GARRISON_CASCADE_PRIORITY = [
+  { field: 'cavalryTroops', defense: CAVALRY_DEFENSE_BONUS },
+  { field: 'archerTroops', defense: ARCHER_DEFENSE_BONUS },
+  { field: 'aiTroops', defense: AI_TROOP_COMBAT_BONUS },
+  { field: 'orcCount', defense: ORC_COMBAT_BONUS },
+  { field: 'goblinCount', defense: GOBLIN_COMBAT_BONUS },
+];
+
+/**
+ * Reduce la guarnición de `structure` (castillo/aldea/puerto/dungeon) en
+ * `damage` puntos, persistente para el siguiente asalto — "se queda con la
+ * vida y defensa restante de esa batalla" cuando algún atacante muere (ver
+ * resolveConquista()/resolveDungeon() más arriba). No mata jugadores, ni
+ * roza sus tropas: solo la guarnición NEUTRAL de la estructura/dungeon en
+ * sí. Nunca la deja exactamente en 0 aquí a propósito: `hasGarrison()` la
+ * dejaría de ofrecer como objetivo sin que nadie la haya conquistado de
+ * verdad (sin el bono para la casilla / sin trofeo de dungeon) — se deja
+ * SIEMPRE al menos 1 unidad, así que un asalto futuro (con su defensa ya
+ * mínima) acaba conquistándola por el camino normal de arriba.
+ */
+function applyGarrisonCascadeDamage(structure, damage) {
+  let total = GARRISON_CASCADE_PRIORITY.reduce((sum, { field }) => sum + (structure[field] || 0), 0);
+  if (total <= 1) return;
+
+  let remaining = damage;
+  for (const { field, defense } of GARRISON_CASCADE_PRIORITY) {
+    if (remaining <= 0 || total <= 1) break;
+    const count = structure[field] || 0;
+    if (count === 0) continue;
+    const room = total - 1;
+
+    if (defense <= 0) {
+      const killable = Math.min(count, room);
+      structure[field] -= killable;
+      total -= killable;
+      continue;
+    }
+    const killable = Math.min(count, Math.floor(remaining / defense), room);
+    if (killable <= 0) continue;
+    structure[field] -= killable;
+    remaining -= killable * defense;
+    total -= killable;
   }
 }
 

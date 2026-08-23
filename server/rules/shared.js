@@ -46,9 +46,19 @@ const SPECIAL_TROOP_COMBAT_BONUS = 0.4;
 // único punto que combina los dos números.
 const CHURCH_TROOP_LIMIT_BONUS = 50;
 
-/** Límite real de tropas de un jugador de `faction`: el del panel de admin, +50 si su facción ya tiene iglesia. */
+// Viviendas (!casas, ver rules/housing.js): +5 al límite de tropas de CADA
+// jugador de la facción por vivienda construida, máximo MAX_HOUSES_PER_FACTION
+// (10) — igual que la iglesia, se suma al límite base del panel de admin.
+const HOUSE_TROOP_LIMIT_BONUS = 5;
+const MAX_HOUSES_PER_FACTION = 10;
+
+/** Límite real de tropas de un jugador de `faction`: el del panel de admin, +50 si su facción ya tiene iglesia, +5 por cada vivienda que haya construido. */
 function effectiveTroopLimit(match, faction) {
-  return match.config.troopLimitPerPlayer + (faction.churchBuilt ? CHURCH_TROOP_LIMIT_BONUS : 0);
+  return (
+    match.config.troopLimitPerPlayer +
+    (faction.churchBuilt ? CHURCH_TROOP_LIMIT_BONUS : 0) +
+    (faction.housesBuilt || 0) * HOUSE_TROOP_LIMIT_BONUS
+  );
 }
 
 // Guarnición de dungeon (ver rules/structures.js sección 27, !dungeon): no
@@ -220,6 +230,8 @@ module.exports = {
   CAVALRY_DEFENSE_BONUS,
   SPECIAL_TROOP_COMBAT_BONUS,
   CHURCH_TROOP_LIMIT_BONUS,
+  HOUSE_TROOP_LIMIT_BONUS,
+  MAX_HOUSES_PER_FACTION,
   effectiveTroopLimit,
   ORC_COMBAT_BONUS,
   GOBLIN_COMBAT_BONUS,

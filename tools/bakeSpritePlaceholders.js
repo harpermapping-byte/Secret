@@ -505,6 +505,22 @@ const SPRITES = {
     c.rect(13, 2, 10, 2, dark, 1);          // brazos de la cruz
   },
 
+  // CASA: mejora de !casas (ver rules/housing.js) — aparece junto a la
+  // capital, igual mecanismo de anillo que estatua/museo/iglesia, SIN
+  // teñir (casita neutra de piedra/madera, no lleva color de facción).
+  // Cabaña simple para distinguirse de un vistazo de la iglesia (sin
+  // torre/campanario ni cruz): paredes + tejado a dos aguas + puerta +
+  // ventana. 34x36.
+  casa: (c) => {
+    const wall = [214, 194, 150];
+    const roof = [150, 70, 50];
+    const dark = [110, 60, 40];
+    c.rect(3, 16, 28, 20, wall, 2);              // paredes
+    c.triangle(1, 16, 17, 2, 33, 16, roof, dark); // tejado a dos aguas
+    c.rect(13, 24, 8, 12, dark, 1);               // puerta
+    c.rect(6, 19, 6, 6, [120, 170, 190], 1);      // ventana
+  },
+
   // CASTILLO ESPECIAL (nivel 4 de industria, ver rules/industry.js seccion
   // 29): aparece UNA vez junto a la capital de la faccion que llega a ese
   // nivel — placeholder gris neutro, TEÑIDO del color de la faccion en
@@ -650,7 +666,7 @@ const SIZES = {
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
   torre: [20, 30], 'torre-obras': [20, 30],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
-  banner: [20, 44], iglesia: [36, 50],
+  banner: [20, 44], iglesia: [36, 50], casa: [34, 36],
   'castillo-especial': [48, 40], 'tropa-especial': [14, 22],
   'wonder-guggenheim': [44, 40], 'wonder-numancia': [40, 40], 'wonder-moncloa': [44, 40],
   'wonder-spacex': [40, 42], 'wonder-kebab': [40, 40], 'wonder-contrato': [40, 40],

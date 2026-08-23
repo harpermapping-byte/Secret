@@ -37,6 +37,11 @@ const ACTION_TOWER = 'TORRE';
 // (+1 leva/ronda, +1 industria/ronda, +2 defensa base, cada uno acumulable).
 // Ver rules/bosses.js y docs/ACCIONES.md sección 31.
 const ACTION_BOSS = 'BOSS';
+// Construye una vivienda junto a tu capital (anillo anti-solape, igual que
+// estatua/museo/iglesia) — no da tropas, sube el LIMITE de tropas de CADA
+// jugador de la facción +5 por vivienda, máximo 10 por facción (+50 en
+// total). Ver rules/housing.js y docs/ACCIONES.md.
+const ACTION_CASAS = 'CASAS';
 
 // En que fase es valido cada tipo de accion.
 const VALID_PHASE_BY_ACTION = {
@@ -54,6 +59,7 @@ const VALID_PHASE_BY_ACTION = {
   [ACTION_DUNGEON]: PHASE_ACTION,
   [ACTION_TOWER]: PHASE_ACTION,
   [ACTION_BOSS]: PHASE_ACTION,
+  [ACTION_CASAS]: PHASE_ACTION,
 };
 
 const JOIN_RE = /^!faccion(\d+)$/i;
@@ -70,6 +76,7 @@ const CONQUISTA_RE = /^!conquista$/i;
 const DUNGEON_RE = /^!dungeon$/i;
 const TOWER_RE = /^!torre$/i;
 const BOSS_RE = /^!boss$/i;
+const CASAS_RE = /^!casas$/i;
 
 /**
  * Convierte un mensaje de chat en { type, targetFactionNumber } o null si no es un comando reconocido.
@@ -109,6 +116,8 @@ function parseCommand(rawText) {
 
   if (BOSS_RE.test(text)) return { type: ACTION_BOSS, targetFactionNumber: null };
 
+  if (CASAS_RE.test(text)) return { type: ACTION_CASAS, targetFactionNumber: null };
+
   return null;
 }
 
@@ -127,6 +136,7 @@ module.exports = {
   ACTION_DUNGEON,
   ACTION_TOWER,
   ACTION_BOSS,
+  ACTION_CASAS,
   VALID_PHASE_BY_ACTION,
   parseCommand,
 };
