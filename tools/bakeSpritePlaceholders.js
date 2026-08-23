@@ -97,6 +97,18 @@ const SPRITES = {
     c.rect(3, 8, 26, 22, [154, 154, 154]);
     c.rect(11, 2, 10, 8, [124, 124, 124]);
   },
+
+  // DUNGEON: guarnición de orcos/goblins (ver docs/ACCIONES.md sección 27,
+  // rules/structures.js, `!dungeon`) — hasta ahora solo se veían las tropas
+  // paseando y el cartel de guarnición, sin ningún edificio en el sitio en
+  // el que salen. Montículo rocoso con la boca de la cueva, oscura. 50x38.
+  dungeon: (c) => {
+    const stone = [120, 112, 104];
+    const dark = [58, 52, 48];
+    c.triangle(2, 22, 25, 2, 48, 22, stone, dark); // montículo
+    c.rect(0, 20, 50, 10, stone, 2);               // base
+    c.rect(17, 14, 16, 18, [16, 12, 12], 1);        // boca de la cueva, oscura
+  },
   tree: (c) => {            // rectangulo vertical verde, 22x40
     c.rect(8, 26, 6, 14, [74, 52, 32], 1); // tronco
     c.rect(2, 0, 18, 28, [47, 107, 52]);   // copa
@@ -260,6 +272,31 @@ const SPRITES = {
   // poca distancia (ver stepCow() en mapRenderer.js). 18x30.
   'cow-follower': (c) => {
     c.rect(3, 2, 12, 26, [140, 108, 70], 2, [46, 32, 18]);
+  },
+
+  // EASTER EGGS #2 y #3 (ver docs/ACCIONES.md, mapTemplates.js
+  // EASTER_EGG_TYPES): dos mas, uno de cada, siempre en tierra al azar en
+  // cualquier partida nueva — puro decorado, sin efecto de juego, igual que
+  // la vaca de arriba. Un ovni y un yeti, sin mas pretensión que ser
+  // reconocibles de un vistazo hasta que se sustituyan por arte definitivo.
+  'easteregg-ovni': (c) => {         // platillo volante, 50x30
+    const hull = [176, 184, 192];
+    const dome = [150, 210, 226];
+    c.rect(4, 16, 42, 8, hull, 2);       // casco
+    c.rect(18, 6, 14, 12, dome, 1);      // cupula
+    c.rect(10, 24, 4, 4, [230, 210, 90], 0); // luz
+    c.rect(23, 24, 4, 4, [230, 210, 90], 0); // luz
+    c.rect(36, 24, 4, 4, [230, 210, 90], 0); // luz
+  },
+  'easteregg-yeti': (c) => {         // yeti peludo, 34x50
+    const fur = [235, 235, 235];
+    const dark = [70, 66, 64];
+    c.rect(9, 4, 16, 16, fur, 2);    // cabeza
+    c.rect(6, 18, 22, 26, fur, 2);   // cuerpo
+    c.rect(6, 44, 8, 6, dark, 1);    // pie izquierdo
+    c.rect(20, 44, 8, 6, dark, 1);   // pie derecho
+    c.rect(13, 9, 3, 3, dark, 0);    // ojo izquierdo
+    c.rect(19, 9, 3, 3, dark, 0);    // ojo derecho
   },
 
   // TROPA DE IA (ver docs/ACCIONES.md seccion 18, rules/troops.js): sigue
@@ -438,6 +475,36 @@ const SPRITES = {
     c.triangle(19, 2, 19, 12, 34, 7, body, dark); // bandera
   },
 
+  // BANNER: quien es el dueño de la capital, un carril fijo a su lado (ver
+  // BANNER_OFFSET_X en mapRenderer.js) — SUSTITUYE al tinte de la capital
+  // entera (quedaba lavado/poco legible). Paño CASI BLANCO a propósito: el
+  // juego lo tiñe casi opaco (alpha .92, ver drawTintedSprite) del color de
+  // la facción, y cuanto más claro el paño de base, más "puro" sale el
+  // color encima. Asta y travesaño SÍ quedan oscuros (tambien se tiñen,
+  // pero al ser tan finos apenas se nota). 20x44.
+  banner: (c) => {
+    const pole = [90, 70, 40];
+    const cloth = [230, 230, 230];
+    c.rect(2, 0, 3, 44, pole, 1);      // asta, de arriba a abajo
+    c.rect(2, 4, 15, 3, pole, 1);      // travesaño del que cuelga el paño
+    c.rect(5, 7, 13, 28, cloth, 1);    // paño, cuelga del travesaño
+  },
+
+  // IGLESIA: mejora de nivel 3 de industria (ver rules/industry.js sección
+  // 29 nueva) — aparece junto a la capital, igual mecanismo de anillo que
+  // estatua/museo, SIN teñir (monumento propio de la facción, pero de
+  // piedra neutra como el resto de edificios de trofeo). Cuerpo + tejado a
+  // dos aguas + torre con cruz. 36x50.
+  iglesia: (c) => {
+    const stone = [186, 176, 158];
+    const dark = [110, 100, 84];
+    c.rect(4, 26, 28, 22, stone, 2);        // nave
+    c.triangle(4, 26, 18, 10, 32, 26, stone, dark); // tejado a dos aguas
+    c.rect(14, 4, 8, 24, stone, 2);         // torre/campanario
+    c.rect(16, 0, 4, 6, dark, 1);           // base de la cruz
+    c.rect(13, 2, 10, 2, dark, 1);          // brazos de la cruz
+  },
+
   // CASTILLO ESPECIAL (nivel 4 de industria, ver rules/industry.js seccion
   // 29): aparece UNA vez junto a la capital de la faccion que llega a ese
   // nivel — placeholder gris neutro, TEÑIDO del color de la faccion en
@@ -568,7 +635,7 @@ const SPRITES = {
 };
 
 const SIZES = {
-  castle: [48, 48], port: [40, 40], village: [32, 32], tree: [22, 40],
+  castle: [48, 48], port: [40, 40], village: [32, 32], dungeon: [50, 38], tree: [22, 40],
   'ship-small': [30, 22], 'ship-big': [46, 28], whale: [48, 18], kraken: [96, 96],
   cursor: [32, 32], skeleton: [64, 110], 'help-icon': [64, 64],
   'soldier-right': [24, 40], 'soldier-left': [24, 40],
@@ -576,12 +643,14 @@ const SIZES = {
   logo: [320, 140],
   industry: [36, 28],
   'cow-right': [40, 24], 'cow-left': [40, 24], 'cow-follower': [18, 30],
+  'easteregg-ovni': [50, 30], 'easteregg-yeti': [34, 50],
   troop: [14, 22], 'troop-archer': [14, 22], 'troop-cavalry': [16, 26],
   barbaro: [14, 22], 'barbaro-arquero': [14, 22], 'barbaro-caballero': [16, 26],
   orco: [24, 30], goblin: [11, 17], estatua: [34, 48], museo: [40, 40],
   barraca: [36, 28], 'campo-arqueria': [36, 28], caballeriza: [36, 28],
   torre: [20, 30], 'torre-obras': [20, 30],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
+  banner: [20, 44], iglesia: [36, 50],
   'castillo-especial': [48, 40], 'tropa-especial': [14, 22],
   'wonder-guggenheim': [44, 40], 'wonder-numancia': [40, 40], 'wonder-moncloa': [44, 40],
   'wonder-spacex': [40, 42], 'wonder-kebab': [40, 40], 'wonder-contrato': [40, 40],
