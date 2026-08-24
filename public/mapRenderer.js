@@ -1281,6 +1281,13 @@
   const iglesiaImg = loadSprite('iglesia');
   const IGLESIA_SPRITE_WORLD_W = spriteSize('iglesia', 44);
   const IGLESIA_RING_RADIUS = MUSEO_RING_RADIUS + 40;
+  // Viviendas (!casas, ver rules/housing.js): mismo mecanismo de anillo,
+  // en el anillo mas ancho de los cuatro — puede haber hasta 10 a la vez
+  // (mas que estatua/museo/iglesia juntos), asi que cada una usa su propio
+  // indice `i` (0-9) para ringSafeAngle(), sin pisar los otros anillos.
+  const casaImg = loadSprite('casa');
+  const CASA_SPRITE_WORLD_W = spriteSize('casa', 40);
+  const CASA_RING_RADIUS = IGLESIA_RING_RADIUS + 40;
   // Castillo especial del nivel 4 de industria (ver rules/industry.js): UNA
   // sola vez por facción, a un lado fijo de la capital (no en anillo como
   // las estatuas, que pueden ser varias — este es siempre uno solo), con sus
@@ -2006,6 +2013,24 @@
           });
         }
 
+        // Viviendas (!casas, ver rules/housing.js sección 32): una casa por
+        // cada una que la facción tenga construida (0-10), en el anillo
+        // MÁS ANCHO de todos para no solaparse con estatua/museo/iglesia
+        // aunque la facción tenga las cuatro cosas a la vez.
+        const houses = f.housesBuilt || 0;
+        for (let i = 0; i < houses; i++) {
+          const angle = ringSafeAngle(i);
+          sites.set(`casa:${f.number}:${i}`, {
+            home: {
+              x: home.x + Math.cos(angle) * CASA_RING_RADIUS,
+              y: home.y + Math.sin(angle) * CASA_RING_RADIUS,
+            },
+            factionColor: null,
+            buildingKind: 'casa',
+            specs: [],
+          });
+        }
+
         // Castillo especial del nivel 4 de industria (rules/industry.js): UNA
         // sola vez, a un lado fijo de la capital (no en anillo, a diferencia
         // de las estatuas — solo puede haber uno). Sin aldeanos ni tropas
@@ -2192,6 +2217,10 @@
           ctx.strokeText('+50 tropas', gx, gy - gh - 4);
           ctx.fillStyle = '#8be08b';
           ctx.fillText('+50 tropas', gx, gy - gh - 4);
+        } else if (inView && group.buildingKind === 'casa' && casaImg.complete && casaImg.naturalWidth) {
+          const hw = CASA_SPRITE_WORLD_W * scale;
+          const hh = hw * (casaImg.naturalHeight / casaImg.naturalWidth);
+          ctx.drawImage(casaImg, home.x * scale + vx - hw / 2, home.y * scale + vy - hh, hw, hh);
         }
 
         group.list.forEach((walker) => {

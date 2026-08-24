@@ -21,6 +21,7 @@ const { resolveTroopBuildings } = require('./rules/troopBuildings');
 const { resolveConquista, resolveDungeon, structureAttackPower, structureDefensePower } = require('./rules/structures');
 const { resolveTowers, towerDefenseBonus } = require('./rules/towers');
 const { resolveBoss, museumDefenseBonus } = require('./rules/bosses');
+const { resolveCasas } = require('./rules/housing');
 const { wonderDefenseBonus } = require('./rules/wonders');
 const {
   AI_TROOP_COMBAT_BONUS,
@@ -45,6 +46,7 @@ const {
   ACTION_DUNGEON,
   ACTION_TOWER,
   ACTION_BOSS,
+  ACTION_CASAS,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -107,6 +109,12 @@ function createMatch(config) {
     // effectiveTroopLimit() en rules/shared.js) y el cliente pinta el
     // edificio junto a la capital.
     churchBuilt: false,
+    // Viviendas construidas con !casas (ver rules/housing.js): 0 a
+    // MAX_HOUSES_PER_FACTION (10), +5 al limite de tropas de cada jugador
+    // de la faccion por cada una (ver effectiveTroopLimit() en
+    // rules/shared.js) — acumulable con la iglesia, a diferencia de esta
+    // no es un interruptor sino un contador.
+    housesBuilt: 0,
     specialEnabled: !!f.specialEnabled,
     specialAbility: f.specialAbility || null,
     specialUsed: false,
@@ -471,6 +479,7 @@ function resolveRound() {
   resolveIndustry(match, context);
   resolveAiTroops(match);
   resolveTroopBuildings(match, context);
+  resolveCasas(match, context);
   resolveExpansion(match, context);
 
   for (const [userId, player] of match.players) {
@@ -534,6 +543,7 @@ function tallyActions() {
       [ACTION_DUNGEON]: [],
       [ACTION_TOWER]: [],
       [ACTION_BOSS]: [],
+      [ACTION_CASAS]: [],
     });
     activePlayerCountByFaction.set(faction.number, 0);
   }
@@ -705,6 +715,11 @@ function getPublicState() {
       // effectiveTroopLimit() en rules/shared.js), esto es solo la señal
       // visual.
       churchBuilt: f.churchBuilt,
+      // Viviendas construidas con !casas (ver rules/housing.js): 0-10, el
+      // cliente pinta una por cada una en el anillo de la capital, y el +5
+      // al limite de tropas por cada una ya esta aplicado del lado del
+      // servidor (effectiveTroopLimit() en rules/shared.js).
+      housesBuilt: f.housesBuilt || 0,
       // Castillo especial del nivel 4 de industria (ver rules/industry.js):
       // el cliente pinta el edificio junto a la capital en cuanto
       // `specialCastleBuilt` es true — SIN tropas propias alrededor (ya no
