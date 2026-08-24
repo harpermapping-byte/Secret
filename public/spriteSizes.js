@@ -99,15 +99,14 @@ window.SPRITE_SIZES = {
 
   // ------------------------------------------------------------------
   // Capital de facción y sus trofeos (banner de color, estatua de dungeon,
-  // museo de boss, iglesia del nivel 3 de industria, casas de !casas,
-  // castillo especial del nivel 4 + sus tropas especiales).
+  // museo de boss, iglesia del nivel 3 de industria, castillo especial del
+  // nivel 4 + sus tropas especiales).
   // ------------------------------------------------------------------
   capital: 120,
   banner: 26,
   estatua: 34,
   museo: 40,
   iglesia: 44,
-  casa: 40,
   'castillo-especial': 70,
   'tropa-especial': 14,
 
