@@ -1064,6 +1064,16 @@
       playResolutionEffect: (effect) => (objectLayer ? objectLayer.addResolutionEffect(effect) : null),
       clearResolutionEffects: () => { if (objectLayer) objectLayer.clearResolutionEffects(); },
       /**
+       * Popup de resumen de facción al pasar el ratón (ver docs/ACCIONES.md
+       * sección 35): dado un punto en coordenadas de pantalla RELATIVAS a
+       * `#mapViewport` (mismo origen que usa el canvas de objetos, ver
+       * `drawObjectLayer()`), devuelve el número de facción de la capital o
+       * el jugador más cercano bajo ese punto (dentro de su radio de
+       * sprite), o `null` si no hay nada ahí. `public/index.html` lo llama
+       * en cada `mousemove` sobre el mapa.
+       */
+      hitTestFactionAt: (x, y) => (objectLayer ? objectLayer.hitTestFactionAt(x, y) : null),
+      /**
        * Posicion actual de cada marcador de jugador, en pixeles de mundo:
        * Map<userId, {x, y, color, username}>. La usa `focusOnPlayer()` por
        * dentro y se expone tambien aqui para que cualquier otra parte de la
@@ -1496,6 +1506,25 @@
     // no Map: no hace falta buscarlos por clave, solo dibujar los que
     // sigan vivos y quitar los que ya cumplieron su `durationMs`.
     let resolutionEffects = [];
+
+    // Popup de resumen de facción al pasar el ratón (ver docs/ACCIONES.md
+    // sección 35): registro de "qué hay bajo el cursor", en coordenadas de
+    // PANTALLA — se vacía y se rellena de cero en cada frame (drawObjectLayer,
+    // más abajo), justo cuando drawSiteWalkers()/drawWalkers() ya calcularon
+    // la posición en pantalla de cada capital/jugador para dibujarlos, así
+    // que no hace falta recalcular ninguna transformación aparte para el
+    // hit-test — hitTestFactionAt() solo compara contra esta lista.
+    let hoverTargets = [];
+
+    function hitTestFactionAt(screenX, screenY) {
+      let best = null;
+      let bestDist = Infinity;
+      for (const t of hoverTargets) {
+        const d = Math.hypot(screenX - t.x, screenY - t.y);
+        if (d <= t.radius && d < bestDist) { best = t; bestDist = d; }
+      }
+      return best ? best.factionNumber : null;
+    }
 
     // Nubes del cielo (decorativo, ver stepClouds()/drawClouds()): pocas a
     // la vez, en pantalla (no en coordenadas de mundo), cruzando solo la
@@ -2062,6 +2091,7 @@
           home,
           factionColor: f.color,
           buildingKind: 'capital',
+          factionNumber: f.number,
           specs: [{ spriteKey: 'aldeano', n: Math.max(1, f.capitalVillagerCount || 0) }],
           // Defensa pasiva TOTAL que ya suma resolveCombat() (torres +
           // maravillas + museos, ver rules/combat.js) — el marcador de al
@@ -2291,6 +2321,9 @@
           const chh = cw * (capitalSpriteImg.naturalHeight / capitalSpriteImg.naturalWidth);
           const ccx = home.x * scale + vx, ccy = home.y * scale + vy;
           ctx.drawImage(capitalSpriteImg, ccx - cw / 2, ccy - chh, cw, chh);
+          if (group.factionNumber != null) {
+            hoverTargets.push({ factionNumber: group.factionNumber, x: ccx, y: ccy - chh / 2, radius: Math.max(cw, chh) / 2 });
+          }
           // Bono de defensa pasiva total (torres+maravillas+museos, ver
           // desiredSiteSpecs()) — en tamaño de PANTALLA fijo (no escala con
           // `scale`), asi que se lee igual de bien a cualquier zoom, y solo
@@ -2892,6 +2925,10 @@
         const sx = walker.x * scale + vx;
         const sy = (walker.y - hop) * scale + vy;
 
+        if (walker.factionNumber != null) {
+          hoverTargets.push({ factionNumber: walker.factionNumber, x: sx, y: sy - drawH / 2, radius: Math.max(drawW, drawH) / 2 });
+        }
+
         // Tropas de IA: se dibujan ANTES que al jugador, para que quede
         // claro que van detras/debajo de su "general" — cada una en su
         // propio punto del cono de detras (ver stepFollowerCone()), no en
@@ -3103,6 +3140,9 @@
       if (!w || !h) return;
       if (!objectsEl.width || !objectsEl.height) resizeCanvas();
       ctx.clearRect(0, 0, w, h);
+      // Se vacía y se repuebla entera cada frame — ver hitTestFactionAt() más
+      // arriba y su relleno dentro de drawSiteWalkers()/drawWalkers().
+      hoverTargets = [];
 
       // Orden de capas dentro de este canvas, de atras hacia delante:
       // decoracion del mapa -> objetos de terreno -> vaca -> caminantes ->
@@ -3311,7 +3351,7 @@
 
     return {
       onLayout, onViewChanged, onResize, setDecorations, setWalkerWorld, getMarkerPositions, getCowPosition,
-      addResolutionEffect, clearResolutionEffects,
+      addResolutionEffect, clearResolutionEffects, hitTestFactionAt,
     };
   }
 

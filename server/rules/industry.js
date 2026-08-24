@@ -82,12 +82,25 @@ const SPECIAL_TROOP_CAP = 10;
  *                            (ver SPECIAL_TROOP_COMBAT_BONUS, integrado en
  *                            rules/combat.js). Sin aldeanos alrededor, a
  *                            diferencia de la capital.
+ *
+ * Niveles 5-8 ('nivel5'..'nivel8'): PREPARADOS pero SIN EFECTO todavia — a
+ * proposito, pendientes de decidir que hacen (ver docs/ACCIONES.md sección
+ * 35). Ya cuentan para la probeta de industria del panel de facciones (la
+ * probeta lee `industryThresholds`, que sale de este mismo array, así que
+ * pasa sola de 4 a 8 marcas sin tocar el cliente) y para el resumen de ronda
+ * ("mejoras desbloqueadas") — `applyIndustryTier()` mas abajo simplemente no
+ * hace nada al cruzarlos, exactamente igual que cualquier `tierKey`
+ * desconocida.
  */
 const INDUSTRY_TIERS = [
   { key: 'caballero', perPlayer: 3 },
   { key: 'industria_extra', perPlayer: 8 },
   { key: 'iglesia', perPlayer: 15 },
   { key: 'castillo_especial', perPlayer: 24 },
+  { key: 'nivel5', perPlayer: 35 },
+  { key: 'nivel6', perPlayer: 48 },
+  { key: 'nivel7', perPlayer: 63 },
+  { key: 'nivel8', perPlayer: 80 },
 ];
 
 // Suelo de jugadores al calcular los umbrales. Sin el, una faccion a la que
@@ -220,6 +233,14 @@ function applyIndustryTier(match, context, faction, tierKey) {
       // `churchBuilt` es tambien lo que usa el cliente para pintar el
       // edificio junto a la capital (ver public/mapRenderer.js).
       faction.churchBuilt = true;
+      return;
+    case 'nivel5':
+    case 'nivel6':
+    case 'nivel7':
+    case 'nivel8':
+      // Sin efecto todavia (ver docs/ACCIONES.md sección 35) — el desbloqueo
+      // ya quedó registrado arriba (context.roundEvents.industryUnlocks) y
+      // la probeta ya se llena hasta aquí, solo falta decidir qué hacen.
       return;
     default:
       return;

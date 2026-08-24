@@ -125,6 +125,8 @@
 
     <label><input type="checkbox" id="alliancesEnabled" style="width:auto" checked /> Alianzas activadas</label>
 
+    <label title="Si se activa, cada facción recibe al azar (al crear la partida, con posible repetición) una de las 6 habilidades especiales del catálogo, activable con !especial cuando llegue al % de votantes de abajo. Todavía sin efecto definido (hab1-hab6, ver botón de ayuda) — este interruptor solo prepara el reparto."><input type="checkbox" id="specialAbilitiesEnabled" style="width:auto" /> Habilidades especiales activadas</label>
+
     <div class="row">
       <div style="flex:1">
         <label title="Cuántas tropas de IA (soldados+arqueros+caballeros) puede llevar como mucho cada jugador. Al llegar al límite deja de recibir más — si toda la facción está al límite, esa producción se pierde.">Límite de tropas por jugador (1-200)</label>
@@ -240,9 +242,6 @@
     row.innerHTML = `
       <input type="text" placeholder="Nombre de la facción" value="${escapeHtml(name)}" class="factionName" />
       <input type="color" value="${escapeHtml(color)}" class="factionColor" />
-      <label style="margin:0; display:flex; gap:4px; align-items:center; font-size:12px;">
-        <input type="checkbox" class="factionSpecial" style="width:auto" /> especial
-      </label>
       <button class="secondary" onclick="this.parentElement.remove()">✕</button>
     `;
     container.appendChild(row);
@@ -288,8 +287,6 @@
     const factions = [...document.querySelectorAll('.faction-row')].map((row) => ({
       name: row.querySelector('.factionName').value || 'Sin nombre',
       color: row.querySelector('.factionColor').value,
-      specialEnabled: row.querySelector('.factionSpecial').checked,
-      specialAbility: 'escudo', // catálogo simple por ahora, elegible más adelante desde el panel
     }));
 
     send('admin:createMatch', {
@@ -301,6 +298,7 @@
         key: document.getElementById('mapKey').value,
       },
       alliancesEnabled: document.getElementById('alliancesEnabled').checked,
+      specialAbilitiesEnabled: document.getElementById('specialAbilitiesEnabled').checked,
       troopLimitPerPlayer: Number(document.getElementById('troopLimitPerPlayer').value),
       startingLives: Number(document.getElementById('startingLives').value),
       maxPlayersPerFaction: Number(document.getElementById('maxPlayersPerFaction').value),

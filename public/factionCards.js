@@ -82,7 +82,7 @@
     const nextTier = nextMark !== undefined ? marks.indexOf(nextMark) + 1 : null;
     const title = nextTier
       ? `Industria: ${industry.toFixed(1)} — faltan ${(nextMark - industry).toFixed(1)} para el nivel ${nextTier}`
-      : `Industria: ${industry.toFixed(1)} — las 4 mejoras ya están desbloqueadas`;
+      : `Industria: ${industry.toFixed(1)} — las 8 mejoras ya están desbloqueadas`;
 
     const safeColor = escapeHtml(color);
 
@@ -144,7 +144,7 @@
       card.innerHTML = `
         <div class="factionCardMain">
           <span class="dot" style="background:${color}"></span>
-          <span class="fname">#${f.number} ${name}</span>
+          <span class="fname" data-hover-faction="${f.number}">#${f.number} ${name}</span>
           <span class="fstat">${aliveCount}/${playersInFaction.length} vivos</span>
           <span class="fstat">${f.territoryCount} terr.</span>
           <span class="fstat">industria ${f.industry.toFixed(1)} (+${(f.industryGainedLastRound || 0).toFixed(1)})</span>

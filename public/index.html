@@ -73,6 +73,38 @@
   .resolutionCardBody { font-size:13px; line-height:1.5; }
   .resolutionCardBody .rline { margin-bottom:2px; }
   .resolutionCardProgress { margin-top:8px; font-size:11px; color:var(--ink-soft); text-align:right; }
+  /* Barra de comandos (ver docs/ACCIONES.md sección 35): vive sobre la misma
+     maderita de abajo que ya pinta `body::after` (shared.css) — mismo fondo
+     por encima, así que no hace falta desactivar ese pseudo-elemento, solo
+     apilar encima con pointer-events reales. Scroll horizontal en vez de
+     envolver a varias líneas: la barra tiene alto fijo (var(--map-margin-y)),
+     y son muchos botones para caber siempre en una fila en pantallas
+     estrechas. */
+  #commandBar { position:fixed; left:0; right:0; bottom:0; height:var(--map-margin-y); z-index:19;
+                background-image:url('/ui/wood-bar.png'); background-repeat:repeat-x;
+                background-size:var(--wood-tile-w) 100%; image-rendering:pixelated;
+                display:flex; align-items:center; gap:6px; padding:0 16px;
+                overflow-x:auto; overflow-y:hidden; box-sizing:border-box; }
+  #commandBar::-webkit-scrollbar { height:6px; }
+  .cmdBtn { border:8px solid transparent; border-image:url('/ui/metal-plate.png') 11 fill / 8px stretch;
+            image-rendering:pixelated; background:none; padding:3px 9px; flex:0 0 auto;
+            font-family:var(--font-title); font-size:12px; font-weight:600; letter-spacing:.02em;
+            color:var(--gold); text-shadow:0 1px 1px rgba(45,25,5,.85); cursor:pointer;
+            transition:filter .12s ease; white-space:nowrap; }
+  .cmdBtn:hover { filter:brightness(1.14); }
+  .cmdBtn:active { filter:brightness(.92); }
+  .cmdBtn.justCopied { filter:hue-rotate(80deg) saturate(1.4) brightness(1.15); }
+  /* Popup de resumen de facción (ver docs/ACCIONES.md sección 35): tarjeta
+     pequeña y compacta que sigue al ratón, pointer-events:none para que
+     nunca robe el mouseleave del elemento que lo disparó. */
+  .factionHoverTip { position:fixed; z-index:95; pointer-events:none;
+                      background-image:url('/ui/parchment.png'); background-size:160px 160px;
+                      color:var(--ink); font-family:var(--font-serif); font-size:12px; line-height:1.6;
+                      border:2px solid #4a331c; border-radius:3px; padding:8px 10px;
+                      box-shadow:0 6px 18px rgba(0,0,0,.5); max-width:210px; }
+  .factionHoverTip.hidden { display:none; }
+  .factionHoverTip .fhtTitle { font-family:var(--font-title); font-size:13px; margin-bottom:4px; }
+  [data-hover-faction] { cursor:help; }
   .modalOverlay { position:fixed; inset:0; background:rgba(20,12,4,.74); display:flex; align-items:center;
                   justify-content:center; z-index:100; padding:20px; }
   .modalOverlay.hidden { display:none; }
@@ -168,6 +200,13 @@
        cómo sustituir public/audio/bgm-placeholder.mp3 por la pista final. -->
   <audio id="bgMusic" src="/audio/bgm-placeholder.mp3" loop preload="auto"></audio>
 
+  <!-- Barra de comandos (ver docs/ACCIONES.md sección 35): un botón por cada
+       comando de la Fase de Acción, sobre la maderita de abajo. No se puede
+       escribir en el chat de Twitch desde aquí (otra pestaña, otro origen —
+       el navegador lo bloquea), así que cada botón copia el comando al
+       portapapeles; el jugador solo tiene que pegarlo en el chat y enviar. -->
+  <div id="commandBar"></div>
+
   <div class="mapToolbar">
     <button onclick="mapCtrl.zoom(1.25)" title="Acercar">+</button>
     <button onclick="mapCtrl.zoom(0.8)" title="Alejar">−</button>
@@ -179,7 +218,7 @@
       <!-- Numero de version: sube esto en cada entrega nueva (empezamos en 0.1.0, a peticion del streamer).
            Convencion pedida: sube el ULTIMO numero en cada entrega; al llegar a 9 el del medio sube
            uno y el ultimo vuelve a 0 (...0.4.9 -> 0.5.0 -> 0.5.1...), progresivamente. -->
-      <h1>Version 0.4.2</h1>
+      <h1>Version 0.4.3</h1>
       <button class="headerBtn" id="musicToggle" onclick="toggleMusic()" title="Música de fondo">🎵</button>
       <input type="range" id="musicVolume" class="volumeSlider" min="0" max="100" value="50"
              oninput="setMusicVolume(this.value)" title="Volumen de la música" />
@@ -257,6 +296,13 @@
     <div id="resolutionCardBody" class="resolutionCardBody"></div>
     <div id="resolutionCardProgress" class="resolutionCardProgress"></div>
   </div>
+
+  <!-- Popup de resumen de facción al pasar el ratón (ver docs/ACCIONES.md
+       sección 35): sobre el nombre de una facción, su capital en el mapa, o
+       el placeholder de un jugador. Trigger de hover puro (pointer-events
+       none en el propio popup para no interferir con el mouseleave del
+       elemento de debajo) — se oculta solo al quitar el ratón. -->
+  <div id="factionHoverTip" class="factionHoverTip hidden"></div>
 
   <div id="summaryModal" class="modalOverlay hidden">
     <div class="modalBox">
@@ -716,6 +762,13 @@
     industria_extra: '3 industrias gratis',
     iglesia: 'Iglesia ⛪ junto a tu capital (+50 al límite de tropas de cada uno)',
     castillo_especial: 'Castillo especial 🏯 junto a tu capital (2 tropas especiales, +1/ronda)',
+    // Niveles 5-8: preparados, sin efecto todavía (ver docs/ACCIONES.md
+    // sección 35) — se etiquetan igual que el resto para que el resumen no
+    // se quede en blanco al cruzarlos, aunque de momento no pase nada más.
+    nivel5: 'Nivel 5 🔧 (sin efecto todavía)',
+    nivel6: 'Nivel 6 🔧 (sin efecto todavía)',
+    nivel7: 'Nivel 7 🔧 (sin efecto todavía)',
+    nivel8: 'Nivel 8 🔧 (sin efecto todavía)',
   };
 
   function industryLines(state, industryData, unlocksData) {
@@ -833,11 +886,16 @@
   // explicación, la explicación grande va en el texto de ayuda".
   const CHAT_COMMANDS = [
     { cmd: '!faccion1, !faccion2, ...', phase: 'Reclutamiento', short: 'Te unes a esa facción (una vez por partida).', desc: 'Te unes a esa facción (el número es el que muestra el admin). Solo se puede una vez por partida, y solo mientras dura la fase de Reclutamiento.' },
-    { cmd: '!industria', phase: 'Acción', short: 'Levantas una industria: +0.5 por ronda para siempre.', desc: 'Levantas una industria en un terreno al azar de tu facción. Cada industria da +0.5 por ronda, para siempre, además del +0.1 que da cada terreno por sí solo. Si te conquistan ese terreno, la industria se va con él. La industria acumulada de tu facción desbloquea 4 mejoras automáticas (nadie vota nada, saltan solas): 1 soldado al azar pasa a caballero 🐴 (más fuerte y más rápido), 3 industrias gratis, una iglesia ⛪ junto a tu capital que da +50 al límite de tropas de cada uno de tu facción (para siempre), y por último aparece un castillo especial 🏯 junto a tu capital que trae 2 tropas especiales al construirse y 1 más cada ronda después (hasta 10 por facción) — cada una con 0.4 fijo de ataque Y defensa, y siguen a quien las lleve como cualquier otra tropa.' },
+    { cmd: '!industria', phase: 'Acción', short: 'Levantas una industria: +0.5 por ronda para siempre.', desc: 'Levantas una industria en un terreno al azar de tu facción. Cada industria da +0.5 por ronda, para siempre, además del +0.1 que da cada terreno por sí solo. Si te conquistan ese terreno, la industria se va con él. La industria acumulada de tu facción (la probeta de su tarjeta) desbloquea 8 mejoras automáticas, EN ORDEN, sin que nadie vote nada — saltan solas al cruzar cada marca:<br><br>' +
+      '<strong>Nivel 1</strong> — 1 soldado al azar pasa a caballero 🐴 (tira más fuerte en combate y se mueve más rápido por el mapa).<br>' +
+      '<strong>Nivel 2</strong> — se levantan 3 industrias más de golpe, gratis (como si 3 personas hubieran votado !industria).<br>' +
+      '<strong>Nivel 3</strong> — aparece una iglesia ⛪ junto a tu capital: +50 al límite de tropas de CADA jugador de tu facción, para siempre.<br>' +
+      '<strong>Nivel 4</strong> — aparece un castillo especial 🏯 junto a tu capital: trae 2 tropas especiales al construirse y 1 más cada ronda después (hasta 10 por facción), cada una con 0.4 fijo de ataque Y defensa, y siguen a quien las lleve como cualquier otra tropa.<br>' +
+      '<strong>Niveles 5 a 8</strong> — preparados para más adelante, todavía sin efecto (se avisará en el resumen de ronda igualmente al cruzarlos, y la probeta se llena hasta el final).' },
     { cmd: '!ataque <N>', phase: 'Acción', short: 'Atacas a la facción N (solo si tenéis frontera).', desc: 'Atacas a la facción número N (solo si tenéis frontera). Cada atacante aporta entre 0.7 y 1.3 de fuerza (al azar) — o entre 0.9 y 1.4 si es un caballero 🐴 — así que el mismo número de gente no siempre gana. En el mapa sale una espada roja ⚔ sobre la facción atacada con cuántos la atacáis.' },
     { cmd: '!defender', phase: 'Acción', short: 'Defiendes a tu facción esta ronda.', desc: 'Defiendes a tu facción esta ronda, aportando entre 0.7 y 1.3 de defensa (al azar) — o entre 0.9 y 1.4 si eres caballero 🐴. ¡Importante! El territorio NO se defiende solo: si nadie escribe !defender, tu facción entra al combate con 0 de defensa. En el mapa sale un escudo verde 🛡 con cuántos estáis defendiendo.' },
     { cmd: '!expansion', phase: 'Acción', short: 'Ocupáis terreno neutral vecino.', desc: 'Ocupáis terreno neutral vecino: hacen falta 2 personas por cada terreno nuevo (1 o 2 votos = 1 terreno, 4 votos = 2 terrenos...). No hace nada si la partida es de "reparto total", sin neutrales.' },
-    { cmd: '!especial', phase: 'Acción', short: 'Vota para activar la habilidad especial de tu facción.', desc: 'Votas para activar la habilidad especial de tu facción cuando llegue al % necesario.' },
+    { cmd: '!especial', phase: 'Acción', short: 'Vota para activar la habilidad especial de tu facción — solo si el admin las activó.', desc: 'Votas para activar la habilidad especial de tu facción cuando llegue al % de votantes necesario (una sola vez por partida) — solo funciona si el admin activó las habilidades especiales al crear la partida. Cada facción recibe UNA al azar del catálogo de 6 al empezar la partida (con más de 6 facciones, se repiten) — de momento se llaman "hab1" a "hab6" porque todavía no tienen un efecto definido, es solo la primera parte del sistema (el catálogo real vendrá más adelante). Pasa el ratón por el nombre de tu facción, por su capital en el mapa, o por tu propio personaje, para ver qué habilidad le tocó.' },
     { cmd: '!alianza <N>', phase: 'Acción', short: 'Vota proponer una alianza con la facción N.', desc: 'Votas para proponer una alianza con la facción número N (solo si el admin activó alianzas al crear la partida).' },
     { cmd: '!levas', phase: 'Acción', short: 'Levanta una barraca 🏕️: +5 soldados de IA, +1/ronda después.', desc: 'Levantas una barraca 🏕️ en un terreno al azar de tu facción (igual que !industria) y te lleva de inmediato +5 soldados de IA que te siguen por el mapa. Cada soldado te suma +0.1 fijo tanto en ataque como en defensa. Además, cada barraca en pie da +1 soldado por ronda a partir de la siguiente, repartido entre tu facción priorizando a quien menos tenga. Si te conquistan el terreno, la barraca pasa a producir para el nuevo dueño.' },
     { cmd: '!arqueros', phase: 'Acción', short: 'Levanta un campo de arquería 🏹: +5 arqueros de IA, +1/ronda después.', desc: 'Levantas un campo de arquería 🏹 (igual mecánica que !levas) y te da +5 arqueros de IA al momento, +1 por ronda después por cada campo en pie. Los arqueros son especialistas de ataque: +0.2 fijo atacando, 0 defendiendo.' },
@@ -849,6 +907,120 @@
     { cmd: '!casas', phase: 'Acción', short: 'Construye una vivienda 🏠 junto a tu capital: +5 al límite de tropas de cada uno, máx. 10 por facción.', desc: 'Construyes una vivienda 🏠 junto a tu capital, en un anillo propio como la iglesia/estatua/museo, sin solaparse con ellos. No da tropas: sube el LÍMITE MÁXIMO de tropas que puede llevar CADA jugador de tu facción +5 por cada vivienda que tenga la facción, hasta un máximo de 10 (+50 en total) — se suma al límite base que pone el admin, y también al +50 de la iglesia si la tenéis, sin tope combinado entre las dos.' },
     { cmd: '!apoyar <usuario>', phase: 'Acción', short: 'Manda tus propias tropas a reforzar la defensa de OTRO jugador de OTRA facción, solo esta ronda.', desc: 'Escribe el nombre de un jugador de OTRA facción (no la tuya) para mandar tus propias tropas a reforzar la defensa de SU facción, como si hubieras escrito !defender por ellos — una especie de ayuda puntual entre facciones, sin ser una alianza permanente. Solo tiene efecto si esa facción recibe algún ataque ESTA MISMA ronda (si nadie la ataca, tu apoyo no hace nada, igual que un !defender sin ataque entrante). Sigues siendo de TU facción — no cambias de bando — pero tus tropas entran en ESE combate: si se quedan a 0, pierdes una vida como en cualquier otro combate, y si tu facción se queda sin nadie vivo por esto, también puede desaparecer. Rechazado si el jugador no existe, está muerto, o es de tu propia facción.' },
   ];
+
+  // ---------------------------------------------------------------------
+  // Barra de comandos (ver docs/ACCIONES.md sección 35): un botón por cada
+  // comando de la Fase de Acción (se deja fuera !faccionN, que es de
+  // Reclutamiento y ya tiene su propio flujo). Copiar al portapapeles es la
+  // única forma real de "ayudar a escribir en Twitch" sin cuentas ni
+  // extensiones: un sitio web no puede escribir en la pestaña de otro
+  // origen, así que el jugador pega (Ctrl+V) el resultado en el chat.
+  // ---------------------------------------------------------------------
+  function renderCommandBar() {
+    const bar = document.getElementById('commandBar');
+    bar.innerHTML = CHAT_COMMANDS.filter((c) => c.phase === 'Acción').map((c, i) => {
+      const base = c.cmd.split(' ')[0];
+      const copyText = c.cmd.includes('<') ? `${base} ` : base;
+      return `<button class="cmdBtn" data-copy="${escapeHtmlAttr(copyText)}" onclick="copyCommand(this)" title="${escapeHtmlAttr(c.short)}">${base}</button>`;
+    }).join('');
+  }
+
+  function escapeHtmlAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  async function copyCommand(btn) {
+    const text = btn.getAttribute('data-copy');
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      console.warn('[commandBar] no se pudo copiar al portapapeles:', err);
+      return;
+    }
+    const original = btn.textContent;
+    btn.textContent = '¡Copiado!';
+    btn.classList.add('justCopied');
+    clearTimeout(btn._copyTimer);
+    btn._copyTimer = setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('justCopied');
+    }, 1100);
+  }
+
+  renderCommandBar();
+
+  // ---------------------------------------------------------------------
+  // Popup de resumen de facción al pasar el ratón (ver docs/ACCIONES.md
+  // sección 35): sobre el nombre de una facción (Facciones/Jugadores,
+  // atributo data-hover-faction puesto en factionCards.js/renderRoster()
+  // más arriba), su capital en el mapa, o el placeholder de un jugador
+  // (mapCtrl.hitTestFactionAt(), ver mapRenderer.js). Un único popup
+  // compartido por los tres sitios — se posiciona junto al cursor y se
+  // oculta al quitar el ratón de encima (mouseleave/mousemove fuera del
+  // objetivo), como un tooltip normal.
+  // ---------------------------------------------------------------------
+  const SPECIAL_ABILITY_EMOJI = { hab1: '🔮', hab2: '🌀', hab3: '⚡', hab4: '🛡️', hab5: '🗡️', hab6: '🔥' };
+
+  function factionHoverHtml(factionNumber) {
+    const f = ((lastState && lastState.factions) || []).find((x) => x.number === factionNumber);
+    if (!f) return '';
+    const { escapeHtml } = window.CondejorgeFactionCards;
+    const ability = f.specialAbility
+      ? `${SPECIAL_ABILITY_EMOJI[f.specialAbility] || '✨'} ${escapeHtml(f.specialAbility)}`
+      : '— (desactivadas en esta partida)';
+    return `
+      <div class="fhtTitle">${escapeHtml(f.name)}</div>
+      <div>🏭 Industria: nivel ${f.industryTierIndex || 0}/8</div>
+      <div>⛪ Iglesia: ${f.churchBuilt ? 'sí' : 'no'} · 🏯 Castillo especial: ${f.specialCastleBuilt ? 'sí' : 'no'}</div>
+      <div>🏠 Casas: ${f.housesBuilt || 0}/10 · 🗼 Torres: ${f.towerCount || 0}</div>
+      <div>🗿 Estatuas: ${f.dungeonTrophies || 0} · 🏛️ Museos: ${f.bossTrophies || 0} · 🗽 Maravillas: ${f.wondersCount || 0}</div>
+      <div>✨ Habilidad especial: ${ability}</div>`;
+  }
+
+  function showFactionHoverTip(factionNumber, clientX, clientY) {
+    const html = factionHoverHtml(factionNumber);
+    const tip = document.getElementById('factionHoverTip');
+    if (!html) { tip.classList.add('hidden'); return; }
+    tip.innerHTML = html;
+    tip.classList.remove('hidden');
+    // Se aleja un poco del cursor y se voltea al lado izquierdo/arriba si no
+    // le cabe a la derecha/abajo, para que nunca se salga de la pantalla.
+    const pad = 16;
+    const rectW = tip.offsetWidth || 210, rectH = tip.offsetHeight || 100;
+    let left = clientX + pad, top = clientY + pad;
+    if (left + rectW > window.innerWidth) left = clientX - rectW - pad;
+    if (top + rectH > window.innerHeight) top = clientY - rectH - pad;
+    tip.style.left = `${Math.max(4, left)}px`;
+    tip.style.top = `${Math.max(4, top)}px`;
+  }
+
+  function hideFactionHoverTip() {
+    document.getElementById('factionHoverTip').classList.add('hidden');
+  }
+
+  // Trigger DOM (nombre de facción en Facciones/Jugadores): delegado en
+  // document, así funciona igual para elementos creados/recreados en cada
+  // render (renderFactionCards()/renderRoster() reconstruyen el HTML entero
+  // cada vez que llega un state nuevo).
+  document.addEventListener('mousemove', (e) => {
+    const el = e.target.closest('[data-hover-faction]');
+    if (el) showFactionHoverTip(Number(el.getAttribute('data-hover-faction')), e.clientX, e.clientY);
+  });
+  document.addEventListener('mouseout', (e) => {
+    if (e.target.closest('[data-hover-faction]') && !e.relatedTarget?.closest('[data-hover-faction]')) hideFactionHoverTip();
+  });
+
+  // Trigger de mapa (capital o jugador bajo el cursor, ver
+  // mapCtrl.hitTestFactionAt() en mapRenderer.js) — coordenadas relativas a
+  // #mapViewport, mismo origen que usa el canvas de objetos.
+  const mapViewportEl = document.getElementById('mapViewport');
+  mapViewportEl.addEventListener('mousemove', (e) => {
+    const rect = mapViewportEl.getBoundingClientRect();
+    const factionNumber = mapCtrl.hitTestFactionAt(e.clientX - rect.left, e.clientY - rect.top);
+    if (factionNumber != null) showFactionHoverTip(factionNumber, e.clientX, e.clientY);
+    else hideFactionHoverTip();
+  });
+  mapViewportEl.addEventListener('mouseleave', hideFactionHoverTip);
 
   function openCommands() {
     const body = document.getElementById('commandsBody');
@@ -905,7 +1077,7 @@
       column.className = 'roster-column';
       column.style.borderTopColor = f.color;
       const { escapeHtml, heartsFor } = window.CondejorgeFactionCards;
-      column.innerHTML = `<h3><span><span class="dot" style="background:${escapeHtml(f.color)}"></span> ${escapeHtml(f.name)}</span><span>${playersInFaction.length}</span></h3>`;
+      column.innerHTML = `<h3><span data-hover-faction="${f.number}"><span class="dot" style="background:${escapeHtml(f.color)}"></span> ${escapeHtml(f.name)}</span><span>${playersInFaction.length}</span></h3>`;
       if (playersInFaction.length === 0) {
         column.innerHTML += '<div class="roster-empty">nadie unido todavía</div>';
       } else {
