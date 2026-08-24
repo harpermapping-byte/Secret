@@ -134,6 +134,10 @@
         <label title="Cuántos jugadores como mucho puede aceptar cada facción durante el reclutamiento.">Jugadores máx. por facción (1-100)</label>
         <input type="number" id="maxPlayersPerFaction" value="100" min="1" max="100" />
       </div>
+      <div style="flex:1">
+        <label title="Vidas con las que empieza cada jugador. Al quedarse sin ninguna tropa en un combate (PvP o PvE) pierde una vida y reaparece con 0 tropas; al perder la última es la muerte real de siempre. 1 = muerte súbita (sin colchón, como una muerte normal), 2-5 = vidas extra.">Vidas por jugador (1=muerte súbita, 2-5)</label>
+        <input type="number" id="startingLives" value="3" min="1" max="5" />
+      </div>
     </div>
 
     <label title="Si se activa, aparecen de 1 a 5 dungeons al azar en el mapa (guarnición de orcos/goblins) — atacables con !dungeon dentro de tu propio territorio. Al derrotarlos, la facción gana una estatua junto a su capital."><input type="checkbox" id="ffDungeons" style="width:auto" /> Dungeons (!dungeon)</label>
@@ -217,6 +221,7 @@
     </div>
   </div>
 
+<script src="/spriteSizes.js"></script>
 <script src="/mapRenderer.js"></script>
 <script src="/factionCards.js"></script>
 <script src="/matchTimer.js"></script>
@@ -297,6 +302,7 @@
       },
       alliancesEnabled: document.getElementById('alliancesEnabled').checked,
       troopLimitPerPlayer: Number(document.getElementById('troopLimitPerPlayer').value),
+      startingLives: Number(document.getElementById('startingLives').value),
       maxPlayersPerFaction: Number(document.getElementById('maxPlayersPerFaction').value),
       futureFeatures: {
         wonders: document.getElementById('ffWonders').checked,

@@ -32,6 +32,8 @@
   .player { padding:5px 8px; border-radius:3px; background:rgba(92,64,30,.12); font-size:13px;
             border:1px solid var(--ink-line); margin-bottom:6px; color:var(--ink); }
   .player.dead { opacity:0.4; text-decoration: line-through; }
+  .player.clickable { cursor:pointer; }
+  .player.clickable:hover { background:rgba(92,64,30,.28); }
 
   /* Buscador de jugador (arriba del panel "👥 Jugadores"): escribir un nombre
      y confirmar mueve el zoom del mapa hasta su marcador — ver
@@ -58,6 +60,19 @@
 
   /* Popups = hoja de pergamino. El velo de fondo es marrón oscuro (no azul)
      para que la hoja destaque como si estuviera sobre una mesa de madera. */
+  /* Fase de Resolución (ver playResolutionQueue()): tarjeta flotante abajo
+     al centro, NUNCA a pantalla completa — el mapa (y la cámara siguiendo
+     cada combate) tiene que seguir viéndose detrás. */
+  .resolutionCard { position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+                     background-image:url('/ui/parchment.png'); background-size:220px 220px;
+                     color:var(--ink); font-family:var(--font-serif);
+                     border:2px solid #4a331c; border-radius:3px; max-width:480px; width:calc(100% - 40px);
+                     padding:12px 16px; box-shadow:0 10px 30px rgba(0,0,0,.55); z-index:90; }
+  .resolutionCard.hidden { display:none; }
+  .resolutionCardTitle { font-family:var(--font-title); font-size:16px; margin-bottom:6px; letter-spacing:.02em; }
+  .resolutionCardBody { font-size:13px; line-height:1.5; }
+  .resolutionCardBody .rline { margin-bottom:2px; }
+  .resolutionCardProgress { margin-top:8px; font-size:11px; color:var(--ink-soft); text-align:right; }
   .modalOverlay { position:fixed; inset:0; background:rgba(20,12,4,.74); display:flex; align-items:center;
                   justify-content:center; z-index:100; padding:20px; }
   .modalOverlay.hidden { display:none; }
@@ -161,8 +176,10 @@
 
   <div class="overlayTopBar">
     <div class="topLeft">
-      <!-- Numero de version: sube esto en cada entrega nueva (empezamos en 0.1.0, a peticion del streamer). -->
-      <h1>Version 0.1.0</h1>
+      <!-- Numero de version: sube esto en cada entrega nueva (empezamos en 0.1.0, a peticion del streamer).
+           Convencion pedida: sube el ULTIMO numero en cada entrega; al llegar a 9 el del medio sube
+           uno y el ultimo vuelve a 0 (...0.4.9 -> 0.5.0 -> 0.5.1...), progresivamente. -->
+      <h1>Version 0.4.2</h1>
       <button class="headerBtn" id="musicToggle" onclick="toggleMusic()" title="Música de fondo">🎵</button>
       <input type="range" id="musicVolume" class="volumeSlider" min="0" max="100" value="50"
              oninput="setMusicVolume(this.value)" title="Volumen de la música" />
@@ -231,6 +248,16 @@
     </div>
   </div>
 
+  <!-- Fase de Resolución (ver docs/ACCIONES.md, playResolutionQueue() más
+       abajo): a propósito NO es un .modalOverlay — no debe tapar el mapa,
+       la gracia es ver la cámara siguiendo cada combate/conquista por
+       detrás de esta tarjeta. -->
+  <div id="resolutionCard" class="resolutionCard hidden">
+    <div id="resolutionCardTitle" class="resolutionCardTitle"></div>
+    <div id="resolutionCardBody" class="resolutionCardBody"></div>
+    <div id="resolutionCardProgress" class="resolutionCardProgress"></div>
+  </div>
+
   <div id="summaryModal" class="modalOverlay hidden">
     <div class="modalBox">
       <button class="modalClose" onclick="closeSummaryModal()">✕</button>
@@ -291,6 +318,7 @@
     handleFactionsPanelAutoOpen(state);
     renderRoster(state);
     handleSummaryModal(state);
+    handleResolutionPhase(state);
 
     renderEndBanner(state);
     handleMatchEndModal(state);
@@ -533,6 +561,119 @@
     document.getElementById('summaryModal').classList.add('hidden');
   }
 
+  // ---------------------------------------------------------------------
+  // Fase de Resolución (ver docs/ACCIONES.md, server/gameEngine.js
+  // buildResolutionEvents()/enterResolutionPhase()): reproduce la cola de
+  // `state.resolutionEvents` UNO A UNO — cámara al foco de cada uno,
+  // efecto visual (polvareda o carromato, ver mapCtrl.playResolutionEffect
+  // en mapRenderer.js) y una tarjeta con el resultado, durante los
+  // milisegundos que ya decidió el servidor (adaptados si hay muchos
+  // eventos esa ronda). Si el admin pide pasar ronda en mitad de la fase
+  // (ver server skipResolutionFast()), el resto de la cola se recorre
+  // rápido: sin cámara ni efecto, solo la tarjeta un instante cada uno.
+  // ---------------------------------------------------------------------
+  let resolutionQueue = [];
+  let resolutionIndex = -1;
+  let resolutionRoundKey = null; // `${round}` de la cola actual, para no reiniciarla en cada state:public que llegue de la misma ronda
+  let resolutionTimer = null;
+  let resolutionFastMode = false;
+  let lastSkipRequestedAt = null;
+  const RESOLUTION_FAST_MS = 900; // igual que RESOLUTION_SKIP_MS_PER_EVENT en gameEngine.js, para no desincronizarse del servidor
+  const RESOLUTION_FOCUS_SCALE = 2.6;
+
+  function handleResolutionPhase(state) {
+    const hasEvents = state.phase === 'resolution' && (state.resolutionEvents || []).length > 0;
+    if (hasEvents) {
+      const key = String(state.round);
+      if (resolutionRoundKey !== key) {
+        resolutionRoundKey = key;
+        resolutionQueue = state.resolutionEvents;
+        resolutionIndex = -1;
+        resolutionFastMode = false;
+        lastSkipRequestedAt = state.resolutionSkipRequestedAt;
+        document.getElementById('resolutionCard').classList.remove('hidden');
+        playNextResolutionEvent();
+      } else if (state.resolutionSkipRequestedAt && state.resolutionSkipRequestedAt !== lastSkipRequestedAt) {
+        lastSkipRequestedAt = state.resolutionSkipRequestedAt;
+        resolutionFastMode = true;
+      }
+    } else if (resolutionRoundKey !== null) {
+      closeResolutionCard();
+    }
+  }
+
+  function playNextResolutionEvent() {
+    resolutionIndex++;
+    if (resolutionIndex >= resolutionQueue.length) { closeResolutionCard(); return; }
+    const ev = resolutionQueue[resolutionIndex];
+    const state = lastState;
+
+    document.getElementById('resolutionCardTitle').textContent = resolutionTitleFor(ev);
+    document.getElementById('resolutionCardBody').innerHTML = resolutionBodyFor(state, ev);
+    document.getElementById('resolutionCardProgress').textContent = `${resolutionIndex + 1} / ${resolutionQueue.length}`;
+
+    if (!resolutionFastMode) {
+      mapCtrl.focusOnTile(ev.focusTileId, RESOLUTION_FOCUS_SCALE);
+      if (ev.kind === 'conquest') {
+        mapCtrl.playResolutionEffect({ type: 'wagon', focusTileId: ev.focusTileId, originTileId: ev.originTileId, durationMs: ev.durationMs });
+      } else {
+        mapCtrl.playResolutionEffect({ type: 'dust', focusTileId: ev.focusTileId, durationMs: ev.durationMs });
+      }
+    }
+
+    clearTimeout(resolutionTimer);
+    resolutionTimer = setTimeout(playNextResolutionEvent, resolutionFastMode ? RESOLUTION_FAST_MS : ev.durationMs);
+  }
+
+  function closeResolutionCard() {
+    clearTimeout(resolutionTimer);
+    resolutionTimer = null;
+    resolutionRoundKey = null;
+    resolutionQueue = [];
+    resolutionIndex = -1;
+    document.getElementById('resolutionCard').classList.add('hidden');
+    mapCtrl.clearResolutionEffects();
+  }
+
+  function resolutionTitleFor(ev) {
+    if (ev.kind === 'pvp_combat') {
+      const label = { attacker_won: '⚔️ ¡Conquista!', attacker_lost: '⚔️ El ataque fracasa', defender_held: '⚔️ La defensa aguanta' }[ev.outcome] || '⚔️ Combate';
+      return label;
+    }
+    if (ev.kind === 'pve_fight') {
+      return { boss: '👹 Ataque a un boss', conquista: '🏰 Intento de conquista', dungeon: '💀 Asalto a un dungeon' }[ev.pveKind] || '⚔️ Combate';
+    }
+    if (ev.kind === 'conquest') return ev.conquestKind === 'expansion' ? '🚩 Expansión' : '🚩 Conquista';
+    return 'Resolución';
+  }
+
+  function resolutionBodyFor(state, ev) {
+    const lines = [];
+    if (ev.kind === 'pvp_combat') {
+      lines.push(`${fchip(state, ev.attackerFactionNumber)} ataca a ${fchip(state, ev.defenderFactionNumber)}`);
+      if (ev.attackPower != null) lines.push(`Ataque: ${ev.attackPower} · Defensa: ${ev.defensePower}`);
+      if (ev.defenderTroopsLost !== undefined) {
+        if (ev.defenderTroopsLost) lines.push(`El defensor pierde ${ev.defenderTroopsLost} tropas.`);
+        if (ev.defenderDiedCount) lines.push(`${ev.defenderDiedCount} jugador(es) pierden una vida.`);
+      }
+      if (ev.attackerTroopsLost !== undefined) {
+        if (ev.attackerTroopsLost) lines.push(`El atacante pierde ${ev.attackerTroopsLost} tropas.`);
+        if (ev.attackerDiedCount) lines.push(`${ev.attackerDiedCount} jugador(es) pierden una vida.`);
+      }
+      lines.push(ev.outcome === 'attacker_won' ? `Casilla ${ev.tileId} conquistada.` : 'No cambia de dueño.');
+    } else if (ev.kind === 'pve_fight') {
+      lines.push(`${fchip(state, ev.factionNumber)} ataca (${ev.label})`);
+      if (ev.attackPower != null) lines.push(`Ataque: ${ev.attackPower} · Defensa: ${ev.defensePower}`);
+      lines.push(ev.defeated ? '¡Derrotado!' : 'Resiste el asalto.');
+      if (ev.troopsLost) lines.push(`Pierden ${ev.troopsLost} tropas en el contraataque.`);
+      if (ev.diedCount) lines.push(`${ev.diedCount} jugador(es) pierden una vida.`);
+    } else if (ev.kind === 'conquest') {
+      const origin = ev.fromFactionNumber != null ? fchip(state, ev.fromFactionNumber) : 'territorio neutral';
+      lines.push(`${fchip(state, ev.toFactionNumber)} se hace con la casilla ${ev.tileId}, antes de ${origin}.`);
+    }
+    return lines.map((l) => `<div class="rline">${l}</div>`).join('');
+  }
+
   function renderSummaryModal(state) {
     document.getElementById('summaryModalTitle').textContent = `Resumen de la ronda ${state.round}`;
     const blocks = state.summaryBlocks || [];
@@ -565,7 +706,7 @@
 
   function conquestLine(state, c) {
     const origin = c.fromFactionNumber != null ? fchip(state, c.fromFactionNumber) : 'territorio neutral';
-    return c.kind === 'expansion'
+    return c.conquestKind === 'expansion'
       ? `${fchip(state, c.toFactionNumber)} se expandió sobre ${origin} (casilla ${c.tileId})`
       : `${fchip(state, c.toFactionNumber)} conquistó la casilla ${c.tileId} a ${origin}`;
   }
@@ -701,10 +842,12 @@
     { cmd: '!levas', phase: 'Acción', short: 'Levanta una barraca 🏕️: +5 soldados de IA, +1/ronda después.', desc: 'Levantas una barraca 🏕️ en un terreno al azar de tu facción (igual que !industria) y te lleva de inmediato +5 soldados de IA que te siguen por el mapa. Cada soldado te suma +0.1 fijo tanto en ataque como en defensa. Además, cada barraca en pie da +1 soldado por ronda a partir de la siguiente, repartido entre tu facción priorizando a quien menos tenga. Si te conquistan el terreno, la barraca pasa a producir para el nuevo dueño.' },
     { cmd: '!arqueros', phase: 'Acción', short: 'Levanta un campo de arquería 🏹: +5 arqueros de IA, +1/ronda después.', desc: 'Levantas un campo de arquería 🏹 (igual mecánica que !levas) y te da +5 arqueros de IA al momento, +1 por ronda después por cada campo en pie. Los arqueros son especialistas de ataque: +0.2 fijo atacando, 0 defendiendo.' },
     { cmd: '!caballeros', phase: 'Acción', short: 'Levanta una caballeriza 🐎: +5 caballeros de IA, +1/ronda después.', desc: 'Levantas una caballeriza 🐎 (igual mecánica que !levas) y te da +5 caballeros de IA al momento, +1 por ronda después por cada caballeriza en pie. Los caballeros de IA son especialistas de defensa: +0.2 fijo defendiendo, 0 atacando (no confundir con el caballero 🐴 de la mejora de industria, que es un jugador que cambia de sprite).' },
-    { cmd: '!conquista', phase: 'Acción', short: 'Ataca a una estructura neutral de tu territorio (castillo/aldea/puerto).', desc: 'Conquista al azar una estructura neutral (castillo 🏰, aldea 🏘️ o puerto ⚓) que esté dentro de tu propio territorio y todavía tenga guarnición — no puedes elegir cuál, el juego elige una entre las disponibles. Si varios de tu facción votan !conquista la misma ronda, todos atacan juntos a esa única estructura. Sobre cada estructura sin conquistar verás un marcador con la guarnición que tiene (soldados/arqueros/caballeros de IA) y su ataque/defensa ya calculados, para saber si te conviene intentarlo. Si ganáis, la estructura pasa a producir para tu facción para siempre (castillo +1 caballero de IA/ronda, aldea +2 levas/ronda, puerto +1 de industria/ronda) — y si luego pierdes ese terreno, se lo lleva quien te lo conquiste a ti. Si perdéis el asalto, los que votaron sufren bajas según lo fuerte que fuera la guarnición.' },
-    { cmd: '!dungeon', phase: 'Acción', short: 'Ataca a un dungeon (orcos/goblins) de tu territorio — solo si el admin los activó.', desc: 'Ataca a un dungeon 💀 (guarnición de orcos y goblins, ver marcador sobre él) que esté dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 5 por mapa). Misma mecánica de grupo que !conquista: todos los que voten !dungeon esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no. Si lo derrotáis, la guarnición desaparece para siempre y tu facción gana una estatua junto a su capital (con sus propios aldeanos alrededor) — a diferencia de castillo/aldea/puerto, un dungeon no da producción para la casilla.' },
+    { cmd: '!conquista', phase: 'Acción', short: 'Ataca a una estructura neutral de tu territorio (castillo/aldea/puerto).', desc: 'Conquista al azar una estructura neutral (castillo 🏰, aldea 🏘️ o puerto ⚓) que esté dentro de tu propio territorio y todavía tenga guarnición — no puedes elegir cuál, el juego elige una entre las disponibles. Si varios de tu facción votan !conquista la misma ronda, todos atacan juntos a esa única estructura. Sobre cada estructura sin conquistar verás un marcador con la guarnición que tiene (soldados/arqueros/caballeros de IA) y su ataque/defensa ya calculados, para saber si te conviene intentarlo. Si ganáis, la estructura pasa a producir para tu facción para siempre (castillo +1 caballero de IA/ronda, aldea +2 levas/ronda, puerto +1 de industria/ronda) — y si luego pierdes ese terreno, se lo lleva quien te lo conquiste a ti. Si perdéis el asalto, los que votaron sufren bajas según lo fuerte que fuera la guarnición — a diferencia del combate contra otra facción, aquí SÍ puedes morir. Si alguien muere en el intento, la guarnición se queda con el daño que sí le hicisteis (no vuelve a estar intacta): cada intento fallido la va debilitando para el siguiente.' },
+    { cmd: '!dungeon', phase: 'Acción', short: 'Ataca a un dungeon (orcos/goblins) de tu territorio — solo si el admin los activó.', desc: 'Ataca a un dungeon 💀 (guarnición de orcos y goblins, ver marcador sobre él) que esté dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 5 por mapa). Misma mecánica de grupo que !conquista: todos los que voten !dungeon esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no — aquí sí se puede morir, y si eso pasa la guarnición se queda debilitada para el siguiente intento (no se cura). Si lo derrotáis, la guarnición desaparece para siempre y tu facción gana una estatua junto a su capital (con sus propios aldeanos alrededor) — a diferencia de castillo/aldea/puerto, un dungeon no da producción para la casilla.' },
     { cmd: '!torre', phase: 'Acción', short: 'Construye una torre 🗼 en 2 rondas: +0.5 de defensa pasiva, máx. 10 por facción.', desc: 'Empiezas a construir una torre 🗼 en un terreno al azar de tu facción. Esta ronda queda "en obras" (sin efecto todavía); a la ronda siguiente se termina sola, sin que tengas que volver a votar. Cada torre terminada da +0.5 de defensa pasiva a tu facción PARA SIEMPRE, incluso si nadie escribe !defender esa ronda — es la única excepción a "el territorio no se defiende solo". Máximo 10 torres por facción (contando las que están en obras). Si te conquistan el terreno donde está, la torre se la lleva quien te lo conquiste, esté terminada o a medias.' },
-    { cmd: '!boss', phase: 'Acción', short: 'Ataca a un boss de tu territorio — solo si el admin los activó.', desc: 'Ataca a un boss (un ogro 👹, un troll 🧌 o un behemot 🐗, según cuál haya salido) que esté vagando dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 3 por mapa, cada uno atado a la casilla en la que salió). Misma mecánica de grupo que !conquista/!dungeon: todos los que voten !boss esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no — su ataque y su defensa (entre 5 y 10, sorteado por partida) se ven encima de su cabeza. Si lo derrotáis, tu facción gana un museo 🏛️ junto a su capital: +1 leva/ronda, +1 industria/ronda y +2 de defensa base, PARA SIEMPRE — si matas más de un boss, se crea otro museo más, y los bonos se suman.' },
+    { cmd: '!boss', phase: 'Acción', short: 'Ataca a un boss de tu territorio — solo si el admin los activó.', desc: 'Ataca a un boss (un ogro 👹, un troll 🧌 o un behemot 🐗, según cuál haya salido) que esté vagando dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 3 por mapa, cada uno atado a la casilla en la que salió). Misma mecánica de grupo que !conquista/!dungeon: todos los que voten !boss esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no — su ataque y su defensa (entre 5 y 10, sorteado por partida) se ven encima de su cabeza. Aquí sí se puede morir: si alguien muere en el intento, el boss se queda con el ataque y la defensa que le quedaban tras ESA batalla (no vuelve a estar a tope), así que cada intento fallido con bajas lo va desgastando para el siguiente. Si lo derrotáis, tu facción gana un museo 🏛️ junto a su capital: +1 leva/ronda, +1 industria/ronda y +2 de defensa base, PARA SIEMPRE — si matas más de un boss, se crea otro museo más, y los bonos se suman.' },
+    { cmd: '!casas', phase: 'Acción', short: 'Construye una vivienda 🏠 junto a tu capital: +5 al límite de tropas de cada uno, máx. 10 por facción.', desc: 'Construyes una vivienda 🏠 junto a tu capital, en un anillo propio como la iglesia/estatua/museo, sin solaparse con ellos. No da tropas: sube el LÍMITE MÁXIMO de tropas que puede llevar CADA jugador de tu facción +5 por cada vivienda que tenga la facción, hasta un máximo de 10 (+50 en total) — se suma al límite base que pone el admin, y también al +50 de la iglesia si la tenéis, sin tope combinado entre las dos.' },
+    { cmd: '!apoyar <usuario>', phase: 'Acción', short: 'Manda tus propias tropas a reforzar la defensa de OTRO jugador de OTRA facción, solo esta ronda.', desc: 'Escribe el nombre de un jugador de OTRA facción (no la tuya) para mandar tus propias tropas a reforzar la defensa de SU facción, como si hubieras escrito !defender por ellos — una especie de ayuda puntual entre facciones, sin ser una alianza permanente. Solo tiene efecto si esa facción recibe algún ataque ESTA MISMA ronda (si nadie la ataca, tu apoyo no hace nada, igual que un !defender sin ataque entrante). Sigues siendo de TU facción — no cambias de bando — pero tus tropas entran en ESE combate: si se quedan a 0, pierdes una vida como en cualquier otro combate, y si tu facción se queda sin nadie vivo por esto, también puede desaparecer. Rechazado si el jugador no existe, está muerto, o es de tu propia facción.' },
   ];
 
   function openCommands() {
@@ -761,7 +904,7 @@
       const column = document.createElement('div');
       column.className = 'roster-column';
       column.style.borderTopColor = f.color;
-      const { escapeHtml } = window.CondejorgeFactionCards;
+      const { escapeHtml, heartsFor } = window.CondejorgeFactionCards;
       column.innerHTML = `<h3><span><span class="dot" style="background:${escapeHtml(f.color)}"></span> ${escapeHtml(f.name)}</span><span>${playersInFaction.length}</span></h3>`;
       if (playersInFaction.length === 0) {
         column.innerHTML += '<div class="roster-empty">nadie unido todavía</div>';
@@ -769,7 +912,19 @@
         playersInFaction.forEach((p) => {
           const div = document.createElement('div');
           div.className = 'player' + (p.alive ? '' : ' dead');
-          div.textContent = `${p.username}${p.unitType === 'knight' ? ' 🐴' : ''}`;
+          const hearts = p.alive ? ` ${heartsFor(p.lives, state.startingLives || 3)}` : '';
+          div.textContent = `${p.username}${p.unitType === 'knight' ? ' 🐴' : ''}${hearts}`;
+          // Click en el nombre hace zoom a donde esté ese jugador ahora
+          // mismo (mismo mapCtrl.focusOnPlayer() que usa el buscador de
+          // arriba), sea quien sea — solo si está vivo, un jugador muerto
+          // no tiene marcador en el mapa al que saltar.
+          if (p.alive) {
+            div.classList.add('clickable');
+            div.title = 'Ir al mapa';
+            div.onclick = () => {
+              if (mapCtrl.focusOnPlayer(p.username)) document.getElementById('roster').classList.remove('open');
+            };
+          }
           column.appendChild(div);
         });
       }
@@ -778,7 +933,7 @@
   }
 
   function phaseLabel(phase) {
-    return { config: 'Configuración', recruitment: 'Reclutamiento', action: 'Acción', resolution: 'Combate', summary: 'Resumen', end: 'Fin' }[phase] || phase;
+    return { config: 'Configuración', recruitment: 'Reclutamiento', action: 'Acción', resolution: 'Resolución', summary: 'Resumen', end: 'Fin' }[phase] || phase;
   }
 
   // Cuenta atrás compartida con el panel de admin — congela el número

@@ -869,6 +869,36 @@
       return true;
     }
 
+    /**
+     * Centra la cámara sobre una casilla por su `tileId`, a un zoom
+     * concreto (por defecto el mismo que `focusOnPlayer()`) — lo usa la
+     * Fase de Resolución (ver public/index.html playResolutionQueue()) para
+     * llevar la cámara a cada combate/conquista de la ronda uno detrás de
+     * otro. `layout.centroids[tileId]` viene en celdas de rejilla, no en
+     * píxeles de mundo — de ahí el `* BLOCK_PX`, igual que el resto del
+     * archivo (ver tileCenter()).
+     */
+    function focusOnTile(tileId, scale) {
+      if (!layout || tileId == null) return false;
+      const c = layout.centroids[tileId];
+      if (!c) return false;
+      const cx = c.x * BLOCK_PX;
+      const cy = c.y * BLOCK_PX;
+      const viewportCx = viewportEl.clientWidth / 2;
+      const viewportCy = viewportEl.clientHeight / 2;
+      const useScale = scale || FOCUS_SCALE;
+      setView(useScale, viewportCx - cx * useScale, viewportCy - cy * useScale);
+      return true;
+    }
+
+    /** Posición (px de mundo) del centro de una casilla, o `null` — usado por la Fase de Resolución para el carromato/polvareda. */
+    function tileWorldCenter(tileId) {
+      if (!layout || tileId == null) return null;
+      const c = layout.centroids[tileId];
+      if (!c) return null;
+      return { x: c.x * BLOCK_PX, y: c.y * BLOCK_PX };
+    }
+
     function rgbFor(hex, cache) {
       if (cache.has(hex)) return cache.get(hex);
       const value = hex.replace('#', '');
@@ -1028,6 +1058,11 @@
       zoom,
       reset,
       focusOnPlayer,
+      focusOnTile,
+      tileWorldCenter,
+      /** Fase de Resolución (ver public/index.html playResolutionQueue()): añade/quita un efecto visual (polvareda de combate o carromato de conquista) — ver createObjectLayer() más abajo. */
+      playResolutionEffect: (effect) => (objectLayer ? objectLayer.addResolutionEffect(effect) : null),
+      clearResolutionEffects: () => { if (objectLayer) objectLayer.clearResolutionEffects(); },
       /**
        * Posicion actual de cada marcador de jugador, en pixeles de mundo:
        * Map<userId, {x, y, color, username}>. La usa `focusOnPlayer()` por
@@ -1281,6 +1316,24 @@
   const iglesiaImg = loadSprite('iglesia');
   const IGLESIA_SPRITE_WORLD_W = spriteSize('iglesia', 44);
   const IGLESIA_RING_RADIUS = MUSEO_RING_RADIUS + 40;
+  // Viviendas (!casas, ver rules/housing.js): mismo mecanismo de anillo,
+  // en el anillo mas ancho de los cuatro — puede haber hasta 10 a la vez
+  // (mas que estatua/museo/iglesia juntos), asi que cada una usa su propio
+  // indice `i` (0-9) para ringSafeAngle(), sin pisar los otros anillos.
+  const casaImg = loadSprite('casa');
+  // Fase de Resolución (ver createObjectLayer() addResolutionEffect()/
+  // drawResolutionEffects() más abajo, y public/index.html
+  // playResolutionQueue()): polvareda de combate (dos sprites intercalados,
+  // "al poner y alternar la aparición de 1 y el otro parece que se mueve",
+  // tal y como se pidió) y carromato con lona para conquista/expansión.
+  const dust1Img = loadSprite('dust-1');
+  const dust2Img = loadSprite('dust-2');
+  const wagonImg = loadSprite('wagon');
+  const DUST_SPRITE_WORLD_W = spriteSize('dust-1', 46);
+  const WAGON_SPRITE_WORLD_W = spriteSize('wagon', 56);
+  const DUST_FRAME_MS = 220; // cuanto dura cada sprite antes de alternar al otro
+  const CASA_SPRITE_WORLD_W = spriteSize('casa', 40);
+  const CASA_RING_RADIUS = IGLESIA_RING_RADIUS + 40;
   // Castillo especial del nivel 4 de industria (ver rules/industry.js): UNA
   // sola vez por facción, a un lado fijo de la capital (no en anillo como
   // las estatuas, que pueden ser varias — este es siempre uno solo), con sus
@@ -1435,6 +1488,15 @@
     // attackPower,defensePower,dir,pauseUntil,hopSeed }
     const bossWalkers = new Map();
 
+    // Fase de Resolución (ver public/index.html playResolutionQueue(),
+    // docs/ACCIONES.md): efectos visuales de vida corta que pide el
+    // reproductor de la cola de eventos — una polvareda de combate (dos
+    // sprites intercalados, quieta sobre la casilla) o un carromato
+    // avanzando de una casilla a otra (conquista/expansión). Lista simple,
+    // no Map: no hace falta buscarlos por clave, solo dibujar los que
+    // sigan vivos y quitar los que ya cumplieron su `durationMs`.
+    let resolutionEffects = [];
+
     // Nubes del cielo (decorativo, ver stepClouds()/drawClouds()): pocas a
     // la vez, en pantalla (no en coordenadas de mundo), cruzando solo la
     // franja del mapa.
@@ -1526,7 +1588,13 @@
      */
     function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures, bosses }) {
       if (!layout) return;
-      walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1 };
+      // Vidas (ver rules/shared.js handleTroopWipeout(), panel de admin):
+      // nadie tiene nunca más vidas que las que empezó con, así que el
+      // máximo visto en la lista de jugadores ES `startingLives` — evita
+      // tener que enhebrar un parámetro nuevo por las 5 funciones de
+      // paint()/paintOverlay() que hay entre el estado y aquí.
+      const maxLives = Math.max(1, ...(players || []).map((p) => p.lives || 0));
+      walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1, maxLives };
       if (!cow) spawnCow();
       syncSiteWalkers(structures || [], factions || []);
       syncBossWalkers(bosses || []);
@@ -1593,6 +1661,7 @@
           walker.attackPower = p.attackPower || 0;
           walker.defensePower = p.defensePower || 0;
           walker.troopDeltaLastRound = p.troopDeltaLastRound || 0;
+          walker.lives = p.lives ?? maxLives;
           syncFollowerCone(walker.followers.aiTroops, walker.aiTroops, walker.x, walker.y);
           syncFollowerCone(walker.followers.archerTroops, walker.archerTroops, walker.x, walker.y);
           syncFollowerCone(walker.followers.cavalryTroops, walker.cavalryTroops, walker.x, walker.y);
@@ -1624,6 +1693,69 @@
     function tileCenter(tileId) {
       const c = walkerWorld.layout.centroids[tileId];
       return c ? { x: c.x * walkerWorld.blockPx, y: c.y * walkerWorld.blockPx } : null;
+    }
+
+    /**
+     * Fase de Resolución: da de alta un efecto visual — `type: 'dust'`
+     * (polvareda quieta sobre `focusTileId`, para un combate) o
+     * `type: 'wagon'` (avanza en línea recta de `originTileId` a
+     * `focusTileId` a lo largo de `durationMs`, para una conquista/
+     * expansión — si no hay `originTileId` se queda quieto sobre el
+     * destino). Se quita solo cuando pasa `durationMs`, no hace falta
+     * llamar a nada para borrarlo.
+     */
+    function addResolutionEffect({ type, focusTileId, originTileId, durationMs }) {
+      if (!walkerWorld) return null;
+      const focus = tileCenter(focusTileId);
+      if (!focus) return null;
+      const origin = originTileId != null ? tileCenter(originTileId) : null;
+      const entry = {
+        type,
+        fromX: origin ? origin.x : focus.x,
+        fromY: origin ? origin.y : focus.y,
+        toX: focus.x,
+        toY: focus.y,
+        startedAt: performance.now(),
+        durationMs: durationMs || 3000,
+      };
+      resolutionEffects.push(entry);
+      return entry;
+    }
+
+    function clearResolutionEffects() {
+      resolutionEffects = [];
+    }
+
+    /** Dibuja los efectos vivos de la Fase de Resolución y quita los que ya cumplieron su tiempo. */
+    function drawResolutionEffects(w, h) {
+      if (!resolutionEffects.length) return;
+      const { x: vx, y: vy, scale } = currentView;
+      const now = performance.now();
+      resolutionEffects = resolutionEffects.filter((e) => now - e.startedAt < e.durationMs);
+      if (!resolutionEffects.length) return;
+
+      resolutionEffects.forEach((e) => {
+        const t = Math.min(1, (now - e.startedAt) / e.durationMs);
+        if (e.type === 'wagon') {
+          if (!wagonImg.complete || !wagonImg.naturalWidth) return;
+          const wx = e.fromX + (e.toX - e.fromX) * t;
+          const wy = e.fromY + (e.toY - e.fromY) * t;
+          const drawW = WAGON_SPRITE_WORLD_W * scale;
+          const drawH = drawW * (wagonImg.naturalHeight / wagonImg.naturalWidth);
+          const sx = wx * scale + vx, sy = wy * scale + vy;
+          ctx.drawImage(wagonImg, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+        } else {
+          // 'dust': quieta sobre el punto de combate, alternando entre los
+          // dos sprites cada DUST_FRAME_MS — el intercalado en sí ya da la
+          // sensación de "se está moviendo/agitando" sin animar posición.
+          const frame = Math.floor((now - e.startedAt) / DUST_FRAME_MS) % 2 === 0 ? dust1Img : dust2Img;
+          if (!frame.complete || !frame.naturalWidth) return;
+          const drawW = DUST_SPRITE_WORLD_W * scale;
+          const drawH = drawW * (frame.naturalHeight / frame.naturalWidth);
+          const sx = e.toX * scale + vx, sy = e.toY * scale + vy;
+          ctx.drawImage(frame, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+        }
+      });
     }
 
     function randomOf(list) {
@@ -2006,6 +2138,24 @@
           });
         }
 
+        // Viviendas (!casas, ver rules/housing.js sección 32): una casa por
+        // cada una que la facción tenga construida (0-10), en el anillo
+        // MÁS ANCHO de todos para no solaparse con estatua/museo/iglesia
+        // aunque la facción tenga las cuatro cosas a la vez.
+        const houses = f.housesBuilt || 0;
+        for (let i = 0; i < houses; i++) {
+          const angle = ringSafeAngle(i);
+          sites.set(`casa:${f.number}:${i}`, {
+            home: {
+              x: home.x + Math.cos(angle) * CASA_RING_RADIUS,
+              y: home.y + Math.sin(angle) * CASA_RING_RADIUS,
+            },
+            factionColor: null,
+            buildingKind: 'casa',
+            specs: [],
+          });
+        }
+
         // Castillo especial del nivel 4 de industria (rules/industry.js): UNA
         // sola vez, a un lado fijo de la capital (no en anillo, a diferencia
         // de las estatuas — solo puede haber uno). Sin aldeanos ni tropas
@@ -2192,6 +2342,10 @@
           ctx.strokeText('+50 tropas', gx, gy - gh - 4);
           ctx.fillStyle = '#8be08b';
           ctx.fillText('+50 tropas', gx, gy - gh - 4);
+        } else if (inView && group.buildingKind === 'casa' && casaImg.complete && casaImg.naturalWidth) {
+          const hw = CASA_SPRITE_WORLD_W * scale;
+          const hh = hw * (casaImg.naturalHeight / casaImg.naturalWidth);
+          ctx.drawImage(casaImg, home.x * scale + vx - hw / 2, home.y * scale + vy - hh, hw, hh);
         }
 
         group.list.forEach((walker) => {
@@ -2803,7 +2957,12 @@
           // Circulito del color de la facción a la IZQUIERDA del nombre,
           // que a su vez lleva el icono de accion a la derecha — todo el
           // grupo (circulo + nombre + icono) centrado sobre el caminante.
-          const label = walker.username + (ACTION_ICONS[walker.action] || '');
+          // Vidas (ver rules/shared.js handleTroopWipeout()): mismos
+          // corazones que el roster de Facciones/Jugadores, reutilizando su
+          // heartsFor() en vez de duplicar el criterio de color aquí.
+          const heartsFor = window.CondejorgeFactionCards && window.CondejorgeFactionCards.heartsFor;
+          const hearts = heartsFor ? ` ${heartsFor(walker.lives, walkerWorld.maxLives)}` : '';
+          const label = walker.username + hearts + (ACTION_ICONS[walker.action] || '');
           const textW = ctx.measureText(label).width;
           const totalW = WALKER_DOT_DIAMETER + WALKER_DOT_GAP + textW;
           const labelY = sy - drawH - 3;
@@ -2957,6 +3116,7 @@
       drawBossWalkers(w, h);
       drawCow(w, h);
       drawWalkers(w, h);
+      drawResolutionEffects(w, h);
       drawClouds(w, h);
     }
 
@@ -3149,7 +3309,10 @@
       return cow ? { x: cow.x, y: cow.y, followerX: cow.follower.x, followerY: cow.follower.y } : null;
     }
 
-    return { onLayout, onViewChanged, onResize, setDecorations, setWalkerWorld, getMarkerPositions, getCowPosition };
+    return {
+      onLayout, onViewChanged, onResize, setDecorations, setWalkerWorld, getMarkerPositions, getCowPosition,
+      addResolutionEffect, clearResolutionEffects,
+    };
   }
 
   window.CondejorgeMap = { createMapController };

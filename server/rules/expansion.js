@@ -38,7 +38,7 @@ function resolveExpansion(match, context) {
         tileId: tile.id,
         fromFactionNumber: null,
         toFactionNumber: faction.number,
-        kind: 'expansion',
+        conquestKind: 'expansion',
       });
     }
   }

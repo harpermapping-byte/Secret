@@ -114,8 +114,24 @@
       </svg>`;
   }
 
+  /**
+   * Sistema de vidas (ver rules/shared.js handleTroopWipeout(),
+   * match.config.startingLives del panel de admin, docs/ACCIONES.md): un
+   * corazón por vida configurada, en rojo las que le quedan a `lives`, en
+   * negro ("apagado") las que ya perdió — usado en el roster de Facciones,
+   * el panel de Jugadores (public/index.html) y el marcador del mapa
+   * (mapRenderer.js, su propia copia porque dibuja en canvas, no en DOM).
+   */
+  function heartsFor(lives, startingLives) {
+    const total = Math.max(startingLives || 0, lives || 0);
+    let s = '';
+    for (let i = 0; i < total; i++) s += i < (lives || 0) ? '❤️' : '🖤';
+    return s;
+  }
+
   function renderFactionCards(container, state) {
     container.innerHTML = '';
+    const startingLives = state.startingLives || 3;
     (state.factions || []).forEach((f) => {
       const playersInFaction = (state.players || []).filter((p) => p.factionNumber === f.number);
       const aliveCount = playersInFaction.filter((p) => p.alive).length;
@@ -145,7 +161,8 @@
         playersInFaction.forEach((p) => {
           const tag = document.createElement('span');
           tag.className = p.alive ? '' : 'dead';
-          tag.textContent = `${p.username}${p.unitType === 'knight' ? ' 🐴' : ''}`;
+          const hearts = p.alive ? ` ${heartsFor(p.lives, startingLives)}` : '';
+          tag.textContent = `${p.username}${p.unitType === 'knight' ? ' 🐴' : ''}${hearts}`;
           roster.appendChild(tag);
         });
       }
@@ -157,5 +174,5 @@
     });
   }
 
-  window.CondejorgeFactionCards = { renderFactionCards, escapeHtml };
+  window.CondejorgeFactionCards = { renderFactionCards, escapeHtml, heartsFor };
 })();

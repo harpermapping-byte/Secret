@@ -3,9 +3,7 @@
 const { ACTION_CONQUISTA, ACTION_DUNGEON } = require('../commands');
 const {
   sumRandomPower,
-  applyTroopCascadeDamage,
-  killPlayer,
-  shuffle,
+  applyTroopCascadeDamageAndWipeouts,
   AI_TROOP_COMBAT_BONUS,
   ARCHER_ATTACK_BONUS,
   ARCHER_DEFENSE_BONUS,
@@ -50,8 +48,9 @@ function resolveConquista(match, context) {
     const ourDefense = sumRandomPower(match, attackerUserIds, 'defense');
     const garrisonAttack = structureAttackPower(target);
     const garrisonDefense = structureDefensePower(target);
+    const conquered = attackPower > garrisonDefense;
 
-    if (attackPower > garrisonDefense) {
+    if (conquered) {
       conquerStructure(match, target);
       context.roundEvents.structureConquests.push({
         tileId: target.tileId,
@@ -64,20 +63,32 @@ function resolveConquista(match, context) {
     // tropas de IA de los votantes (caballero->arquero->leva, ver
     // applyTroopCascadeDamage en rules/shared.js), solo lo que sobra mata
     // jugadores de verdad.
+    let troopsLost = 0;
+    let diedCount = 0;
     const counterDamage = Math.round(garrisonAttack - ourDefense);
     if (counterDamage > 0) {
-      const remaining = applyTroopCascadeDamage(match, attackerUserIds, counterDamage);
-      const deaths = applyStructureCasualties(match, attackerUserIds, remaining);
-      if (deaths > 0) {
-        // Si alguien muere en el asalto, la guarnición no queda intacta
-        // para el siguiente intento: se lleva puesto el daño que sí le
-        // hicieron (attackPower de este asalto), igual que un boss (ver
-        // rules/bosses.js) — si ya fue conquistada esta misma ronda (arriba)
-        // no hace nada, su guarnición ya está a 0.
+      // Sistema de vidas (rules/shared.js): quien se queda sin ninguna
+      // tropa pierde una vida y reaparece con 0 — solo si era la última es
+      // la muerte real de siempre.
+      const { wipedOutUserIds, diedUserIds, troopsBefore, troopsAfter } = applyTroopCascadeDamageAndWipeouts(match, attackerUserIds, counterDamage);
+      troopsLost = troopsBefore - troopsAfter;
+      diedCount = diedUserIds.length;
+      if (wipedOutUserIds.length > 0) {
+        // Si alguien se quedó sin tropas en el asalto, la guarnición no
+        // queda intacta para el siguiente intento: se lleva puesto el daño
+        // que sí le hicieron (attackPower de este asalto), igual que un
+        // boss (ver rules/bosses.js) — si ya fue conquistada esta misma
+        // ronda (arriba) no hace nada, su guarnición ya está a 0.
         applyGarrisonCascadeDamage(target, attackPower);
-        checkFactionElimination(match, context, faction.number, null);
       }
+      if (diedUserIds.length > 0) checkFactionElimination(match, context, faction.number, null);
     }
+
+    context.roundEvents.pveFights.push({
+      pveKind: 'conquista', factionNumber: faction.number, tileId: target.tileId, label: target.type,
+      attackPower: Math.round(attackPower * 10) / 10, defensePower: Math.round(garrisonDefense * 10) / 10,
+      defeated: conquered, troopsLost, diedCount,
+    });
   }
 }
 
@@ -105,8 +116,9 @@ function resolveDungeon(match, context) {
     const ourDefense = sumRandomPower(match, attackerUserIds, 'defense');
     const garrisonAttack = structureAttackPower(target);
     const garrisonDefense = structureDefensePower(target);
+    const defeated = attackPower > garrisonDefense;
 
-    if (attackPower > garrisonDefense) {
+    if (defeated) {
       target.orcCount = 0;
       target.goblinCount = 0;
       faction.dungeonTrophies += 1;
@@ -117,35 +129,23 @@ function resolveDungeon(match, context) {
       });
     }
 
+    let troopsLost = 0;
+    let diedCount = 0;
     const counterDamage = Math.round(garrisonAttack - ourDefense);
     if (counterDamage > 0) {
-      const remaining = applyTroopCascadeDamage(match, attackerUserIds, counterDamage);
-      const deaths = applyStructureCasualties(match, attackerUserIds, remaining);
-      if (deaths > 0) {
-        applyGarrisonCascadeDamage(target, attackPower);
-        checkFactionElimination(match, context, faction.number, null);
-      }
+      const { wipedOutUserIds, diedUserIds, troopsBefore, troopsAfter } = applyTroopCascadeDamageAndWipeouts(match, attackerUserIds, counterDamage);
+      troopsLost = troopsBefore - troopsAfter;
+      diedCount = diedUserIds.length;
+      if (wipedOutUserIds.length > 0) applyGarrisonCascadeDamage(target, attackPower);
+      if (diedUserIds.length > 0) checkFactionElimination(match, context, faction.number, null);
     }
-  }
-}
 
-/**
- * Baja `count` de los votantes que perdieron el asalto, al azar entre ellos
- * mismos. NO reutiliza `applyCasualties()` de rules/shared.js a propósito:
- * esa reparte bajas entre 4 bolsas con prioridad fija pensadas para el
- * combate normal entre facciones (inactivos/industria/atacantes/defensores
- * DE LA FACCIÓN) — aquí no hay más bolsa posible que "quien votó
- * `!conquista`", así que basta con un `shuffle()` + `killPlayer()` directo
- * sobre esa lista, sin la maquinaria de prioridad que no aplica.
- */
-function applyStructureCasualties(match, userIds, count) {
-  const pool = shuffle([...userIds]);
-  let remaining = count;
-  let deaths = 0;
-  while (remaining > 0 && pool.length > 0) {
-    if (killPlayer(match, pool.pop())) { remaining--; deaths++; }
+    context.roundEvents.pveFights.push({
+      pveKind: 'dungeon', factionNumber: faction.number, tileId: target.tileId, label: target.type,
+      attackPower: Math.round(attackPower * 10) / 10, defensePower: Math.round(garrisonDefense * 10) / 10,
+      defeated, troopsLost, diedCount,
+    });
   }
-  return deaths;
 }
 
 // Mismo orden de prioridad que TROOP_CASCADE_PRIORITY (rules/shared.js)

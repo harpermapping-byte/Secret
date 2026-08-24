@@ -209,6 +209,75 @@ function killPlayer(match, userId) {
   return true;
 }
 
+/** Total de tropas (los 4 tipos juntos) que lleva `userId` ahora mismo. */
+function totalPlayerTroops(match, userId) {
+  const player = match.players.get(userId);
+  if (!player) return 0;
+  return (player.aiTroops || 0) + (player.archerTroops || 0) + (player.cavalryTroops || 0) + (player.specialTroops || 0);
+}
+
+/**
+ * Sistema de vidas (panel de admin, `match.config.startingLives`, 1-5): -1
+ * vida a `userId` por quedarse sin NINGUNA tropa en un combate, sea PvP o
+ * PvE (ver combat.js/bosses.js/structures.js) — sustituye tanto la regla
+ * "nunca muere en PvP" como las muertes directas de PvE que había antes de
+ * esta función: ahora las dos comparten el mismo colchón. Si le quedan
+ * vidas, "reaparece" (sigue `alive`, las 4 tropas a 0, -1 vida) — si esta
+ * era la última, muerte real de siempre (`killPlayer()`, con
+ * `startingLives=1` esto pasa siempre a la primera, "muerte súbita").
+ * Devuelve `true` si hubo muerte real, para que el llamador dispare
+ * `checkFactionElimination()`.
+ */
+function handleTroopWipeout(match, userId) {
+  const player = match.players.get(userId);
+  if (!player || !player.alive) return false;
+  player.lives = Math.max(0, (player.lives || 0) - 1);
+  if (player.lives > 0) {
+    player.aiTroops = 0;
+    player.archerTroops = 0;
+    player.cavalryTroops = 0;
+    player.specialTroops = 0;
+    player.livesLostCount = (player.livesLostCount || 0) + 1;
+    return false;
+  }
+  killPlayer(match, userId);
+  return true;
+}
+
+/**
+ * Igual que `applyTroopCascadeDamage()`, pero además detecta a quién de
+ * `userIds` ha dejado a 0 tropas justo con este golpe (tenía alguna antes,
+ * ninguna después) y le aplica `handleTroopWipeout()` — único punto que
+ * comparten PvP y PvE para "se quedó sin tropas -> pierde una vida", en vez
+ * de tener esa lógica duplicada en cada regla de combate. Devuelve
+ * `{ remaining, wipedOutUserIds, diedUserIds, troopsBefore, troopsAfter }`:
+ * `wipedOutUserIds` son los que se quedaron a 0 con este golpe (perdieran o
+ * no la última vida), `diedUserIds` los que ya no les quedaba ninguna (el
+ * llamador debe llamar a `checkFactionElimination()` por la facción de cada
+ * uno), y `troopsBefore`/`troopsAfter` son el total del GRUPO entero (todos
+ * los `userIds` sumados) antes y después del golpe — para la Fase de
+ * Resolución (ver gameEngine.js buildResolutionEvents()), sin que cada
+ * regla de combate tenga que calcularlo por su cuenta.
+ */
+function applyTroopCascadeDamageAndWipeouts(match, userIds, damage) {
+  const before = new Map(userIds.map((id) => [id, totalPlayerTroops(match, id)]));
+  let troopsBefore = 0;
+  for (const v of before.values()) troopsBefore += v;
+  const remaining = applyTroopCascadeDamage(match, userIds, damage);
+  const wipedOutUserIds = [];
+  const diedUserIds = [];
+  let troopsAfter = 0;
+  for (const userId of userIds) {
+    const after = totalPlayerTroops(match, userId);
+    troopsAfter += after;
+    if ((before.get(userId) || 0) > 0 && after === 0) {
+      wipedOutUserIds.push(userId);
+      if (handleTroopWipeout(match, userId)) diedUserIds.push(userId);
+    }
+  }
+  return { remaining, wipedOutUserIds, diedUserIds, troopsBefore, troopsAfter };
+}
+
 function shuffle(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -221,6 +290,9 @@ module.exports = {
   sumRandomPower,
   applyCasualties,
   applyTroopCascadeDamage,
+  applyTroopCascadeDamageAndWipeouts,
+  handleTroopWipeout,
+  totalPlayerTroops,
   killPlayer,
   shuffle,
   AI_TROOP_COMBAT_BONUS,

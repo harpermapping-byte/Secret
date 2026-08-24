@@ -32,7 +32,7 @@ const {
   SPECIAL_TROOP_COMBAT_BONUS,
 } = require('./rules/shared');
 const { resolveExpansion } = require('./rules/expansion');
-const { factionByNumber, factionsAreAdjacent } = require('./rules/territory');
+const { factionByNumber, factionsAreAdjacent, pickBorderTileToConquer } = require('./rules/territory');
 
 const {
   ACTION_JOIN_FACTION,
@@ -47,6 +47,7 @@ const {
   ACTION_TOWER,
   ACTION_BOSS,
   ACTION_CASAS,
+  ACTION_APOYAR,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -214,6 +215,10 @@ function createMatch(config) {
     activeAlliancePairsThisRound: new Set(),
     combatModifiers: {},
     summaryBlocks: [],
+    // Fase de Resolución (ver buildResolutionEvents()): [] hasta que se
+    // resuelva la primera ronda.
+    resolutionEvents: [],
+    resolutionSkipRequestedAt: null,
     winnerFactionNumber: null,
     timer: null,
     // Paron decorativo entre fases (esqueleto con cartel) — null cuando no
@@ -264,6 +269,13 @@ function normalizeConfig(config) {
     // reclutamiento (!faccionN) — ver joinFaction(). 1-100, por defecto sin
     // límite práctico (100).
     maxPlayersPerFaction: clampInt(config.maxPlayersPerFaction, 1, 100, 100),
+    // Vidas de cada jugador (ver rules/shared.js handleTroopWipeout()): al
+    // quedarse sin ninguna tropa en un combate (PvP o PvE) pierde una vida y
+    // reaparece con 0 tropas; al llegar a 0 vidas es la muerte real de
+    // siempre (checkFactionElimination si era su última vida viva de la
+    // facción). 1 = "muerte súbita" (como una muerte normal, sin colchón),
+    // 2-5 = vidas extra. Panel de admin, por defecto 3.
+    startingLives: clampInt(config.startingLives, 1, 5, 3),
     alliancesEnabled: !!config.alliancesEnabled,
     thresholds: {
       // `!expansion` ya NO tiene umbral de porcentaje: lo que decide cuantas
@@ -314,6 +326,26 @@ function handleChatCommand(userId, username, channel, text) {
     return;
   }
 
+  // !apoyar <usuario>: el comando solo trae un nombre de usuario (no un
+  // número de facción como !ataque/!alianza) — se resuelve aquí a la
+  // facción de ESE jugador (tiene que existir, estar vivo, y ser de otra
+  // facción que la de quien vota) antes de tratarlo como cualquier otra
+  // acción con objetivo. Ver rules/gameEngine.js resolveRound() ->
+  // tallyActions() para cómo se convierte en un !defender prestado.
+  if (parsed.type === ACTION_APOYAR) {
+    const caller = match.players.get(userId);
+    const target = findPlayerByUsername(match, parsed.targetUsername);
+    if (!caller || !target || !target.alive || target.factionNumber === caller.factionNumber) {
+      console.log(`[gameEngine] ${username} -> APOYAR "${parsed.targetUsername}": RECHAZADO (jugador inexistente, muerto, o de tu propia facción)`);
+      pushChatLog({ username, text, ok: false, reason: 'jugador de apoyo inválido (no existe, está muerto, o es de tu propia facción)' });
+      return;
+    }
+    const ok = castAction(userId, ACTION_APOYAR, target.factionNumber);
+    console.log(`[gameEngine] ${username} -> APOYAR a ${target.username} (facción ${target.factionNumber}): ${ok ? 'OK' : 'RECHAZADO'}`);
+    pushChatLog({ username, text, ok, reason: ok ? `apoyando a ${target.username}` : 'rechazado' });
+    return;
+  }
+
   const ok = castAction(userId, parsed.type, parsed.targetFactionNumber);
   console.log(`[gameEngine] ${username} -> ${parsed.type}: ${ok ? 'OK' : 'RECHAZADO (revisa si esta unido y vivo)'}`);
   pushChatLog({ username, text, ok, reason: ok ? 'aceptado' : 'rechazado (revisa si está unido a una facción y vivo)' });
@@ -358,6 +390,15 @@ function joinFaction(userId, username, factionNumber) {
     // (+x) o rojo (-x) encima del jugador, junto a su HUD de poder.
     troopDeltaLastRound: existing ? existing.troopDeltaLastRound : 0,
     diedOnRound: null,
+    // Vidas restantes (ver rules/shared.js handleTroopWipeout() y
+    // match.config.startingLives, panel de admin) — al unirse por primera
+    // vez arranca con el número que haya configurado el admin para esta
+    // partida; si se vuelve a unir (rejoin) conserva las que le quedaran.
+    lives: existing ? existing.lives : match.config.startingLives,
+    // Cuántas veces ha reaparecido (perdido una vida sin ser la última) —
+    // el cliente lo usa solo para saber cuántos corazones "apagar", no
+    // afecta a ninguna regla.
+    livesLostCount: existing ? existing.livesLostCount : 0,
   });
   notifyStateChange();
   return true;
@@ -371,7 +412,7 @@ function castAction(userId, actionType, targetFactionNumber) {
   if (actionType === commands.ACTION_EXPAND && match.config.map.mode === 'total') return false;
   if (actionType === ACTION_ALLIANCE && !match.config.alliancesEnabled) return false;
 
-  if (actionType === ACTION_ATTACK || actionType === ACTION_ALLIANCE) {
+  if (actionType === ACTION_ATTACK || actionType === ACTION_ALLIANCE || actionType === ACTION_APOYAR) {
     if (!targetFactionNumber || targetFactionNumber === player.factionNumber) return false;
     const target = factionByNumber(match, targetFactionNumber);
     if (!target || target.territoryIds.length === 0) return false;
@@ -487,11 +528,122 @@ function resolveRound() {
   }
 
   match.summaryBlocks = buildRoundSummary(context);
-  enterTransition('summary', match.round, () => {
-    match.phase = PHASE_SUMMARY;
-    startTimer(Math.max(match.summaryBlocks.length, 1) * SUMMARY_MS_PER_BLOCK, advanceRound);
-    notifyStateChange();
+  match.resolutionEvents = buildResolutionEvents(context);
+  match.resolutionSkipRequestedAt = null;
+  enterResolutionPhase();
+}
+
+/**
+ * Fase de Resolución (sustituye al cartel de transición genérico que había
+ * aquí antes, ver docs/ACCIONES.md): cámara siguiendo cada combate/PvE/
+ * conquista de la ronda uno detrás de otro, con su propia cinemática y
+ * popup — ver buildResolutionEvents() para el detalle de cada evento y
+ * public/mapRenderer.js para cómo se reproduce. Sin eventos que enseñar
+ * (ronda tranquila, nadie atacó ni conquistó nada) se salta directa a
+ * Resumen: una fase de Resolución vacía no aporta nada.
+ */
+function enterResolutionPhase() {
+  if (match.resolutionEvents.length === 0) {
+    enterSummaryPhase();
+    return;
+  }
+  const durationMs = match.resolutionEvents.reduce((sum, e) => sum + e.durationMs, 0);
+  match.phase = PHASE_RESOLUTION;
+  startTimer(durationMs, enterSummaryPhase);
+  notifyStateChange();
+}
+
+function enterSummaryPhase() {
+  match.phase = PHASE_SUMMARY;
+  startTimer(Math.max(match.summaryBlocks.length, 1) * SUMMARY_MS_PER_BLOCK, advanceRound);
+  notifyStateChange();
+}
+
+// Cuanto le da el "pasar ronda" del admin a CADA evento que le quede en la
+// cola cuando lo pulsa en mitad de la Fase de Resolución — recorre la cola
+// batalla a batalla en vez de saltar todo de golpe al Resumen (ver
+// skipResolutionFast() y docs/ACCIONES.md): el cliente ve el flash de cada
+// popup, sin la cámara/cinemática lenta, y el temporizador del servidor
+// se acorta a la par para no dejar la ronda esperando de más.
+const RESOLUTION_SKIP_MS_PER_EVENT = 900;
+
+/**
+ * "Pasar ronda" del admin mientras se está reproduciendo la Fase de
+ * Resolución: no salta directo a Resumen (eso escondería el resto de la
+ * ronda) — marca `resolutionSkipRequestedAt` para que el cliente ponga su
+ * cola de eventos en modo rápido (sin cámara ni cinemática, solo el popup
+ * un instante cada uno) y recorta el temporizador del servidor a la par,
+ * para que la fase no se quede esperando más de lo que tarda esa cola
+ * rápida en el cliente.
+ */
+function skipResolutionFast() {
+  if (!match || match.phase !== PHASE_RESOLUTION) return false;
+  match.resolutionSkipRequestedAt = Date.now();
+  const remainingMs = Math.max(500, match.resolutionEvents.length * RESOLUTION_SKIP_MS_PER_EVENT);
+  startTimer(remainingMs, enterSummaryPhase);
+  notifyStateChange();
+  return true;
+}
+
+const PVP_COMBAT_BASE_MS = 5500; // 5-6s pedidos para combate PvP
+const PVE_FIGHT_BASE_MS = 4000; // 3-5s pedidos para PvE (mas rapido que PvP)
+const CONQUEST_BASE_MS = 4000; // 3-5s pedidos para el carromato avanzando
+const RESOLUTION_EVENT_MIN_MS = 1800; // nunca mas corto que esto, para que se pueda leer el popup
+const RESOLUTION_TOTAL_CAP_MS = 90000; // tope razonable si hay una avalancha de eventos esa ronda (ver opcion 2 pedida: duracion ADAPTABLE, no fija)
+
+/**
+ * Convierte `context.roundEvents` (combats/pveFights/conquests, ya rellenos
+ * por resolveCombat()/resolveBoss()/resolveConquista()/resolveDungeon()/
+ * resolveExpansion()) en la lista ORDENADA de eventos que reproduce la Fase
+ * de Resolución en el cliente — cada uno con dónde centrar la cámara y
+ * cuánto dura. La duración de cada evento es la "base" pedida (5-6s PvP,
+ * 3-5s PvE/conquista) escalada hacia abajo si esta ronda hay tantos eventos
+ * que sumados pasarían de RESOLUTION_TOTAL_CAP_MS — así una ronda tranquila
+ * se ve con calma y una ronda con una facción de 20 gente no se come el
+ * directo entero, sin tener que fijar un número mágico de eventos máximo
+ * (opción 2 de las que se habló: duración adaptable, no un tope duro).
+ */
+function buildResolutionEvents(context) {
+  const events = [];
+
+  for (const c of context.roundEvents.combats) {
+    const focusTileId = c.tileId ?? pickCombatFocusTileId(c.defenderFactionNumber, c.attackerFactionNumber);
+    if (focusTileId == null) continue; // no debería pasar (atacar exige frontera), red de seguridad
+    events.push({ kind: 'pvp_combat', baseDurationMs: PVP_COMBAT_BASE_MS, focusTileId, ...c });
+  }
+
+  for (const f of context.roundEvents.pveFights) {
+    events.push({ kind: 'pve_fight', baseDurationMs: PVE_FIGHT_BASE_MS, focusTileId: f.tileId, ...f });
+  }
+
+  for (const cq of context.roundEvents.conquests) {
+    const originTileId = pickOriginNeighborTileId(cq.tileId, cq.toFactionNumber);
+    events.push({ kind: 'conquest', baseDurationMs: CONQUEST_BASE_MS, focusTileId: cq.tileId, originTileId, ...cq });
+  }
+
+  const totalBase = events.reduce((sum, e) => sum + e.baseDurationMs, 0);
+  const scale = totalBase > RESOLUTION_TOTAL_CAP_MS ? RESOLUTION_TOTAL_CAP_MS / totalBase : 1;
+  events.forEach((e, i) => {
+    e.id = `${match.round}-${i}`;
+    e.durationMs = Math.max(RESOLUTION_EVENT_MIN_MS, Math.round(e.baseDurationMs * scale));
+    delete e.baseDurationMs;
   });
+  return events;
+}
+
+/** Casilla de frontera para centrar la cámara en un combate que NO acabó en conquista (nadie se lleva territorio, pero la pelea pasó igual). */
+function pickCombatFocusTileId(defenderNumber, attackerFactionNumber) {
+  const tile = pickBorderTileToConquer(match, defenderNumber, attackerFactionNumber);
+  return tile ? tile.id : null;
+}
+
+/** Casilla vecina que YA era de `factionNumber` antes de conquistar `tileId` — de ahí "sale" el carromato. `null` si no encuentra ninguna (casilla aislada). */
+function pickOriginNeighborTileId(tileId, factionNumber) {
+  const tile = match.tiles[tileId];
+  if (!tile) return null;
+  const candidates = tile.neighborIds.filter((id) => match.tiles[id].ownerFactionNumber === factionNumber && id !== tileId);
+  if (candidates.length === 0) return null;
+  return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
 function advanceRound() {
@@ -527,6 +679,10 @@ function tallyActions() {
   const votesByFactionAndType = new Map();
   const activePlayerCountByFaction = new Map();
   const inactiveUserIds = new Set();
+  // !apoyar (ver más abajo): quién apoyó a quién esta ronda, para poder
+  // mostrarlo más adelante (Fase de Resolución) — no lo usa combat.js, solo
+  // sirve de registro.
+  const support = [];
 
   for (const faction of match.factions) {
     votesByFactionAndType.set(faction.number, {
@@ -564,11 +720,25 @@ function tallyActions() {
       const map = bucket[action.type];
       if (!map.has(action.targetFactionNumber)) map.set(action.targetFactionNumber, []);
       map.get(action.targetFactionNumber).push(player.userId);
+    } else if (action.type === ACTION_APOYAR) {
+      // !apoyar <usuario> (ver docs/ACCIONES.md, resolveCombat() en
+      // rules/combat.js sin tocar): quien vota esto se suma al DEFEND de la
+      // facción del jugador elegido, como si hubiera escrito !defender POR
+      // ELLOS — sus propias tropas (siguen siendo suyas) cuentan en ese
+      // combate y pueden perderse/perder una vida igual que cualquier
+      // defensor de esa facción. Solo tiene efecto si esa facción recibe
+      // algún ataque esta misma ronda, igual que un !defender normal sin
+      // ataque entrante.
+      const targetBucket = votesByFactionAndType.get(action.targetFactionNumber);
+      if (targetBucket) {
+        targetBucket[ACTION_DEFEND].push(player.userId);
+        support.push({ supporterUserId: player.userId, supporterFactionNumber: player.factionNumber, targetFactionNumber: action.targetFactionNumber });
+      }
     } else if (bucket[action.type]) {
       bucket[action.type].push(player.userId);
     }
 
-    if (action.type === ACTION_ATTACK || action.type === ACTION_DEFEND) player.participation += 1;
+    if (action.type === ACTION_ATTACK || action.type === ACTION_DEFEND || action.type === ACTION_APOYAR) player.participation += 1;
   }
 
   return {
@@ -578,7 +748,7 @@ function tallyActions() {
     forceInactive: new Set(),
     // Sucesos de la ronda que van llenando resolveExpansion/resolveCombat/resolveIndustry a medida
     // que ocurren, para poder construir despues el resumen por fases (ver docs/ACCIONES.md seccion 6).
-    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [], bossKills: [] },
+    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [], bossKills: [], support, pveFights: [] },
   };
 }
 
@@ -651,6 +821,14 @@ function resumeTimer() {
 
 function forceAdvancePhase() {
   if (!match?.timer) return;
+  // "Pasar ronda" del admin en mitad de la Fase de Resolución NO salta
+  // directo a Resumen (se perdería el resto de la ronda sin enseñarla) —
+  // pone la cola de eventos en modo rápido en su lugar, ver
+  // skipResolutionFast(). Cualquier otra fase se comporta como siempre.
+  if (match.phase === PHASE_RESOLUTION) {
+    skipResolutionFast();
+    return;
+  }
   clearTimeout(match.timer.handle);
   match.timer.onExpire();
 }
@@ -684,6 +862,9 @@ function getPublicState() {
       bosses: [],
       players: [],
       summaryBlocks: [],
+      resolutionEvents: [],
+      resolutionSkipRequestedAt: null,
+      startingLives: 3,
       winnerFactionNumber: null,
       timerEndsAt: null,
       timerPaused: false,
@@ -863,6 +1044,12 @@ function getPublicState() {
         // propio sprite ('tropa-especial').
         specialTroops: p.specialTroops || 0,
         troopDeltaLastRound: p.troopDeltaLastRound || 0,
+        // Vidas restantes (ver rules/shared.js handleTroopWipeout(),
+        // match.config.startingLives del panel de admin) — el cliente
+        // pinta `startingLives` corazones, `lives` en color y el resto
+        // "apagados". `alive=false` (muerte real) es un caso aparte, ya
+        // cubierto arriba.
+        lives: p.lives ?? match.config.startingLives,
         // Poder de ataque/defensa que aportan SUS tropas ahora mismo — la
         // misma cuenta que hace sumRandomPower() en rules/shared.js para el
         // bonus FIJO por tropa (sin la tirada al azar del soldado/caballero
@@ -876,7 +1063,21 @@ function getPublicState() {
       };
     }),
     summaryBlocks: match.phase === PHASE_SUMMARY ? match.summaryBlocks : [],
+    // Fase de Resolución (ver buildResolutionEvents() más arriba): la lista
+    // ordenada de combates/PvE/conquistas de la ronda, con cámara y
+    // duración ya decididas por el servidor — solo se expone mientras dura
+    // esa fase, mismo criterio que summaryBlocks con PHASE_SUMMARY.
+    resolutionEvents: match.phase === PHASE_RESOLUTION ? match.resolutionEvents : [],
+    // Momento (Date.now()) en que el admin pidió pasar la Fase de
+    // Resolución rápido (ver skipResolutionFast()) — el cliente lo compara
+    // con el que ya tenía guardado: si cambia, pone su cola de eventos en
+    // modo rápido. `null` mientras nadie lo ha pedido.
+    resolutionSkipRequestedAt: match.resolutionSkipRequestedAt || null,
     winnerFactionNumber: match.winnerFactionNumber,
+    // Cuántas vidas empieza teniendo cada jugador en esta partida (panel de
+    // admin, 1-5) — el cliente lo usa para saber cuántos corazones dibujar
+    // en total junto a cada nombre (ver player.lives más arriba).
+    startingLives: match.config.startingLives,
     // Paron decorativo del esqueleto entre fases (ver enterTransition) —
     // { kind, round } mientras dura, null el resto del tiempo.
     transition: match.transition,
@@ -954,6 +1155,16 @@ function findInFactionList(factions, number) {
   return factions.find((f) => f.number === number);
 }
 
+/** Jugador por nombre exacto (sin mayúsculas), o `null` si no existe — usado por !apoyar. */
+function findPlayerByUsername(match, name) {
+  if (!name) return null;
+  const needle = name.trim().toLowerCase();
+  for (const player of match.players.values()) {
+    if (player.username.toLowerCase() === needle) return player;
+  }
+  return null;
+}
+
 function assertPhase(expectedPhase) {
   if (!match || match.phase !== expectedPhase) {
     throw new Error(`Operacion invalida: se esperaba fase "${expectedPhase}", fase actual "${match?.phase}"`);
@@ -975,6 +1186,7 @@ module.exports = {
   pauseTimer,
   resumeTimer,
   forceAdvancePhase,
+  skipResolutionFast,
   endMatch,
   getPublicState,
   getAdminState,
