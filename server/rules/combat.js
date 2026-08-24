@@ -1,7 +1,7 @@
 'use strict';
 
 const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
-const { sumRandomPower, applyTroopCascadeDamage } = require('./shared');
+const { sumRandomPower, applyTroopCascadeDamageAndWipeouts } = require('./shared');
 const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
 const { towerDefenseBonus } = require('./towers');
 const { wonderDefenseBonus } = require('./wonders');
@@ -30,14 +30,20 @@ const { museumDefenseBonus } = require('./bosses');
  *
  * Combate JUGADOR contra JUGADOR (esta función — !dungeon/!boss/!conquista
  * son combates aparte contra guarnición neutral, con su propia resolución en
- * rules/structures.js/rules/bosses.js, sin tocar): un jugador NUNCA muere
- * por quedarse sin tropas ni en ataque ni en defensa — el daño que sobra
- * tras la cascada de tropas (applyTroopCascadeDamage) simplemente se
- * descarta, no mata a nadie. Que el atacante GANE la comparación de poder no
+ * rules/structures.js/rules/bosses.js, mismo sistema de vidas de abajo pero
+ * en su propio archivo): que el atacante GANE la comparación de poder no
  * basta por sí solo para conquistar: solo se lleva la casilla si además deja
  * a los defensores (los que votaron `!defender`) sin NINGUNA tropa — si
  * alguno conserva aunque sea una, la defensa aguanta y el territorio no
  * cambia de dueño, aunque haya ganado el cálculo de poder por poco.
+ *
+ * Sistema de vidas (ver `handleTroopWipeout()`/`applyTroopCascadeDamageAndWipeouts()`
+ * en rules/shared.js, `match.config.startingLives` del panel de admin): quien
+ * se queda sin NINGUNA tropa en este combate (atacante o defensor, gane o
+ * pierda su bando) pierde una vida y reaparece con 0 tropas — solo si esa
+ * era su última vida es la muerte real de siempre (dispara
+ * `checkFactionElimination()`). Esto pasa igual en ataque que en defensa: no
+ * hace falta perder la casilla para perder una vida, ni al revés.
  */
 function resolveCombat(match, context) {
   const incomingByDefender = groupIncomingAttacks(match, context);
@@ -66,16 +72,26 @@ function resolveCombat(match, context) {
     if (attackPower > defensePower) {
       // Gana el ataque: el daño se reparte entre las tropas de los que
       // votaron !defender (caballero->arquero->leva->especial, ver
-      // applyTroopCascadeDamage en rules/shared.js) — lo que sobra de esa
-      // cascada se DESCARTA (ya no mata jugadores, ver cabecera de este
+      // applyTroopCascadeDamage en rules/shared.js) — quien se queda sin
+      // NINGUNA con este golpe pierde una vida (ver cabecera de este
       // archivo). Solo se conquista si eso deja a los defensores sin
       // NINGUNA tropa (o si no defendió nadie): si a alguno le queda
       // aunque sea una, la defensa aguanta pese a haber "ganado" el
       // cálculo de poder.
       const winningAttacker = attackers.sort((a, b) => b.userIds.length - a.userIds.length)[0];
       const rawDamage = Math.round(attackPower - defensePower);
-      applyTroopCascadeDamage(match, defenderUserIds, rawDamage);
+      const { diedUserIds, troopsBefore, troopsAfter } = applyTroopCascadeDamageAndWipeouts(match, defenderUserIds, rawDamage);
+      if (diedUserIds.length > 0) checkFactionElimination(match, context, defenderNumber, winningAttacker.factionNumber);
       const defendersWiped = defenderUserIds.length === 0 || totalRemainingTroops(match, defenderUserIds) === 0;
+      // Detalle para la Fase de Resolución (ver gameEngine.js
+      // buildResolutionEvents()) — no lo usa nada de la lógica de arriba,
+      // solo lo lee el cliente para el popup de resultado.
+      const detail = {
+        attackPower: Math.round(attackPower * 10) / 10,
+        defensePower: Math.round(defensePower * 10) / 10,
+        defenderTroopsLost: troopsBefore - troopsAfter,
+        defenderDiedCount: diedUserIds.length,
+      };
 
       if (!defendersWiped) {
         for (const attacker of attackers) {
@@ -83,27 +99,24 @@ function resolveCombat(match, context) {
             attackerFactionNumber: attacker.factionNumber,
             defenderFactionNumber: defenderNumber,
             outcome: 'defender_held',
+            ...detail,
           });
         }
         continue;
       }
 
+      let conqueredTileId = null;
       const tile = pickBorderTileToConquer(match, defenderNumber, winningAttacker.factionNumber);
       if (tile) {
+        conqueredTileId = tile.id;
         transferTile(match, tile.id, winningAttacker.factionNumber);
         context.roundEvents.conquests.push({
           tileId: tile.id,
           fromFactionNumber: defenderNumber,
           toFactionNumber: winningAttacker.factionNumber,
-          kind: 'attack',
+          conquestKind: 'attack',
         });
       }
-
-      // Un jugador ya no muere aquí (ver cabecera), así que esto ya no
-      // dispara nunca la eliminación de la facción por esta vía — se deja
-      // igualmente como red de seguridad ante cualquier otra causa de
-      // muerte que haya podido darse esta misma ronda.
-      checkFactionElimination(match, context, defenderNumber, winningAttacker.factionNumber);
 
       match.lastAttackerOf[defenderNumber] = winningAttacker.factionNumber;
       for (const attacker of attackers) {
@@ -111,21 +124,28 @@ function resolveCombat(match, context) {
           attackerFactionNumber: attacker.factionNumber,
           defenderFactionNumber: defenderNumber,
           outcome: attacker.factionNumber === winningAttacker.factionNumber ? 'attacker_won' : 'attacker_lost',
+          tileId: attacker.factionNumber === winningAttacker.factionNumber ? conqueredTileId : null,
+          ...detail,
         });
       }
     } else {
       // Empate o gana la defensa: las facciones atacantes pierden tropas
-      // proporcionales a su aporte (cascada igual que arriba) — el sobrante
-      // se descarta, ya no mata jugadores.
+      // proporcionales a su aporte (cascada igual que arriba) — quien se
+      // queda sin ninguna pierde una vida, igual que en la rama de arriba.
       const excess = Math.round(defensePower - attackPower);
       for (const attacker of attackers) {
         const share = attacker.userIds.length / totalAttackers;
         const rawDamage = Math.round(excess * share);
-        applyTroopCascadeDamage(match, attacker.userIds, rawDamage);
+        const { diedUserIds, troopsBefore, troopsAfter } = applyTroopCascadeDamageAndWipeouts(match, attacker.userIds, rawDamage);
+        if (diedUserIds.length > 0) checkFactionElimination(match, context, attacker.factionNumber, defenderNumber);
         context.roundEvents.combats.push({
           attackerFactionNumber: attacker.factionNumber,
           defenderFactionNumber: defenderNumber,
           outcome: 'defender_held',
+          attackPower: Math.round(attackPower * 10) / 10,
+          defensePower: Math.round(defensePower * 10) / 10,
+          attackerTroopsLost: troopsBefore - troopsAfter,
+          attackerDiedCount: diedUserIds.length,
         });
       }
     }

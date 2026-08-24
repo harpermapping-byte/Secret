@@ -521,6 +521,38 @@ const SPRITES = {
     c.rect(6, 19, 6, 6, [120, 170, 190], 1);      // ventana
   },
 
+  // POLVAREDA DE COMBATE (Fase de Resolucion, ver docs/ACCIONES.md): dos
+  // sprites que se intercalan quietos sobre el punto del combate — "al
+  // poner e intercalar la aparicion de 1 y el otro parece que se mueve",
+  // tal y como se pidio. dust-2 con los mismos puffs desplazados/mas
+  // grandes para que el intercalado se note. 40x30.
+  'dust-1': (c) => {
+    const cloud = [196, 178, 150];
+    c.rect(4, 14, 14, 10, cloud, 1);
+    c.rect(14, 8, 16, 16, cloud, 1);
+    c.rect(26, 16, 10, 8, cloud, 1);
+  },
+  'dust-2': (c) => {
+    const cloud = [210, 192, 164];
+    c.rect(2, 12, 16, 12, cloud, 1);
+    c.rect(16, 6, 18, 18, cloud, 1);
+    c.rect(30, 14, 10, 10, cloud, 1);
+  },
+
+  // CARROMATO (Fase de Resolucion, conquista/expansion, ver docs/ACCIONES.md):
+  // avanza de la casilla de origen a la conquistada. Caja + lona a dos
+  // aguas + dos ruedas. 50x36.
+  wagon: (c) => {
+    const wood = [110, 74, 40];
+    const cover = [222, 210, 180];
+    const dark = [80, 55, 30];
+    const wheel = [60, 40, 20];
+    c.rect(6, 16, 38, 14, wood, 2);
+    c.triangle(6, 16, 25, 2, 44, 16, cover, dark);
+    c.rect(10, 30, 8, 8, wheel, 0);
+    c.rect(32, 30, 8, 8, wheel, 0);
+  },
+
   // CASTILLO ESPECIAL (nivel 4 de industria, ver rules/industry.js seccion
   // 29): aparece UNA vez junto a la capital de la faccion que llega a ese
   // nivel — placeholder gris neutro, TEÑIDO del color de la faccion en
@@ -667,6 +699,7 @@ const SIZES = {
   torre: [20, 30], 'torre-obras': [20, 30],
   guardia: [14, 22], aldeano: [14, 22], capital: [44, 56],
   banner: [20, 44], iglesia: [36, 50], casa: [34, 36],
+  'dust-1': [40, 30], 'dust-2': [40, 30], wagon: [50, 36],
   'castillo-especial': [48, 40], 'tropa-especial': [14, 22],
   'wonder-guggenheim': [44, 40], 'wonder-numancia': [40, 40], 'wonder-moncloa': [44, 40],
   'wonder-spacex': [40, 42], 'wonder-kebab': [40, 40], 'wonder-contrato': [40, 40],

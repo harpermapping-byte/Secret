@@ -142,4 +142,12 @@ window.SPRITE_SIZES = {
   // ------------------------------------------------------------------
   'easteregg-ovni': 50,
   'easteregg-yeti': 40,
+
+  // ------------------------------------------------------------------
+  // Fase de Resolución (ver docs/ACCIONES.md): polvareda de combate
+  // (dos sprites intercalados) y carromato de conquista/expansión.
+  // ------------------------------------------------------------------
+  'dust-1': 46,
+  'dust-2': 46,
+  wagon: 56,
 };
