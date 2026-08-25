@@ -3,6 +3,7 @@
 const { ACTION_BOSS } = require('../commands');
 const { sumRandomPower, applyTroopCascadeDamageAndWipeouts } = require('./shared');
 const { checkFactionElimination } = require('./territory');
+const { sunnyPveBonus } = require('./weather');
 
 // Bono pasivo por cada museo (trofeo de boss, ver resolveBoss() más abajo) —
 // TERCER tipo de bono acumulable por facción, junto a torres (rules/towers.js)
@@ -32,8 +33,12 @@ function resolveBoss(match, context) {
     const target = pickEligibleBoss(match, faction.number);
     if (!target) continue; // ningun boss vivo en su territorio ahora mismo: voto desperdiciado
 
-    const attackPower = sumRandomPower(match, attackerUserIds, 'attack');
-    const ourDefense = sumRandomPower(match, attackerUserIds, 'defense');
+    // Clima: día soleado da +1 ataque Y +1 defensa a CADA jugador en combate
+    // PvE esta ronda (ver rules/weather.js) — por eso se multiplica por
+    // cuántos participan, no un +1 fijo para todo el grupo.
+    const weatherBonus = sunnyPveBonus(match) * attackerUserIds.length;
+    const attackPower = sumRandomPower(match, attackerUserIds, 'attack') + weatherBonus;
+    const ourDefense = sumRandomPower(match, attackerUserIds, 'defense') + weatherBonus;
     const bossDefenseAtStart = target.defensePower; // antes de la posible erosión de más abajo, para el popup
     const defeated = attackPower > target.defensePower;
 

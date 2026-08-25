@@ -6,6 +6,7 @@ const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElim
 const { towerDefenseBonus } = require('./towers');
 const { wonderDefenseBonus } = require('./wonders');
 const { museumDefenseBonus } = require('./bosses');
+const { rainDefensePenalty } = require('./weather');
 
 /**
  * Resuelve todo el combate de la ronda a la vez: agrupa los ataques que recibe
@@ -63,11 +64,14 @@ function resolveCombat(match, context) {
     // archerTroops/cavalryTroops.
     const attackPower =
       sumRandomPower(match, attackerUserIds, 'attack') * combatModifier(match, defenderNumber, 'attack');
-    const defensePower =
+    const defensePower = Math.max(
+      0,
       sumRandomPower(match, defenderUserIds, 'defense') * combatModifier(match, defenderNumber, 'defense') +
-      towerDefenseBonus(match, defenderFaction) +
-      wonderDefenseBonus(match, defenderFaction) +
-      museumDefenseBonus(defenderFaction);
+        towerDefenseBonus(match, defenderFaction) +
+        wonderDefenseBonus(match, defenderFaction) +
+        museumDefenseBonus(defenderFaction) -
+        rainDefensePenalty(match) // clima: lluvia resta -2 de defensa PvP esta ronda, ver rules/weather.js
+    );
 
     if (attackPower > defensePower) {
       // Gana el ataque: el daño se reparte entre las tropas de los que

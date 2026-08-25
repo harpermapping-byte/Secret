@@ -13,6 +13,7 @@ const {
   GOBLIN_COMBAT_BONUS,
 } = require('./shared');
 const { checkFactionElimination } = require('./territory');
+const { sunnyPveBonus } = require('./weather');
 
 /**
  * `!conquista` (ver docs/ACCIONES.md sección 20): ataca a UNA estructura
@@ -44,8 +45,11 @@ function resolveConquista(match, context) {
     const target = pickEligibleStructure(match, faction.number, (s) => s.type !== 'dungeon');
     if (!target) continue; // no hay ninguna estructura con guarnición en su territorio ahora mismo: voto desperdiciado
 
-    const attackPower = sumRandomPower(match, attackerUserIds, 'attack');
-    const ourDefense = sumRandomPower(match, attackerUserIds, 'defense');
+    // Clima: día soleado da +1 ataque Y +1 defensa a CADA jugador en combate
+    // PvE esta ronda (ver rules/weather.js).
+    const weatherBonus = sunnyPveBonus(match) * attackerUserIds.length;
+    const attackPower = sumRandomPower(match, attackerUserIds, 'attack') + weatherBonus;
+    const ourDefense = sumRandomPower(match, attackerUserIds, 'defense') + weatherBonus;
     const garrisonAttack = structureAttackPower(target);
     const garrisonDefense = structureDefensePower(target);
     const conquered = attackPower > garrisonDefense;
@@ -112,8 +116,11 @@ function resolveDungeon(match, context) {
     const target = pickEligibleStructure(match, faction.number, (s) => s.type === 'dungeon');
     if (!target) continue; // no hay ningun dungeon con guarnición en su territorio ahora mismo: voto desperdiciado
 
-    const attackPower = sumRandomPower(match, attackerUserIds, 'attack');
-    const ourDefense = sumRandomPower(match, attackerUserIds, 'defense');
+    // Clima: día soleado da +1 ataque Y +1 defensa a CADA jugador en combate
+    // PvE esta ronda (ver rules/weather.js).
+    const weatherBonus = sunnyPveBonus(match) * attackerUserIds.length;
+    const attackPower = sumRandomPower(match, attackerUserIds, 'attack') + weatherBonus;
+    const ourDefense = sumRandomPower(match, attackerUserIds, 'defense') + weatherBonus;
     const garrisonAttack = structureAttackPower(target);
     const garrisonDefense = structureDefensePower(target);
     const defeated = attackPower > garrisonDefense;

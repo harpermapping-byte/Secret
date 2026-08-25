@@ -22,6 +22,7 @@ const { resolveConquista, resolveDungeon, structureAttackPower, structureDefense
 const { resolveTowers, towerDefenseBonus, finishedTowerCountForFaction } = require('./rules/towers');
 const { resolveBoss, museumDefenseBonus } = require('./rules/bosses');
 const { resolveCasas } = require('./rules/housing');
+const { rollWeather, weatherBlocksAction } = require('./rules/weather');
 const { wonderDefenseBonus } = require('./rules/wonders');
 const {
   AI_TROOP_COMBAT_BONUS,
@@ -226,6 +227,11 @@ function createMatch(config) {
     // resuelva la primera ronda.
     resolutionEvents: [],
     resolutionSkipRequestedAt: null,
+    // Clima activo de la ronda en curso (ver rules/weather.js, docs/ACCIONES.md
+    // sección 36) — null hasta la primera Fase de Acción, y de ahí en
+    // adelante uno de 'niebla'/'lluvia'/'nieve'/'soleado' o null (ronda sin
+    // clima), sorteado de cero cada ronda.
+    activeWeather: null,
     winnerFactionNumber: null,
     timer: null,
     // Paron decorativo entre fases (esqueleto con cartel) — null cuando no
@@ -423,6 +429,11 @@ function castAction(userId, actionType, targetFactionNumber) {
 
   if (actionType === commands.ACTION_EXPAND && match.config.map.mode === 'total') return false;
   if (actionType === ACTION_ALLIANCE && !match.config.alliancesEnabled) return false;
+  // Clima de esta ronda (ver rules/weather.js, docs/ACCIONES.md sección 36):
+  // niebla bloquea !ataque, nieve bloquea ataque/conquista/dungeon/boss/
+  // expansion — se rechaza igual que cualquier comando invalido, sin caso
+  // especial en el chat ni en el mapa.
+  if (weatherBlocksAction(match, actionType)) return false;
 
   if (actionType === ACTION_ATTACK || actionType === ACTION_ALLIANCE || actionType === ACTION_APOYAR) {
     if (!targetFactionNumber || targetFactionNumber === player.factionNumber) return false;
@@ -483,6 +494,10 @@ function closeRecruitment() {
   match.roundActions.clear();
   enterTransition('first-action', match.round, () => {
     match.phase = PHASE_ACTION;
+    // Clima de esta ronda (ver rules/weather.js, docs/ACCIONES.md sección
+    // 36): se sortea de cero al entrar en CADA Fase de Acción — dura
+    // exactamente esa ronda, nunca se arrastra a la siguiente.
+    match.activeWeather = rollWeather(match);
     startTimer(match.config.timers.actionMs, closeActionPhase);
     notifyStateChange();
   });
@@ -673,6 +688,7 @@ function advanceRound() {
   match.roundActions.clear();
   enterTransition('next-round', match.round, () => {
     match.phase = PHASE_ACTION;
+    match.activeWeather = rollWeather(match);
     startTimer(match.config.timers.actionMs, closeActionPhase);
     notifyStateChange();
   });
@@ -876,6 +892,8 @@ function getPublicState() {
       summaryBlocks: [],
       resolutionEvents: [],
       resolutionSkipRequestedAt: null,
+      activeWeather: null,
+      weatherEnabled: false,
       startingLives: 3,
       winnerFactionNumber: null,
       timerEndsAt: null,
@@ -887,6 +905,14 @@ function getPublicState() {
   return {
     phase: match.phase,
     round: match.round,
+    // Clima de la ronda en curso (ver rules/weather.js, docs/ACCIONES.md
+    // sección 36) — null si esta ronda no tocó ninguno, o si el admin
+    // desactivó el clima al crear la partida. `weatherEnabled` es el
+    // interruptor en sí (antes `futureFeatures.weather` era puro adorno sin
+    // exponer, ahora el cliente lo necesita para saber si arrancar el ciclo
+    // día/noche, que se apaga entero junto con el clima).
+    activeWeather: match.activeWeather,
+    weatherEnabled: match.config.futureFeatures.weather,
     factions: match.factions.map((f) => ({
       number: f.number,
       name: f.name,

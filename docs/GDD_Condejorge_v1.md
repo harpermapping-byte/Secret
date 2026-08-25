@@ -45,11 +45,13 @@ El admin define, antes de pulsar "Iniciar partida":
 
 - Modo de juego (v1: **Eliminación total**; roadmap futuro: por tiempo, por turnos).
 - Número de facciones.
-- Por cada facción: nombre libre, color, alias numérico automático (`!faccion1`, `!faccion2`...), y si tiene habilidad especial habilitada (y cuál, del catálogo).
+- Por cada facción: nombre libre, color, alias numérico automático (`!faccion1`, `!faccion2`...).
 - Lista de canales de Twitch a escuchar (el propio Condejorge y streamers invitados).
 - Plantilla de mapa: tamaño (ej. 20 / 35 / 50 casillas) y variante concreta dentro de ese tamaño.
 - Modo de reparto inicial: **reparto total** (todo el mapa asignado desde el minuto uno, sin terreno gris, `!expansion` no tiene efecto) o **zonas pequeñas + territorio neutral** (recomendado, da una fase de expansión inicial y activa `!expansion`).
 - Si las **alianzas** están activadas o no para esta partida (si no lo están, el comando `!alianza` no existe esa partida).
+- Si las **habilidades especiales** están activadas o no (interruptor único para toda la partida, ya no por facción — si está activo, cada facción recibe una al azar del catálogo de 6 al crearse la partida).
+- Si el **clima** está activado o no (interruptor único: activa a la vez el ciclo día/noche visual y el sistema de climas con efecto real — niebla/lluvia/nieve/día soleado, ver sección 6).
 - % de usuarios activos necesario para activar una alianza — por defecto 50%.
 - % de usuarios activos necesario para activar la habilidad especial de una facción — por defecto 75%.
 - Duración de la Fase de Reclutamiento — por defecto 3 min.
@@ -170,6 +172,17 @@ A diferencia de dungeons/castillo/aldea/puerto, una maravilla **no se conquista 
 Configurable sí/no en la Fase 0 (panel de admin). Si está activado, aparecen de **1 a 3** bosses al azar en el mapa, sorteados sin repetir ninguno de los 3 fijos (**ogro** 👹, **troll** 🧌, **behemot** 🐗), cada uno atado para siempre a la casilla en la que salió y vagando SOLO por ella (nunca sale de ahí, a diferencia de la vaca easter egg, que recorre el mapa entero). Cada instancia sortea su propio ataque y defensa, entre **5 y 10** cada uno, que se ven encima de su cabeza.
 
 Votando `!boss` atacas, junto con el resto de tu facción, a un boss vivo que esté dentro de tu propio territorio — comando aparte de `!conquista`/`!dungeon`, misma mecánica de grupo. Mismo combate bidireccional de siempre: tu ataque decide si lo derrotas, el ataque del boss contra tu defensa os causa bajas siempre, ganéis o no. Al derrotarlo, tu facción gana un **museo** nuevo junto a su capital (mismo mecanismo de anillo que la estatua de dungeon, con sus propios 4 aldeanos alrededor) que da, PARA SIEMPRE y de forma acumulable: **+1 leva/ronda**, **+1 industria/ronda** y **+2 de defensa base**. Si derrotas más de un boss, se crea otro museo por cada uno, y los tres bonos se suman sin tope.
+
+### Clima (ciclo día/noche + niebla/lluvia/nieve/día soleado)
+Configurable sí/no en la Fase 0 (un único interruptor activa las dos cosas). Si está activo:
+- **Ciclo día/noche** — puramente visual, sin ningún efecto en el juego. El mapa se oscurece un poco (nunca a negro del todo) cada 2 minutos reales durante 1 minuto de "noche", con una transición tipo cortinilla; capital, iglesia, casas, castillo especial, estatuas y museos brillan con luz propia de noche.
+- **Clima** — al empezar cada ronda hay una posibilidad de que salga uno (nunca más de uno a la vez), dura exactamente esa ronda:
+  - 🌫️ **Niebla** (10%) — no se puede usar `!ataque`.
+  - 🌧️ **Lluvia** (10%) — -2 de defensa en combates PvP.
+  - ❄️ **Nieve** (10%) — no se puede usar `!ataque`, `!conquista`, `!dungeon`, `!boss` ni `!expansion`.
+  - ☀️ **Día soleado** (20%, el más frecuente) — +1 ataque y +1 defensa para cada jugador en combates PvE.
+  
+  Al activarse, sale un cartel centrado con su nombre/efecto y suena un aviso.
 
 ### Habilidad especial (catálogo v2 — 6 al azar, efecto por definir)
 Un único interruptor sí/no para TODA la partida en la Fase 0 (ya no se elige por facción) — si está activo, cada facción recibe al crearse la partida UNA habilidad al azar de un catálogo de 6 (con repetición: con más de 6 facciones, varias comparten la misma). De momento se llaman `hab1` a `hab6` — nombres marcador, sin efecto todavía, pendientes de decidir qué hace cada una (ver docs/ACCIONES.md sección 35). Se ven pasando el ratón por el nombre de la facción, su capital en el mapa, o el personaje de cualquiera de sus jugadores.
