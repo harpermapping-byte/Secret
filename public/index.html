@@ -94,6 +94,32 @@
   .cmdBtn:hover { filter:brightness(1.14); }
   .cmdBtn:active { filter:brightness(.92); }
   .cmdBtn.justCopied { filter:hue-rotate(80deg) saturate(1.4) brightness(1.15); }
+  /* Fila de "unirme a facción" (ver docs/ACCIONES.md sección 37) — mismo
+     aspecto que la barra de comandos, solo visible en Fase de Reclutamiento,
+     apilada justo encima de #commandBar para no chocar con ella. */
+  .joinFactionBar { position:fixed; left:0; right:0; bottom:calc(var(--map-margin-y) + 56px); height:38px; z-index:21;
+                     background-image:url('/ui/wood-bar.png'); background-repeat:repeat-x;
+                     background-size:var(--wood-tile-w) 100%; image-rendering:pixelated;
+                     display:flex; align-items:center; gap:6px; padding:0 16px;
+                     overflow-x:auto; overflow-y:hidden; box-sizing:border-box; }
+  .joinFactionBar.hidden { display:none; }
+  .joinFactionLabel { font-family:var(--font-title); font-size:12px; color:var(--gold); flex:0 0 auto;
+                       text-shadow:0 1px 1px rgba(45,25,5,.85); }
+  .joinFactionBar .cmdBtn { border-left:3px solid transparent; }
+  /* Selector de objetivo junto a un botón de comando (ver docs/ACCIONES.md
+     sección 37): !ataque/!alianza piden facción, !apoyar pide un nombre. */
+  .cmdTargetPicker { position:fixed; z-index:97; background-image:url('/ui/parchment.png');
+                      background-size:160px 160px; color:var(--ink); font-family:var(--font-serif);
+                      border:2px solid #4a331c; border-radius:3px; padding:8px; max-width:220px;
+                      box-shadow:0 8px 24px rgba(0,0,0,.5); display:flex; flex-direction:column; gap:4px; }
+  .cmdTargetTitle { font-family:var(--font-title); font-size:12px; margin-bottom:2px; }
+  .cmdTargetEmpty { font-size:12px; opacity:.7; }
+  .cmdTargetOption { text-align:left; background:rgba(255,255,255,.35); border:none; border-left:4px solid #999;
+                      border-radius:2px; padding:4px 8px; font-family:var(--font-serif); font-size:12px;
+                      color:var(--ink); cursor:pointer; }
+  .cmdTargetOption:hover { background:rgba(255,255,255,.6); }
+  .cmdTargetInputRow { display:flex; gap:6px; }
+  .cmdTargetInputRow input { flex:1; min-width:0; padding:4px 6px; font-size:12px; box-sizing:border-box; }
   /* Popup de resumen de facción (ver docs/ACCIONES.md sección 35): tarjeta
      pequeña y compacta que sigue al ratón, pointer-events:none para que
      nunca robe el mouseleave del elemento que lo disparó. */
@@ -233,6 +259,9 @@
        el navegador lo bloquea), así que cada botón copia el comando al
        portapapeles; el jugador solo tiene que pegarlo en el chat y enviar. -->
   <div id="commandBar"></div>
+  <!-- Unirse a facción desde la web (ver docs/ACCIONES.md sección 37):
+       solo visible durante la Fase de Reclutamiento. -->
+  <div id="joinFactionBar" class="joinFactionBar hidden"></div>
 
   <div class="mapToolbar">
     <button onclick="mapCtrl.zoom(1.25)" title="Acercar">+</button>
@@ -245,7 +274,7 @@
       <!-- Numero de version: sube esto en cada entrega nueva (empezamos en 0.1.0, a peticion del streamer).
            Convencion pedida: sube el ULTIMO numero en cada entrega; al llegar a 9 el del medio sube
            uno y el ultimo vuelve a 0 (...0.4.9 -> 0.5.0 -> 0.5.1...), progresivamente. -->
-      <h1>Version 0.4.4</h1>
+      <h1>Version 0.4.5</h1>
       <button class="headerBtn" id="musicToggle" onclick="toggleMusic()" title="Música de fondo">🎵</button>
       <input type="range" id="musicVolume" class="volumeSlider" min="0" max="100" value="50"
              oninput="setMusicVolume(this.value)" title="Volumen de la música" />
@@ -257,6 +286,23 @@
       <button class="headerBtn" onclick="openLeaderboard()">🏆 Clasificación</button>
       <button class="headerBtn" id="rosterToggle" onclick="toggleRoster()">👥 Jugadores</button>
       <button class="headerBtn" onclick="openCommands()">❓ Comandos</button>
+      <!-- Identidad de "jugar desde la web sin Twitch" (ver docs/ACCIONES.md
+           sección 37): un nombre guardado en este navegador, sin contraseña.
+           Pulsar el nombre siempre deja cambiarlo. -->
+      <button class="headerBtn secondary" id="webIdentityToggle" onclick="openWebIdentityModal()" title="Tu nombre para jugar desde esta web (sin Twitch)">🎮 <span id="webIdentityLabel">...</span></button>
+    </div>
+  </div>
+
+  <div id="webIdentityModal" class="modalOverlay hidden">
+    <div class="modalBox" style="max-width:360px">
+      <button class="modalClose" onclick="closeWebIdentityModal()">✕</button>
+      <h2>Jugar desde la web</h2>
+      <div class="modalSubtitle">Sin necesidad de Twitch: tu nombre aquí también puede votar en la Fase de Acción y unirse a una facción, usando los botones de abajo. Se guarda solo en este navegador — nadie más puede jugar con tu nombre desde otro sitio, pero tampoco hay contraseña: es solo para identificarte.</div>
+      <label style="display:block;margin:10px 0 4px;font-size:13px">Tu nombre</label>
+      <input type="text" id="webIdentityInput" maxlength="24" placeholder="Ej. Pani" style="width:100%;box-sizing:border-box;padding:6px 8px;font-size:14px" onkeydown="if(event.key==='Enter') saveWebIdentity()" />
+      <div style="margin-top:14px;text-align:right">
+        <button class="headerBtn" onclick="saveWebIdentity()">Guardar</button>
+      </div>
     </div>
   </div>
 
@@ -391,6 +437,76 @@
     else if (message.type === 'map:layout') mapCtrl.setLayout(message.payload);
   });
 
+  // ---------------------------------------------------------------------
+  // Jugar desde la web sin Twitch (ver docs/ACCIONES.md sección 37): un
+  // "userId" propio de este navegador, con prefijo "web-" (reservado — el
+  // servidor rechaza cualquier public:action cuyo userId no empiece así,
+  // para que nadie pueda escribir el userId numérico de un usuario de
+  // Twitch real y robarle el voto). Se guarda en localStorage, así que el
+  // mismo navegador conserva su identidad entre visitas — no hay
+  // contraseña ni cuenta real, es solo para poder votar como "alguien"
+  // consistente, igual de informal que escribir un nombre en el chat.
+  // ---------------------------------------------------------------------
+  const WEB_IDENTITY_KEY = 'condejorgeWebIdentity';
+
+  function loadWebIdentity() {
+    try {
+      const raw = localStorage.getItem(WEB_IDENTITY_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.userId && parsed.username) return parsed;
+      }
+    } catch (err) { /* localStorage puede fallar en privado/bloqueado — seguimos sin identidad guardada */ }
+    return null;
+  }
+
+  function newWebUserId() {
+    return 'web-' + (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  }
+
+  let webIdentity = loadWebIdentity();
+
+  function renderWebIdentityLabel() {
+    document.getElementById('webIdentityLabel').textContent = webIdentity ? webIdentity.username : 'Elegir nombre';
+  }
+  renderWebIdentityLabel();
+
+  function openWebIdentityModal() {
+    document.getElementById('webIdentityInput').value = webIdentity ? webIdentity.username : '';
+    document.getElementById('webIdentityModal').classList.remove('hidden');
+    document.getElementById('webIdentityInput').focus();
+  }
+
+  function closeWebIdentityModal() {
+    document.getElementById('webIdentityModal').classList.add('hidden');
+  }
+
+  function saveWebIdentity() {
+    const name = document.getElementById('webIdentityInput').value.trim();
+    if (!name) return;
+    // Si ya había una identidad guardada y solo cambia el nombre, conserva
+    // el mismo userId (sigue siendo "la misma persona" votando) — solo se
+    // genera uno nuevo la primerísima vez.
+    webIdentity = { userId: webIdentity ? webIdentity.userId : newWebUserId(), username: name };
+    try { localStorage.setItem(WEB_IDENTITY_KEY, JSON.stringify(webIdentity)); } catch (err) { /* privado/bloqueado: seguimos, solo no persiste entre visitas */ }
+    renderWebIdentityLabel();
+    closeWebIdentityModal();
+  }
+
+  /**
+   * Manda un comando de chat de verdad al servidor, con la identidad web de
+   * este navegador — llega a engine.handleChatCommand() exactamente igual
+   * que si lo hubiera escrito alguien en el chat de Twitch (mismo parseo,
+   * misma validación de fase, mismo chatLog), así que Twitch y la web
+   * pueden jugar la MISMA partida a la vez sin ningún camino especial.
+   */
+  function sendWebCommand(text) {
+    if (!webIdentity) { openWebIdentityModal(); return false; }
+    if (socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({ type: 'public:action', payload: { userId: webIdentity.userId, username: webIdentity.username, text } }));
+    return true;
+  }
+
   /** Unica funcion del proyecto para buscar una facción por número dentro del estado recibido por WS. */
   function factionByNumber(state, number) {
     return (state.factions || []).find((f) => f.number === number);
@@ -411,6 +527,7 @@
     handleMatchEndModal(state);
     handleTransitionBanner(state);
     handleWeatherState(state);
+    handleJoinFactionBar(state);
   }
 
   // ---------------------------------------------------------------------
@@ -1067,19 +1184,20 @@
   ];
 
   // ---------------------------------------------------------------------
-  // Barra de comandos (ver docs/ACCIONES.md sección 35): un botón por cada
-  // comando de la Fase de Acción (se deja fuera !faccionN, que es de
-  // Reclutamiento y ya tiene su propio flujo). Copiar al portapapeles es la
-  // única forma real de "ayudar a escribir en Twitch" sin cuentas ni
-  // extensiones: un sitio web no puede escribir en la pestaña de otro
-  // origen, así que el jugador pega (Ctrl+V) el resultado en el chat.
+  // Barra de comandos (ver docs/ACCIONES.md sección 37): un botón por cada
+  // comando de la Fase de Acción — al pulsarlo, manda la acción DE VERDAD
+  // con la identidad web de este navegador (sendWebCommand(), ver arriba),
+  // no solo la copia al portapapeles como antes. Los comandos con objetivo
+  // (!ataque/!alianza piden un número de facción, !apoyar pide un nombre de
+  // usuario) abren un mini selector junto al botón antes de mandar nada.
   // ---------------------------------------------------------------------
+  const CMD_TARGET_TYPE = { '!ataque': 'faction', '!alianza': 'faction', '!apoyar': 'username' };
+
   function renderCommandBar() {
     const bar = document.getElementById('commandBar');
-    bar.innerHTML = CHAT_COMMANDS.filter((c) => c.phase === 'Acción').map((c, i) => {
+    bar.innerHTML = CHAT_COMMANDS.filter((c) => c.phase === 'Acción').map((c) => {
       const base = c.cmd.split(' ')[0];
-      const copyText = c.cmd.includes('<') ? `${base} ` : base;
-      return `<button class="cmdBtn" data-copy="${escapeHtmlAttr(copyText)}" onclick="copyCommand(this)" title="${escapeHtmlAttr(c.short)}">${base}</button>`;
+      return `<button class="cmdBtn" data-base="${escapeHtmlAttr(base)}" onclick="handleCmdBtnClick(this)" title="${escapeHtmlAttr(c.short)}">${base}</button>`;
     }).join('');
   }
 
@@ -1087,25 +1205,136 @@
     return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 
-  async function copyCommand(btn) {
-    const text = btn.getAttribute('data-copy');
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch (err) {
-      console.warn('[commandBar] no se pudo copiar al portapapeles:', err);
-      return;
-    }
+  function handleCmdBtnClick(btn) {
+    const base = btn.getAttribute('data-base');
+    const targetType = CMD_TARGET_TYPE[base];
+    if (!targetType) { dispatchCommand(btn, base); return; }
+    openCmdTargetPicker(btn, base, targetType);
+  }
+
+  function dispatchCommand(btn, text) {
+    const sent = sendWebCommand(text);
+    if (!sent) return; // sin identidad todavia: sendWebCommand() ya abrió el modal de nombre
+    flashCmdBtn(btn, '¡Enviado!');
+  }
+
+  function flashCmdBtn(btn, label) {
     const original = btn.textContent;
-    btn.textContent = '¡Copiado!';
+    btn.textContent = label;
     btn.classList.add('justCopied');
-    clearTimeout(btn._copyTimer);
-    btn._copyTimer = setTimeout(() => {
+    clearTimeout(btn._flashTimer);
+    btn._flashTimer = setTimeout(() => {
       btn.textContent = original;
       btn.classList.remove('justCopied');
     }, 1100);
   }
 
+  /** Mini selector junto al botón: lista de facciones (!ataque/!alianza) o un campo de texto (!apoyar). Todo el contenido dinámico se construye con DOM real (textContent/addEventListener), nunca interpolado en HTML — un nombre de facción con comillas no puede romper nada. */
+  function openCmdTargetPicker(btn, base, targetType) {
+    closeCmdTargetPicker();
+    const pop = document.createElement('div');
+    pop.id = 'cmdTargetPicker';
+    pop.className = 'cmdTargetPicker';
+
+    const title = document.createElement('div');
+    title.className = 'cmdTargetTitle';
+    title.textContent = `${base} — ${targetType === 'faction' ? 'elige facción' : 'nombre de usuario'}`;
+    pop.appendChild(title);
+
+    if (targetType === 'faction') {
+      const selfPlayer = webIdentity && lastState ? (lastState.players || []).find((p) => p.userId === webIdentity.userId) : null;
+      const options = (lastState?.factions || []).filter((f) => !selfPlayer || f.number !== selfPlayer.factionNumber);
+      if (!options.length) {
+        const empty = document.createElement('div');
+        empty.className = 'cmdTargetEmpty';
+        empty.textContent = 'No hay facciones disponibles todavía.';
+        pop.appendChild(empty);
+      }
+      options.forEach((f) => {
+        const optBtn = document.createElement('button');
+        optBtn.className = 'cmdTargetOption';
+        optBtn.textContent = `#${f.number} ${f.name}`;
+        optBtn.style.borderLeftColor = f.color;
+        optBtn.addEventListener('click', () => {
+          dispatchCommand(btn, `${base} ${f.number}`);
+          closeCmdTargetPicker();
+        });
+        pop.appendChild(optBtn);
+      });
+    } else {
+      const row = document.createElement('div');
+      row.className = 'cmdTargetInputRow';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.id = 'cmdTargetInput';
+      input.placeholder = 'usuario';
+      input.maxLength = 24;
+      const submit = () => {
+        const val = input.value.trim();
+        if (!val) return;
+        dispatchCommand(btn, `${base} ${val}`);
+        closeCmdTargetPicker();
+      };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+      const sendBtn = document.createElement('button');
+      sendBtn.className = 'headerBtn';
+      sendBtn.textContent = 'Enviar';
+      sendBtn.addEventListener('click', submit);
+      row.appendChild(input);
+      row.appendChild(sendBtn);
+      pop.appendChild(row);
+    }
+
+    document.body.appendChild(pop);
+    const rect = btn.getBoundingClientRect();
+    pop.style.left = `${Math.max(4, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 4 || window.innerWidth - 240))}px`;
+    pop.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    if (targetType === 'username') document.getElementById('cmdTargetInput').focus();
+    setTimeout(() => document.addEventListener('click', outsideCmdTargetPickerClick), 0);
+  }
+
+  function outsideCmdTargetPickerClick(e) {
+    const pop = document.getElementById('cmdTargetPicker');
+    if (pop && !pop.contains(e.target)) closeCmdTargetPicker();
+  }
+
+  function closeCmdTargetPicker() {
+    const pop = document.getElementById('cmdTargetPicker');
+    if (pop) pop.remove();
+    document.removeEventListener('click', outsideCmdTargetPickerClick);
+  }
+
   renderCommandBar();
+
+  // ---------------------------------------------------------------------
+  // Unirse a facción desde la web (ver docs/ACCIONES.md sección 37): solo
+  // visible durante la Fase de Reclutamiento — !faccionN nunca estuvo en la
+  // barra de comandos (esa es solo de Fase de Acción), así que necesita su
+  // propia fila de botones, uno por facción.
+  // ---------------------------------------------------------------------
+  let joinFactionBarFactionsKey = null;
+
+  function handleJoinFactionBar(state) {
+    const bar = document.getElementById('joinFactionBar');
+    if (state.phase !== 'recruitment') { bar.classList.add('hidden'); joinFactionBarFactionsKey = null; return; }
+    const key = (state.factions || []).map((f) => `${f.number}:${f.name}:${f.color}`).join('|');
+    if (key === joinFactionBarFactionsKey) { bar.classList.remove('hidden'); return; }
+    joinFactionBarFactionsKey = key;
+    bar.innerHTML = '';
+    const label = document.createElement('span');
+    label.className = 'joinFactionLabel';
+    label.textContent = 'Unirme a:';
+    bar.appendChild(label);
+    (state.factions || []).forEach((f) => {
+      const btn = document.createElement('button');
+      btn.className = 'cmdBtn';
+      btn.textContent = `#${f.number} ${f.name}`;
+      btn.style.borderLeftColor = f.color;
+      btn.addEventListener('click', () => dispatchCommand(btn, `!faccion${f.number}`));
+      bar.appendChild(btn);
+    });
+    bar.classList.remove('hidden');
+  }
 
   // ---------------------------------------------------------------------
   // Popup de resumen de facción al pasar el ratón (ver docs/ACCIONES.md

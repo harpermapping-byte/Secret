@@ -42,14 +42,43 @@ const wsApp = createServer({
 });
 
 wsApp.onMessage((client, rawText) => {
-  if (client.role !== 'admin') return; // solo el panel admin puede mandar comandos, ver docs/ACCIONES.md seccion 5
-
   let message;
   try {
     message = JSON.parse(rawText);
   } catch {
     return;
   }
+
+  // Jugar desde la web sin Twitch (ver docs/ACCIONES.md sección 37): un
+  // cliente 'public' SOLO puede mandar este único tipo de mensaje, con la
+  // misma forma que ya usaba el bot de Twitch (userId/username/text) — se
+  // reenvía tal cual a handleChatCommand(), así que corre por el MISMO
+  // parseo/validación/fase/chatLog que un comando de chat real, sin ningún
+  // camino especial de reglas para el modo web. `userId` tiene que empezar
+  // por "web-" (namespace reservado, ver public/index.html): así un cliente
+  // público no puede suplantar el userId numérico de un usuario de Twitch
+  // real y robarle el voto.
+  if (client.role === 'public') {
+    if (message.type !== 'public:action') return;
+    const { userId, username, text } = message.payload || {};
+    if (typeof userId !== 'string' || !userId.startsWith('web-') || userId.length > 60) return;
+    if (typeof username !== 'string' || !username.trim() || username.length > 40) return;
+    if (typeof text !== 'string' || !text.trim() || text.length > 60) return;
+    // Cooldown mínimo por conexión: sin esto, una pestaña con un bucle podría
+    // inundar handleChatCommand() (y su chatLog) sin límite — 150ms es de
+    // sobra para pulsar botones a mano, invisible para un jugador real.
+    const now = Date.now();
+    if (client.lastActionAt && now - client.lastActionAt < 150) return;
+    client.lastActionAt = now;
+    try {
+      engine.handleChatCommand(userId, username.trim(), 'web', text.trim());
+    } catch (err) {
+      console.error('[server] error procesando accion web:', err.message);
+    }
+    return;
+  }
+
+  if (client.role !== 'admin') return; // solo el panel admin puede mandar comandos, ver docs/ACCIONES.md seccion 5
 
   console.log('[server] accion admin recibida:', message.type);
 
