@@ -81,7 +81,7 @@ Una vez pulsado "Iniciar partida", **nada de esto se puede volver a tocar**: no 
 
 Solo cuenta el **último comando** que escribas antes de que cierre la Fase de Acción — puedes cambiar de opinión mientras dure.
 
-No hay comandos por botón en la web para el público: los botones/paneles interactivos son solo para el admin. El público solo interactúa por el chat de Twitch.
+El público también puede jugar sin Twitch, directamente desde la web: una barra de botones (uno por comando de la Fase de Acción, más una fila para unirse a facción durante el Reclutamiento) manda la acción de verdad, usando un nombre propio de ese navegador (sin cuenta ni contraseña, ver docs/ACCIONES.md sección 37). Twitch y la web pueden jugar la MISMA partida a la vez, sin que uno excluya al otro.
 
 ---
 
