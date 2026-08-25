@@ -171,14 +171,10 @@ Configurable sí/no en la Fase 0 (panel de admin). Si está activado, aparecen d
 
 Votando `!boss` atacas, junto con el resto de tu facción, a un boss vivo que esté dentro de tu propio territorio — comando aparte de `!conquista`/`!dungeon`, misma mecánica de grupo. Mismo combate bidireccional de siempre: tu ataque decide si lo derrotas, el ataque del boss contra tu defensa os causa bajas siempre, ganéis o no. Al derrotarlo, tu facción gana un **museo** nuevo junto a su capital (mismo mecanismo de anillo que la estatua de dungeon, con sus propios 4 aldeanos alrededor) que da, PARA SIEMPRE y de forma acumulable: **+1 leva/ronda**, **+1 industria/ronda** y **+2 de defensa base**. Si derrotas más de un boss, se crea otro museo por cada uno, y los tres bonos se suman sin tope.
 
-### Habilidad especial (catálogo v1)
-Configurable sí/no por facción en la Fase 0. Activable una única vez por partida cuando el % configurado de votantes activos escribe `!especial` en la misma ronda:
-- **Refuerzo** — revive a los últimos caídos de la facción (su ficha ya existía, solo cambia su estado a "vivo", no hace falta volver a unirse).
-- **Escudo** — reduce el próximo ataque recibido esa ronda.
-- **Frenesí** — aumenta el próximo ataque lanzado esa ronda.
-- **Sabotaje** — reduce la industria del objetivo elegido la siguiente ronda.
+### Habilidad especial (catálogo v2 — 6 al azar, efecto por definir)
+Un único interruptor sí/no para TODA la partida en la Fase 0 (ya no se elige por facción) — si está activo, cada facción recibe al crearse la partida UNA habilidad al azar de un catálogo de 6 (con repetición: con más de 6 facciones, varias comparten la misma). De momento se llaman `hab1` a `hab6` — nombres marcador, sin efecto todavía, pendientes de decidir qué hace cada una (ver docs/ACCIONES.md sección 35). Se ven pasando el ratón por el nombre de la facción, su capital en el mapa, o el personaje de cualquiera de sus jugadores.
 
-Si el intento de activación **no llega** al % necesario, todos los que votaron `!especial` ese turno cuentan como neutrales/inactivos en la Fase de Desarrollo de esa ronda (no defienden, no atacan, no producen, y son los primeros aniquilables si hay combate) — la misma penalización que un intento de alianza fallido.
+Activable una única vez por partida cuando el % configurado de votantes activos de esa facción escribe `!especial` en la misma ronda — igual mecánica de siempre, solo cambia qué se le asignó a cada facción. Si el intento de activación **no llega** al % necesario, todos los que votaron `!especial` ese turno cuentan como neutrales/inactivos en la Fase de Desarrollo de esa ronda (no defienden, no atacan, no producen, y son los primeros aniquilables si hay combate) — la misma penalización que un intento de alianza fallido.
 
 ### Alianzas (unilaterales, con coste)
 Configurable sí/no en la Fase 0. Si están activas, cualquier facción puede intentar imponer un alto el fuego: si el % configurado (por defecto 50%) de votantes activos de la Facción 1 escribe `!alianza 2` en una ronda, se activa un alto el fuego **obligatorio para ambas** esa ronda (`!ataque 1` y `!ataque 2` entre ellas quedan inválidos), **aunque la Facción 2 no haya votado nada** — el coste lo paga solo quien la propone, al sacrificar la mitad de su gente en votar alianza en vez de producir o defender. Dos casos especiales:

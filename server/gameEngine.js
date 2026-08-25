@@ -13,13 +13,13 @@ const {
 const commands = require('./commands');
 const { generateMap, DEFAULT_MAP_KEY } = require('./mapTemplates');
 const { resolveAlliances } = require('./rules/alliances');
-const { resolveSpecialAbilities } = require('./rules/specialAbilities');
+const { resolveSpecialAbilities, pickRandomAbility } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
 const { resolveIndustry, industryThresholdsFor } = require('./rules/industry');
 const { resolveAiTroops } = require('./rules/troops');
 const { resolveTroopBuildings } = require('./rules/troopBuildings');
 const { resolveConquista, resolveDungeon, structureAttackPower, structureDefensePower } = require('./rules/structures');
-const { resolveTowers, towerDefenseBonus } = require('./rules/towers');
+const { resolveTowers, towerDefenseBonus, finishedTowerCountForFaction } = require('./rules/towers');
 const { resolveBoss, museumDefenseBonus } = require('./rules/bosses');
 const { resolveCasas } = require('./rules/housing');
 const { wonderDefenseBonus } = require('./rules/wonders');
@@ -116,8 +116,15 @@ function createMatch(config) {
     // rules/shared.js) — acumulable con la iglesia, a diferencia de esta
     // no es un interruptor sino un contador.
     housesBuilt: 0,
-    specialEnabled: !!f.specialEnabled,
-    specialAbility: f.specialAbility || null,
+    // Habilidad especial (ver rules/specialAbilities.js, docs/ACCIONES.md
+    // sección 35): ya NO la elige el admin por facción — si
+    // `specialAbilitiesEnabled` está activo en la partida, cada facción
+    // recibe una al azar del catálogo de 6 (con repetición posible), fijada
+    // aquí mismo y para siempre. Si está desactivado, ninguna facción tiene
+    // habilidad (specialEnabled=false), igual que antes de esta función
+    // existir.
+    specialEnabled: normalizedConfig.specialAbilitiesEnabled,
+    specialAbility: normalizedConfig.specialAbilitiesEnabled ? pickRandomAbility() : null,
     specialUsed: false,
     territoryIds: [],
     // Capital de la faccion (ver docs/ACCIONES.md): una de sus casillas
@@ -277,6 +284,11 @@ function normalizeConfig(config) {
     // 2-5 = vidas extra. Panel de admin, por defecto 3.
     startingLives: clampInt(config.startingLives, 1, 5, 3),
     alliancesEnabled: !!config.alliancesEnabled,
+    // Habilidades especiales activas en esta partida (ver
+    // rules/specialAbilities.js, docs/ACCIONES.md sección 35). Único
+    // interruptor global — ya no se eligen ni activan por facción desde el
+    // panel de admin, se reparten solas al azar entre las 6 del catálogo.
+    specialAbilitiesEnabled: !!config.specialAbilitiesEnabled,
     thresholds: {
       // `!expansion` ya NO tiene umbral de porcentaje: lo que decide cuantas
       // casillas se ganan es el numero de votantes (ver rules/expansion.js,
@@ -881,6 +893,11 @@ function getPublicState() {
       color: f.color,
       industry: f.industry,
       industryGainedLastRound: f.industryGainedLastRound,
+      // Cuántos de los 8 niveles de industria ya desbloqueó (ver
+      // rules/industry.js) — usado por el popup de resumen de facción de la
+      // sección 35, no solo por la probeta (que ya recibe los umbrales
+      // completos más abajo en industryThresholds).
+      industryTierIndex: f.industryTierIndex,
       territoryCount: f.territoryIds.length,
       // Ver docs/ACCIONES.md: casilla con el placeholder de capital de esta
       // faccion y cuantos aldeanos pasean alrededor. Sigue apuntando a la
@@ -930,6 +947,16 @@ function getPublicState() {
       // controla la casilla de cada una, igual que su bono de industria/
       // defensa; usado en la clasificación (leaderboard).
       wondersCount: match.wonders.filter((w) => match.tiles[w.tileId].ownerFactionNumber === f.number).length,
+      // Torres terminadas (ver rules/towers.js) — para el resumen compacto
+      // del popup de la sección 35, no solo el bonus de defensa ya expuesto
+      // arriba en towerDefenseBonus.
+      towerCount: finishedTowerCountForFaction(match, f),
+      // Habilidad especial asignada (ver rules/specialAbilities.js, sección
+      // 35) — null si `specialAbilitiesEnabled` estaba desactivado al crear
+      // la partida. El cliente solo pinta el nombre/emote, no sabe qué hace
+      // (todavía sin efecto definido).
+      specialEnabled: f.specialEnabled,
+      specialAbility: f.specialAbility,
       // Recuento EN VIVO de la fase de accion en curso (ver countLiveActions):
       // cuanta gente de esta faccion esta defendiendo, y cuantos atacantes
       // tiene encima ahora mismo. El mapa los pinta como escudo verde / espada

@@ -24,13 +24,17 @@ function log(title) {
 
 engine.createMatch({
   factions: [
-    { name: 'Halcones', color: '#e63946', specialEnabled: true, specialAbility: 'escudo' },
-    { name: 'Lobos', color: '#457b9d', specialEnabled: true, specialAbility: 'frenesi' },
-    { name: 'Cuervos', color: '#2a9d8f', specialEnabled: false },
+    { name: 'Halcones', color: '#e63946' },
+    { name: 'Lobos', color: '#457b9d' },
+    { name: 'Cuervos', color: '#2a9d8f' },
   ],
   channels: ['condejorge'],
   map: { tileCount: 18, mode: 'neutral' },
   alliancesEnabled: true,
+  // Habilidad especial ya no se elige por facción (ver rules/specialAbilities.js
+  // sección 35 de docs/ACCIONES.md): se reparte sola al azar entre las 6 del
+  // catálogo si este interruptor global está activo.
+  specialAbilitiesEnabled: true,
 });
 
 engine.startMatch();
