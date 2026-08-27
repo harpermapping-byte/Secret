@@ -1109,8 +1109,6 @@
        * en cada `mousemove` sobre el mapa.
        */
       hitTestFactionAt: (x, y) => (objectLayer ? objectLayer.hitTestFactionAt(x, y) : null),
-      /** Ciclo día/noche (ver docs/ACCIONES.md sección 36): activa/desactiva el resplandor nocturno de capital/iglesia/casas/castillo especial/estatuas/museos. El velo oscuro en sí lo pinta public/index.html con un `<div>` encima, esto es solo la luz DETRÁS de los edificios. */
-      setNightMode: (active) => { if (objectLayer) objectLayer.setNightMode(active); },
       /**
        * Posicion actual de cada marcador de jugador, en pixeles de mundo:
        * Map<userId, {x, y, color, username}>. La usa `focusOnPlayer()` por
@@ -1569,31 +1567,6 @@
         if (d <= t.radius && d < bestDist) { best = t; bestDist = d; }
       }
       return best ? best.factionNumber : null;
-    }
-
-    // Ciclo día/noche (ver docs/ACCIONES.md sección 36, controlado por
-    // public/index.html — reloj real del cliente, como las nubes, no viaja
-    // por el servidor): de noche, capital y sus edificios anexos (iglesia,
-    // casas, castillo especial, estatuas, museos) llevan un resplandor
-    // cálido detrás para que parezca que tienen luz propia y no se pierdan
-    // bajo el velo oscuro — la luz va DETRÁS, el sprite se dibuja encima tal
-    // cual siempre (ver setNightMode()/drawBuildingGlow() más abajo).
-    let nightMode = false;
-    function setNightMode(active) {
-      nightMode = active;
-    }
-    /** Resplandor cálido centrado en el sprite (bottom-anchored: cx,cyBottom,w,h son los mismos 4 valores que ya usa cada ctx.drawImage de un edificio). Se llama justo ANTES de dibujar el sprite, para que quede detrás. */
-    function drawBuildingGlow(cx, cyBottom, w, h) {
-      if (!nightMode) return;
-      const cy = cyBottom - h / 2;
-      const r = Math.max(w, h) * 0.85;
-      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-      grad.addColorStop(0, 'rgba(255,214,120,.5)');
-      grad.addColorStop(1, 'rgba(255,214,120,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fill();
     }
 
     // Nubes del cielo (decorativo, ver stepClouds()/drawClouds()): pocas a
@@ -2438,7 +2411,6 @@
           const cw = CAPITAL_SPRITE_WORLD_W * scale;
           const chh = cw * (capitalSpriteImg.naturalHeight / capitalSpriteImg.naturalWidth);
           const ccx = home.x * scale + vx, ccy = home.y * scale + vy;
-          drawBuildingGlow(ccx, ccy, cw, chh);
           ctx.drawImage(capitalSpriteImg, ccx - cw / 2, ccy - chh, cw, chh);
           if (group.factionNumber != null) {
             hoverTargets.push({ factionNumber: group.factionNumber, x: ccx, y: ccy - chh / 2, radius: Math.max(cw, chh) / 2 });
@@ -2469,23 +2441,19 @@
         } else if (inView && group.buildingKind === 'estatua' && estatuaImg.complete && estatuaImg.naturalWidth) {
           const ew = ESTATUA_SPRITE_WORLD_W * scale;
           const eh = ew * (estatuaImg.naturalHeight / estatuaImg.naturalWidth);
-          drawBuildingGlow(home.x * scale + vx, home.y * scale + vy, ew, eh);
           ctx.drawImage(estatuaImg, home.x * scale + vx - ew / 2, home.y * scale + vy - eh, ew, eh);
         } else if (inView && group.buildingKind === 'castilloEspecial' && castilloEspecialImg.complete && castilloEspecialImg.naturalWidth) {
           const kw = CASTILLO_ESPECIAL_SPRITE_WORLD_W * scale;
           const kh = kw * (castilloEspecialImg.naturalHeight / castilloEspecialImg.naturalWidth);
-          drawBuildingGlow(home.x * scale + vx, home.y * scale + vy, kw, kh);
           drawTintedSprite(castilloEspecialImg, home.x * scale + vx - kw / 2, home.y * scale + vy - kh, kw, kh, group.factionColor, 0.65);
         } else if (inView && group.buildingKind === 'museo' && museoImg.complete && museoImg.naturalWidth) {
           const mw = MUSEO_SPRITE_WORLD_W * scale;
           const mh = mw * (museoImg.naturalHeight / museoImg.naturalWidth);
-          drawBuildingGlow(home.x * scale + vx, home.y * scale + vy, mw, mh);
           ctx.drawImage(museoImg, home.x * scale + vx - mw / 2, home.y * scale + vy - mh, mw, mh);
         } else if (inView && group.buildingKind === 'iglesia' && iglesiaImg.complete && iglesiaImg.naturalWidth) {
           const gw = IGLESIA_SPRITE_WORLD_W * scale;
           const gh = gw * (iglesiaImg.naturalHeight / iglesiaImg.naturalWidth);
           const gx = home.x * scale + vx, gy = home.y * scale + vy;
-          drawBuildingGlow(gx, gy, gw, gh);
           ctx.drawImage(iglesiaImg, gx - gw / 2, gy - gh, gw, gh);
           // "+25 tropas": para que se sepa de un vistazo el beneficio que da,
           // igual estilo que el cartel de un boss (sombra oscura + relleno
@@ -2501,7 +2469,6 @@
         } else if (inView && group.buildingKind === 'casa' && casaImg.complete && casaImg.naturalWidth) {
           const hw = CASA_SPRITE_WORLD_W * scale;
           const hh = hw * (casaImg.naturalHeight / casaImg.naturalWidth);
-          drawBuildingGlow(home.x * scale + vx, home.y * scale + vy, hw, hh);
           ctx.drawImage(casaImg, home.x * scale + vx - hw / 2, home.y * scale + vy - hh, hw, hh);
         }
 
@@ -3485,7 +3452,7 @@
 
     return {
       onLayout, onViewChanged, onResize, setDecorations, setWalkerWorld, getMarkerPositions, getCowPosition,
-      addResolutionEffect, clearResolutionEffects, hitTestFactionAt, setNightMode,
+      addResolutionEffect, clearResolutionEffects, hitTestFactionAt,
     };
   }
 

@@ -149,15 +149,15 @@
   .factionHoverTip.hidden { display:none; }
   .factionHoverTip .fhtTitle { font-family:var(--font-title); font-size:13px; margin-bottom:4px; }
   [data-hover-faction] { cursor:help; }
-  /* Ciclo día/noche y clima (ver docs/ACCIONES.md sección 36). Las dos capas
-     viven exactamente sobre el hueco del mapa (mismo top/bottom que
-     #mapViewport) y no capturan el ratón — son puro adorno visual, nunca
-     deben robarle el hover al mapa de debajo (por eso hitTestFactionAt()
-     sigue funcionando igual con cualquiera de las dos activa). */
-  .nightVeil, .weatherOverlay { position:fixed; top:var(--map-margin-y); bottom:var(--map-margin-y); left:0; right:0;
-                                 z-index:15; pointer-events:none; overflow:hidden; }
-  .nightVeil { background:#040611; opacity:0; }
-  .weatherOverlay { opacity:0; transition:opacity 1.2s ease; }
+  /* Clima (ver docs/ACCIONES.md sección 36). Vive exactamente sobre el hueco
+     del mapa (mismo top/bottom que #mapViewport) y no captura el ratón — es
+     puro adorno visual, nunca debe robarle el hover al mapa de debajo (por
+     eso hitTestFactionAt() sigue funcionando igual con la capa activa). El
+     ciclo día/noche que vivía aquí al lado se quitó (v0.4.8): oscurecía el
+     mapa demasiado y dificultaba ver la partida. */
+  .weatherOverlay { position:fixed; top:var(--map-margin-y); bottom:var(--map-margin-y); left:0; right:0;
+                     z-index:15; pointer-events:none; overflow:hidden;
+                     opacity:0; transition:opacity 1.2s ease; }
   .weatherOverlay.active { opacity:1; }
   .weatherOverlay.niebla { background:rgba(150,150,150,.42); }
   .weatherOverlay.lluvia { background:rgba(40,70,140,.22); }
@@ -299,7 +299,7 @@
       <!-- Numero de version: sube esto en cada entrega nueva (empezamos en 0.1.0, a peticion del streamer).
            Convencion pedida: sube el ULTIMO numero en cada entrega; al llegar a 9 el del medio sube
            uno y el ultimo vuelve a 0 (...0.4.9 -> 0.5.0 -> 0.5.1...), progresivamente. -->
-      <h1>Version 0.4.7</h1>
+      <h1>Version 0.4.8</h1>
       <button class="headerBtn" id="musicToggle" onclick="toggleMusic()" title="Música de fondo">🎵</button>
       <input type="range" id="musicVolume" class="volumeSlider" min="0" max="100" value="50"
              oninput="setMusicVolume(this.value)" title="Volumen de la música" />
@@ -402,14 +402,10 @@
        elemento de debajo) — se oculta solo al quitar el ratón. -->
   <div id="factionHoverTip" class="factionHoverTip hidden"></div>
 
-  <!-- Ciclo día/noche y clima (ver docs/ACCIONES.md sección 36): reloj real
-       del cliente, igual que las nubes — no viaja por el servidor, cada
-       espectador lo ve a su propio ritmo. `#nightVeil` es el velo oscuro que
-       cubre el mapa de noche (nunca negro puro); su aparición/desaparición
-       es una cortinilla de izquierda a derecha (clip-path animado por JS).
-       `#weatherOverlay` es el tinte de color + partículas del clima activo
-       ese turno (viene del servidor, sincronizado para todos). -->
-  <div id="nightVeil" class="nightVeil"></div>
+  <!-- Clima (ver docs/ACCIONES.md sección 36): `#weatherOverlay` es el tinte
+       de color + partículas del clima activo ese turno (viene del servidor,
+       sincronizado para todos). El ciclo día/noche que vivía aquí al lado
+       se quitó en v0.4.8 (oscurecía demasiado el mapa). -->
   <div id="weatherOverlay" class="weatherOverlay"></div>
   <div id="weatherAnnounce" class="weatherAnnounce hidden">
     <div id="weatherAnnounceText"></div>
@@ -556,52 +552,6 @@
     handleJoinFactionBar(state);
     renderActionFeed(state);
   }
-
-  // ---------------------------------------------------------------------
-  // Ciclo día/noche (ver docs/ACCIONES.md sección 36): reloj real del
-  // cliente, no del servidor — "da igual lo que esté pasando en la
-  // partida, es un efecto visual como las nubes". 2 min de día, 1 min de
-  // noche, en bucle infinito mientras la pestaña esté abierta. La
-  // aparición/desaparición del velo es una cortinilla de izquierda a
-  // derecha (clip-path animado), no un simple fundido de opacidad.
-  // ---------------------------------------------------------------------
-  const DAY_MS = 120000;
-  const NIGHT_MS = 60000;
-  const DAYNIGHT_CYCLE_MS = DAY_MS + NIGHT_MS;
-  const DAYNIGHT_TRANSITION_MS = 4000;
-  const NIGHT_VEIL_MAX_OPACITY = 0.62;
-
-  function dayNightTick() {
-    const veil = document.getElementById('nightVeil');
-    const weatherOn = !!(lastState && lastState.weatherEnabled);
-    if (!weatherOn) {
-      veil.style.opacity = 0;
-      mapCtrl.setNightMode(false);
-      return;
-    }
-    const t = Date.now() % DAYNIGHT_CYCLE_MS;
-    // 0..DAY_MS-TRANSITION: dia pleno. DAY_MS-TRANSITION..DAY_MS: anochece.
-    // DAY_MS..DAY_MS+NIGHT_MS-TRANSITION: noche plena. resto: amanece.
-    let progress; // 0 = dia pleno, 1 = noche plena
-    if (t < DAY_MS - DAYNIGHT_TRANSITION_MS) {
-      progress = 0;
-    } else if (t < DAY_MS) {
-      progress = (t - (DAY_MS - DAYNIGHT_TRANSITION_MS)) / DAYNIGHT_TRANSITION_MS;
-    } else if (t < DAY_MS + NIGHT_MS - DAYNIGHT_TRANSITION_MS) {
-      progress = 1;
-    } else {
-      progress = 1 - (t - (DAY_MS + NIGHT_MS - DAYNIGHT_TRANSITION_MS)) / DAYNIGHT_TRANSITION_MS;
-    }
-    veil.style.opacity = progress * NIGHT_VEIL_MAX_OPACITY;
-    // Cortinilla izquierda->derecha: el velo se revela/oculta barriendo la
-    // pantalla en vez de aparecer entero de golpe — clip-path recorta todo
-    // menos el primer `progress*100%` del ancho.
-    veil.style.clipPath = `inset(0 ${(1 - progress) * 100}% 0 0)`;
-    mapCtrl.setNightMode(progress > 0.5);
-  }
-  // El setInterval/primera llamada se arman más abajo, DESPUÉS de que
-  // `mapCtrl` exista (esta función lo usa) — ver justo debajo de
-  // `const mapCtrl = CondejorgeMap.createMapController(...)`.
 
   // ---------------------------------------------------------------------
   // Clima (ver docs/ACCIONES.md sección 36): sincronizado por el servidor
@@ -887,11 +837,6 @@
     objectsEl: document.getElementById('mapObjects'),
     effectsEl: document.getElementById('mapEffects'),
   });
-
-  // Ciclo día/noche (ver dayNightTick() más arriba): arranca aquí porque
-  // necesita `mapCtrl` ya creado.
-  setInterval(dayNightTick, 200);
-  dayNightTick();
 
   function toggleRoster() {
     document.getElementById('roster').classList.toggle('open');
@@ -1596,11 +1541,8 @@
       </div>`).join('') + WEATHER_HELP_HTML;
   }
 
-  /** Ciclo día/noche y clima (ver docs/ACCIONES.md sección 36) — no son comandos, van aparte al final del mismo panel de ayuda. */
+  /** Clima (ver docs/ACCIONES.md sección 36) — no es un comando, va aparte al final del mismo panel de ayuda. */
   const WEATHER_HELP_HTML = `
-    <div class="summaryLine">
-      <strong>🌗 Ciclo día/noche</strong> — solo si el admin activó el clima al crear la partida. Puramente visual, sin ningún efecto en el juego: el mapa se oscurece un poco cada 2 minutos (nunca a negro del todo) durante 1 minuto de "noche", y vuelve a aclararse — capital, iglesia, casas, castillo especial, estatuas y museos brillan con luz propia de noche para que se sigan viendo bien.
-    </div>
     <div class="summaryLine">
       <strong>🌦️ Clima</strong> — solo si el admin lo activó. Al empezar cada ronda hay una posibilidad de que salga uno (nunca más de uno a la vez), dura exactamente esa ronda y luego vuelve la normalidad:<br>
       🌫️ <strong>Niebla</strong> — no se puede usar <code>!ataque</code> esta ronda.<br>

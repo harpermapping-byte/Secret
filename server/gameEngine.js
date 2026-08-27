@@ -969,9 +969,7 @@ function getPublicState() {
     // Clima de la ronda en curso (ver rules/weather.js, docs/ACCIONES.md
     // sección 36) — null si esta ronda no tocó ninguno, o si el admin
     // desactivó el clima al crear la partida. `weatherEnabled` es el
-    // interruptor en sí (antes `futureFeatures.weather` era puro adorno sin
-    // exponer, ahora el cliente lo necesita para saber si arrancar el ciclo
-    // día/noche, que se apaga entero junto con el clima).
+    // interruptor en sí, expuesto por si algún cliente lo necesita.
     activeWeather: match.activeWeather,
     weatherEnabled: match.config.futureFeatures.weather,
     // Alianzas activas por pacto mutuo (ver rules/alliances.js sección 38):
