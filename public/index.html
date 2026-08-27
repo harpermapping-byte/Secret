@@ -299,7 +299,7 @@
       <!-- Numero de version: sube esto en cada entrega nueva (empezamos en 0.1.0, a peticion del streamer).
            Convencion pedida: sube el ULTIMO numero en cada entrega; al llegar a 9 el del medio sube
            uno y el ultimo vuelve a 0 (...0.4.9 -> 0.5.0 -> 0.5.1...), progresivamente. -->
-      <h1>Version 0.4.6</h1>
+      <h1>Version 0.4.7</h1>
       <button class="headerBtn" id="musicToggle" onclick="toggleMusic()" title="Música de fondo">🎵</button>
       <input type="range" id="musicVolume" class="volumeSlider" min="0" max="100" value="50"
              oninput="setMusicVolume(this.value)" title="Volumen de la música" />
@@ -1045,7 +1045,7 @@
       return label;
     }
     if (ev.kind === 'pve_fight') {
-      return { boss: '👹 Ataque a un boss', conquista: '🏰 Intento de conquista', dungeon: '💀 Asalto a un dungeon' }[ev.pveKind] || '⚔️ Combate';
+      return { boss: '👹 Ataque a un boss', conquista: '🏰 Intento de conquista', dungeon: '💀 Asalto a un dungeon', maravilla: '🗽 Asalto a una maravilla' }[ev.pveKind] || '⚔️ Combate';
     }
     if (ev.kind === 'conquest') return ev.conquestKind === 'expansion' ? '🚩 Expansión' : '🚩 Conquista';
     return 'Resolución';
@@ -1125,13 +1125,10 @@
     industria_extra: '3 industrias gratis',
     iglesia: 'Iglesia ⛪ junto a tu capital (+25 al límite de tropas de cada uno)',
     castillo_especial: 'Castillo especial 🏯 junto a tu capital (2 tropas especiales, +1/ronda)',
-    // Niveles 5-8: preparados, sin efecto todavía (ver docs/ACCIONES.md
-    // sección 35) — se etiquetan igual que el resto para que el resumen no
-    // se quede en blanco al cruzarlos, aunque de momento no pase nada más.
-    nivel5: 'Nivel 5 🔧 (sin efecto todavía)',
-    nivel6: 'Nivel 6 🔧 (sin efecto todavía)',
-    nivel7: 'Nivel 7 🔧 (sin efecto todavía)',
-    nivel8: 'Nivel 8 🔧 (sin efecto todavía)',
+    mercado: 'Mercado 🏪 junto a tu capital (+1 tropa de IA por ronda, para siempre)',
+    arsenal: 'Arsenal ⚔️ junto a tu capital (+0.1 de combate fijo a cada tropa de IA)',
+    muralla_real: 'Muralla real 🧱 junto a tu capital (+1 de defensa pasiva, para siempre)',
+    corona: 'Corona 👑 sobre tu capital (la industria de más se convierte sola en tropas)',
   };
 
   function industryLines(state, industryData, unlocksData) {
@@ -1254,11 +1251,14 @@
       '<strong>Nivel 2</strong> — se levantan 3 industrias más de golpe, gratis (como si 3 personas hubieran votado !industria).<br>' +
       '<strong>Nivel 3</strong> — aparece una iglesia ⛪ junto a tu capital: +25 al límite de tropas de CADA jugador de tu facción, para siempre.<br>' +
       '<strong>Nivel 4</strong> — aparece un castillo especial 🏯 junto a tu capital: trae 2 tropas especiales al construirse y 1 más cada ronda después (hasta 10 por facción), cada una con 0.4 fijo de ataque Y defensa, y siguen a quien las lleve como cualquier otra tropa.<br>' +
-      '<strong>Niveles 5 a 8</strong> — preparados para más adelante, todavía sin efecto (se avisará en el resumen de ronda igualmente al cruzarlos, y la probeta se llena hasta el final).' },
+      '<strong>Nivel 5</strong> — aparece un Mercado 🏪 junto a tu capital: +1 tropa de IA por ronda para TODA tu facción, para siempre.<br>' +
+      '<strong>Nivel 6</strong> — aparece un Arsenal ⚔️ junto a tu capital: +0.1 fijo de combate (ataque Y defensa) por cada tropa de IA que lleve cada jugador de tu facción, para siempre.<br>' +
+      '<strong>Nivel 7</strong> — aparece una Muralla real 🧱 junto a tu capital: +1 de defensa pasiva para siempre (se suma a torres/maravillas/habilidad especial).<br>' +
+      '<strong>Nivel 8</strong> — aparece una Corona 👑 sobre tu capital: a partir de aquí, la industria que sigas acumulando por encima de este último umbral se convierte sola en tropas cada cierto tramo, para que seguir produciendo no se quede en un número sin más recompensa.' },
     { cmd: '!ataque <N>', phase: 'Acción', short: 'Atacas a la facción N (solo si tenéis frontera).', desc: 'Atacas a la facción número N (solo si tenéis frontera). Cada atacante aporta entre 0.7 y 1.3 de fuerza (al azar) — o entre 0.9 y 1.4 si es un caballero 🐴 — así que el mismo número de gente no siempre gana. En el mapa sale una espada roja ⚔ sobre la facción atacada con cuántos la atacáis.' },
     { cmd: '!defender', phase: 'Acción', short: 'Defiendes a tu facción esta ronda.', desc: 'Defiendes a tu facción esta ronda, aportando entre 0.7 y 1.3 de defensa (al azar) — o entre 0.9 y 1.4 si eres caballero 🐴. ¡Importante! El territorio NO se defiende solo: si nadie escribe !defender, tu facción entra al combate con 0 de defensa. En el mapa sale un escudo verde 🛡 con cuántos estáis defendiendo.' },
     { cmd: '!expansion', phase: 'Acción', short: 'Ocupáis terreno neutral vecino.', desc: 'Ocupáis terreno neutral vecino: hacen falta 2 personas por cada terreno nuevo (1 o 2 votos = 1 terreno, 4 votos = 2 terrenos...). No hace nada si la partida es de "reparto total", sin neutrales.' },
-    { cmd: '!especial', phase: 'Acción', short: 'Vota para activar la habilidad especial de tu facción — solo si el admin las activó.', desc: 'Votas para activar la habilidad especial de tu facción cuando llegue al % de votantes necesario (una sola vez por partida) — solo funciona si el admin activó las habilidades especiales al crear la partida. Cada facción recibe UNA al azar del catálogo de 6 al empezar la partida (con más de 6 facciones, se repiten) — de momento se llaman "hab1" a "hab6" porque todavía no tienen un efecto definido, es solo la primera parte del sistema (el catálogo real vendrá más adelante). Pasa el ratón por el nombre de tu facción, por su capital en el mapa, o por tu propio personaje, para ver qué habilidad le tocó.' },
+    { cmd: '!especial', phase: 'Acción', short: 'Vota para activar la habilidad especial de tu facción — solo si el admin las activó.', desc: 'Votas para activar la habilidad especial de tu facción cuando llegue al % de votantes necesario (una sola vez por partida) — solo funciona si el admin activó las habilidades especiales al crear la partida. Cada facción recibe UNA al azar del catálogo de 6 al empezar la partida (con más de 6 facciones, se repiten): Refuerzo (revive a tus 3 últimos caídos), Escudo (+30% defensa esta ronda), Frenesí (+30% ataque esta ronda), Sabotaje (anula la industria de un rival la ronda siguiente), Fervor (+30% de industria de golpe) y Muralla (+1 defensa pasiva para siempre). Pasa el ratón por el nombre de tu facción, por su capital en el mapa, o por tu propio personaje, para ver qué habilidad le tocó.' },
     { cmd: '!alianza <N>', phase: 'Acción', short: 'Propón una alianza a la facción N — si ellos también os la proponen, pactáis por varias rondas.', desc: 'Votas para proponer una alianza a la facción número N (solo si el admin activó alianzas). Si en la MISMA ronda tu facción se lo propone a la suya Y ellos os lo proponen a la vuestra (cada una superando su % de votos), se forma una alianza que dura las rondas que haya configurado el admin: mientras dure NO podéis atacaros entre vosotras y defendéis como una sola facción (los !defender de una cuentan también en los combates de la otra). Al acabar volvéis a ser independientes. Si solo una de las dos lo propone, no pasa nada esa ronda.' },
     { cmd: '!levas', phase: 'Acción', short: 'Levanta una barraca 🏕️: +5 soldados de IA, +1/ronda después.', desc: 'Levantas una barraca 🏕️ en un terreno al azar de tu facción (igual que !industria) y te lleva de inmediato +5 soldados de IA que te siguen por el mapa. Cada soldado te suma +0.1 fijo tanto en ataque como en defensa. Además, cada barraca en pie da +1 soldado por ronda a partir de la siguiente, repartido entre tu facción priorizando a quien menos tenga. Si te conquistan el terreno, la barraca pasa a producir para el nuevo dueño.' },
     { cmd: '!arqueros', phase: 'Acción', short: 'Levanta un campo de arquería 🏹: +5 arqueros de IA, +1/ronda después.', desc: 'Levantas un campo de arquería 🏹 (igual mecánica que !levas) y te da +5 arqueros de IA al momento, +1 por ronda después por cada campo en pie. Los arqueros son especialistas de ataque: +0.2 fijo atacando, 0 defendiendo.' },
@@ -1269,6 +1269,7 @@
     { cmd: '!boss', phase: 'Acción', short: 'Ataca a un boss de tu territorio — solo si el admin los activó.', desc: 'Ataca a un boss (un ogro 👹, un troll 🧌 o un behemot 🐗, según cuál haya salido) que esté vagando dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 3 por mapa, cada uno atado a la casilla en la que salió). Misma mecánica de grupo que !conquista/!dungeon: todos los que voten !boss esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no — su ataque y su defensa (entre 5 y 10, sorteado por partida) se ven encima de su cabeza. Aquí sí se puede morir: si alguien muere en el intento, el boss se queda con el ataque y la defensa que le quedaban tras ESA batalla (no vuelve a estar a tope), así que cada intento fallido con bajas lo va desgastando para el siguiente. Si lo derrotáis, tu facción gana un museo 🏛️ junto a su capital: +1 leva/ronda, +1 industria/ronda y +2 de defensa base, PARA SIEMPRE — si matas más de un boss, se crea otro museo más, y los bonos se suman.' },
     { cmd: '!casas', phase: 'Acción', short: 'Construye una vivienda 🏠 junto a tu capital: +10 al límite de tropas de cada uno, máx. 10 por facción.', desc: 'Construyes una vivienda 🏠 junto a tu capital, en un anillo propio como la iglesia/estatua/museo, sin solaparse con ellos. No da tropas: sube el LÍMITE MÁXIMO de tropas que puede llevar CADA jugador de tu facción +10 por cada vivienda que tenga la facción, hasta un máximo de 10 (+100 en total) — se suma al límite base que pone el admin, y también al +25 de la iglesia si la tenéis, sin tope combinado entre las dos.' },
     { cmd: '!apoyar <N>', phase: 'Acción', short: 'Manda tus tropas este turno a defender a la facción N en sus combates.', desc: 'Escribe el número de OTRA facción (no la tuya) para mandar tus propias tropas a defender en SUS combates esta ronda, como si hubieras escrito !defender por ellos — una ayuda puntual entre facciones, sin ser una alianza. Solo tiene efecto si esa facción recibe algún ataque ESTA MISMA ronda (si nadie la ataca, tu apoyo no hace nada, igual que un !defender sin ataque entrante). Sigues siendo de TU facción — no cambias de bando — pero tus tropas entran en ESE combate: si se quedan a 0, pierdes una vida como en cualquier otro combate. Rechazado si la facción no existe, está eliminada, o es la tuya.' },
+    { cmd: '!maravilla', phase: 'Acción', short: 'Ataca a la guarnición de una maravilla de tu territorio — solo si el admin las activó.', desc: 'Ataca a la guarnición de UNA maravilla (Guggenheim 🏛️, Ruinas de Numancia 🏺, La Moncloa 🏢, SpaceX 🚀, Kebab 🥙 o Contrato indefinido 📄, según cuál haya salido) que esté dentro de tu propio territorio y todavía SIN CONQUISTAR — solo aparecen si el admin las activó al crear la partida (2 a 6 por mapa). Misma mecánica de grupo que !boss/!conquista: todos los que voten !maravilla esa ronda atacan juntos. Su ataque y defensa (entre 7 y 10, sorteados por partida) se ven encima del placeholder. Tu ataque contra su defensa decide si te la quedas; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no. Si ganáis, tu facción se queda con su bono (+4 de industria o +4 de defensa pasiva) PARA SIEMPRE, aunque más adelante pierdas la casilla en la que está — es un premio permanente, no un alquiler del terreno.' },
   ];
 
   // ---------------------------------------------------------------------
@@ -1435,7 +1436,7 @@
     INDUSTRY: '🏭 industria', ATTACK: '⚔️ ataca a', DEFEND: '🛡️ defiende', EXPAND: '🚩 se expande',
     SPECIAL: '✨ especial', ALLIANCE: '🤝 propone alianza a', LEVAS: '🏕️ levas', ARQUEROS: '🏹 arqueros',
     CABALLEROS: '🐎 caballeros', CONQUISTA: '🏰 conquista', DUNGEON: '💀 dungeon', TOWER: '🗼 torre',
-    BOSS: '👹 boss', CASAS: '🏠 casas', APOYAR: '🤲 apoya a',
+    BOSS: '👹 boss', CASAS: '🏠 casas', APOYAR: '🤲 apoya a', MARAVILLA: '🗽 maravilla',
   };
 
   function renderActionFeed(state) {
@@ -1481,22 +1482,32 @@
   // oculta al quitar el ratón de encima (mouseleave/mousemove fuera del
   // objetivo), como un tooltip normal.
   // ---------------------------------------------------------------------
-  const SPECIAL_ABILITY_EMOJI = { hab1: '🔮', hab2: '🌀', hab3: '⚡', hab4: '🛡️', hab5: '🗡️', hab6: '🔥' };
+  const SPECIAL_ABILITY_EMOJI = { hab1: '🩹', hab2: '🛡️', hab3: '⚡', hab4: '💣', hab5: '🔥', hab6: '🧱' };
+  const SPECIAL_ABILITY_LABEL = {
+    hab1: 'Refuerzo (revive a tus 3 últimos caídos)',
+    hab2: 'Escudo (+30% defensa esta ronda)',
+    hab3: 'Frenesí (+30% ataque esta ronda)',
+    hab4: 'Sabotaje (anula la industria de un rival la ronda siguiente)',
+    hab5: 'Fervor (+30% de industria de golpe)',
+    hab6: 'Muralla (+1 defensa pasiva permanente)',
+  };
 
   function factionHoverHtml(factionNumber) {
     const f = ((lastState && lastState.factions) || []).find((x) => x.number === factionNumber);
     if (!f) return '';
     const { escapeHtml } = window.CondejorgeFactionCards;
     const ability = f.specialAbility
-      ? `${SPECIAL_ABILITY_EMOJI[f.specialAbility] || '✨'} ${escapeHtml(f.specialAbility)}`
+      ? `${SPECIAL_ABILITY_EMOJI[f.specialAbility] || '✨'} ${escapeHtml(SPECIAL_ABILITY_LABEL[f.specialAbility] || f.specialAbility)}`
       : '— (desactivadas en esta partida)';
     return `
       <div class="fhtTitle">${escapeHtml(f.name)}</div>
       <div>🏭 Industria: nivel ${f.industryTierIndex || 0}/8</div>
       <div>⛪ Iglesia: ${f.churchBuilt ? 'sí' : 'no'} · 🏯 Castillo especial: ${f.specialCastleBuilt ? 'sí' : 'no'}</div>
+      <div>🏪 Mercado: ${f.mercadoBuilt ? 'sí' : 'no'} · ⚔️ Arsenal: ${f.arsenalBuilt ? 'sí' : 'no'} · 🧱 Muralla real: ${f.murallaRealBuilt ? 'sí' : 'no'} · 👑 Corona: ${f.coronaBuilt ? 'sí' : 'no'}</div>
       <div>🏠 Casas: ${f.housesBuilt || 0}/10 · 🗼 Torres: ${f.towerCount || 0}</div>
       <div>🗿 Estatuas: ${f.dungeonTrophies || 0} · 🏛️ Museos: ${f.bossTrophies || 0} · 🗽 Maravillas: ${f.wondersCount || 0}</div>
-      <div>✨ Habilidad especial: ${ability}</div>`;
+      <div>✨ Habilidad especial: ${ability}</div>
+      ${f.atWarThisRound ? '<div>🔥 En guerra esta ronda: producción de tropas a mitad de ritmo</div>' : ''}`;
   }
 
   function showFactionHoverTip(factionNumber, clientX, clientY) {

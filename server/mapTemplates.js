@@ -50,7 +50,7 @@ const iberiaLandMaskMod = require('./iberiaLandMask');
 // Cuanta guarnicion trae castillo/aldea/puerto/dungeon de fabrica y cuanto
 // pega/aguanta un boss — unico sitio a tocar para ajustar balance rapido sin
 // tener que pedirlo, ver server/balanceConfig.js.
-const { STRUCTURE_GARRISON_RANGES, DUNGEON_GARRISON_RANGE, BOSS_POWER_RANGE } = require('./balanceConfig');
+const { STRUCTURE_GARRISON_RANGES, DUNGEON_GARRISON_RANGE, BOSS_POWER_RANGE, WONDER_POWER_RANGE } = require('./balanceConfig');
 
 const OCEAN = -1; // sentinel en cellTileIds: la celda es oceano, no pertenece a ningun tile
 
@@ -319,18 +319,17 @@ const DUNGEON_MIN_GAP = 45;
 // un dungeon (2-6 por partida), mismo criterio de tamaño.
 const WONDER_MIN_GAP = 45;
 
-// Maravillas (ver docs/ACCIONES.md sección 30, `!!wonders` en el panel de
+// Maravillas (ver docs/ACCIONES.md sección 39, `!!wonders` en el panel de
 // admin): 6 fijas, nombradas y con bono propio — se sortean cuáles de las 6
 // salen esta partida (2 a 6, `wonderCount` en generateMap()), nunca se
 // repite ninguna. `bonusType` decide dónde se suma su `bonusAmount`:
 // 'industry' -> rules/industry.js (resolveIndustry, igual que un edificio de
-// industria, pero atado a poseer ESTA casilla en concreto); 'defense' ->
-// rules/combat.js (mismo mecanismo pasivo que las torres, sección 28 —
-// tercera excepción a "el territorio no se defiende solo"). Se poseen
-// simplemente teniendo el terreno en el que salieron — no hace falta ningún
-// comando para "conquistarlas", basta con `!ataque`/`!expansion` normales
-// sobre esa casilla, tal y como se pidió ("para conquistarlas hay que poseer
-// el terreno en el que aparezcas").
+// industria, pero atado a TENERLA CONQUISTADA); 'defense' -> rules/combat.js
+// (mismo mecanismo pasivo que las torres, sección 28 — tercera excepción a
+// "el territorio no se defiende solo"). Desde v0.4.7 llevan guarnición
+// propia y hay que ganarles el combate con `!maravilla` para quedárselas
+// (ver buildWonders() más abajo y rules/wonders.js) — ya NO basta con poseer
+// la casilla en la que salieron.
 const WONDER_TYPES = [
   { key: 'guggenheim', name: 'Guggenheim', icon: '🏛️', bonusType: 'industry', bonusAmount: 4 },
   { key: 'numancia', name: 'Ruinas de Numancia', icon: '🏺', bonusType: 'defense', bonusAmount: 4 },
@@ -618,13 +617,17 @@ function buildStructures(decorations, cellTileIds) {
 }
 
 /**
- * Maravillas (ver docs/ACCIONES.md sección 30): a diferencia de castillo/
- * aldea/puerto/dungeon, NO llevan guarnición ni se "conquistan" con un
- * combate — su dueño es, en todo momento, quien controle `tileId` ahora
- * mismo (`rules/wonders.js` lo consulta en vivo cada ronda, sin guardar
- * ningún `ownerFactionNumber` aquí: guardarlo por duplicado se
- * desincronizaría en cuanto la casilla cambiara de dueño por combate/
- * expansión normal, sin pasar por ningún código de maravillas).
+ * Maravillas (ver docs/ACCIONES.md sección 39, `!maravilla` en
+ * rules/wonders.js): a diferencia de la versión anterior, ahora SÍ llevan
+ * guarnición propia (un único ataque/defensa fijo por instancia, igual
+ * mecanismo que un boss — ver `defeated`/`attackPower`/`defensePower` de
+ * `buildBosses()` un poco más abajo) y hace falta ganarles el combate con
+ * `!maravilla` para quedárselas — ya NO basta con poseer la casilla en la
+ * que salieron. `conqueredByFactionNumber` es quien se la quedó (null
+ * mientras `defeated` sea false); a diferencia de un boss, si la casilla
+ * cambia de dueño DESPUÉS de conquistada, la maravilla sigue siendo de
+ * quien la conquistó, no de quien tenga el terreno ahora (su bono es un
+ * premio permanente por haberla ganado, no un alquiler del terreno).
  */
 function buildWonders(decorations, cellTileIds) {
   const wonders = [];
@@ -637,7 +640,14 @@ function buildWonders(decorations, cellTileIds) {
     const tileId = cellTileIds[d.y * currentSource.cols + d.x];
     if (tileId === OCEAN) continue; // defensivo: no debería pasar (solo salen en tierra)
 
-    wonders.push({ tileId, x: d.x, y: d.y, key: meta.key, name: meta.name, icon: meta.icon, bonusType: meta.bonusType, bonusAmount: meta.bonusAmount });
+    wonders.push({
+      tileId, x: d.x, y: d.y, key: meta.key, name: meta.name, icon: meta.icon,
+      bonusType: meta.bonusType, bonusAmount: meta.bonusAmount,
+      attackPower: randomInRange(WONDER_POWER_RANGE),
+      defensePower: randomInRange(WONDER_POWER_RANGE),
+      defeated: false,
+      conqueredByFactionNumber: null,
+    });
   }
   return wonders;
 }

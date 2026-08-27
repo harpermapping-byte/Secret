@@ -13,9 +13,9 @@ const {
 const commands = require('./commands');
 const { generateMap, DEFAULT_MAP_KEY } = require('./mapTemplates');
 const { resolveAlliances } = require('./rules/alliances');
-const { resolveSpecialAbilities, pickRandomAbility } = require('./rules/specialAbilities');
+const { resolveSpecialAbilities, pickRandomAbility, specialAbilityDefenseBonus } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
-const { resolveIndustry, industryThresholdsFor } = require('./rules/industry');
+const { resolveIndustry, industryThresholdsFor, industryTier7DefenseBonus } = require('./rules/industry');
 const { resolveAiTroops } = require('./rules/troops');
 const { resolveTroopBuildings } = require('./rules/troopBuildings');
 const { resolveConquista, resolveDungeon, structureAttackPower, structureDefensePower } = require('./rules/structures');
@@ -23,7 +23,7 @@ const { resolveTowers, towerDefenseBonus, finishedTowerCountForFaction } = requi
 const { resolveBoss, museumDefenseBonus } = require('./rules/bosses');
 const { resolveCasas } = require('./rules/housing');
 const { rollWeather, weatherBlocksAction } = require('./rules/weather');
-const { wonderDefenseBonus } = require('./rules/wonders');
+const { resolveWonder, wonderDefenseBonus } = require('./rules/wonders');
 const {
   AI_TROOP_COMBAT_BONUS,
   ARCHER_ATTACK_BONUS,
@@ -49,6 +49,7 @@ const {
   ACTION_BOSS,
   ACTION_CASAS,
   ACTION_APOYAR,
+  ACTION_WONDER,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -150,6 +151,35 @@ function createMatch(config) {
     // grantSpecialTroops()), son tropas normales del jugador de ahí en
     // adelante.
     specialCastleBuilt: false,
+    // Niveles 5-8 de industria (ver rules/industry.js sección 39): efectos
+    // permanentes, cada uno se activa una única vez al cruzar su umbral,
+    // igual patrón que churchBuilt/specialCastleBuilt de arriba.
+    //   5 'mercado'      -> +1 tropa de IA/ronda para TODA la facción
+    //   6 'arsenal'      -> +0.1 de combate fijo (ataque Y defensa) a CADA
+    //                       tropa de IA de la facción
+    //   7 'muralla_real' -> +1 de defensa pasiva permanente
+    //   8 'corona'       -> visual + activa la conversión de industria
+    //                       sobrante en tropas (industryOverflowGranted)
+    mercadoBuilt: false,
+    arsenalBuilt: false,
+    murallaRealBuilt: false,
+    coronaBuilt: false,
+    // Cuántas conversiones de industria-sobrante-a-tropa (ver
+    // grantOverflowTroops() en rules/industry.js) ya se han pagado — solo
+    // avanza tras 'corona' (nivel 8). Sin esto, cada ronda volvería a
+    // convertir el mismo tramo ya cobrado.
+    industryOverflowGranted: 0,
+    // Sugerencia 3 del informe de balance de late game (v0.4.6, ver
+    // docs/ACCIONES.md): true cuando la facción atacó o fue atacada (PvP,
+    // ver context.roundEvents.combats) en la ronda que se acaba de
+    // resolver — resolveRound() lo recalcula cada ronda justo después de
+    // resolveCombat() y ANTES de resolveAiTroops()/resolveTroopBuildings(),
+    // así que afecta a la producción pasiva de tropas de esa MISMA ronda
+    // (ver WAR_PRODUCTION_FACTOR en rules/troops.js). Objetivo: que el
+    // desgaste del combate pueda algún día superar a la producción en
+    // partidas largas, en vez de que un asedio sea matemáticamente
+    // imposible para siempre en cuanto ambos bandos superan cierto tamaño.
+    atWarThisRound: false,
     // Museos (trofeo de `!boss`, ver rules/bosses.js sección 31): uno por
     // cada boss derrotado, sin tope — cada uno da +1 leva/ronda, +1
     // industria/ronda, +2 de defensa base, acumulables. Igual mecanismo
@@ -550,7 +580,21 @@ function resolveRound() {
   resolveConquista(match, context);
   resolveDungeon(match, context);
   resolveBoss(match, context);
+  resolveWonder(match, context);
   resolveTowers(match, context);
+
+  // Sugerencia 3 del informe de balance (v0.4.6): quién combatió de VERDAD
+  // esta ronda (PvP, no PvE — ver context.roundEvents.combats, que solo
+  // resolveCombat() rellena) produce tropas pasivas a media velocidad la
+  // producción de ESTA MISMA ronda, ver atWarThisRound arriba y
+  // WAR_PRODUCTION_FACTOR en rules/troops.js.
+  const factionNumbersAtWar = new Set();
+  for (const c of context.roundEvents.combats) {
+    factionNumbersAtWar.add(c.attackerFactionNumber);
+    factionNumbersAtWar.add(c.defenderFactionNumber);
+  }
+  for (const faction of match.factions) faction.atWarThisRound = factionNumbersAtWar.has(faction.number);
+
   resolveIndustry(match, context);
   resolveAiTroops(match);
   resolveTroopBuildings(match, context);
@@ -741,6 +785,7 @@ function tallyActions() {
       [ACTION_TOWER]: [],
       [ACTION_BOSS]: [],
       [ACTION_CASAS]: [],
+      [ACTION_WONDER]: [],
     });
     activePlayerCountByFaction.set(faction.number, 0);
   }
@@ -992,12 +1037,26 @@ function getPublicState() {
       // con el mismo mecanismo de anillo que las estatuas de dungeon.
       bossTrophies: f.bossTrophies,
       museumDefenseBonus: museumDefenseBonus(f),
+      // Niveles 5-8 de industria (ver rules/industry.js sección 39) — el
+      // cliente los usa para saber qué edificios/insignias pintar junto a
+      // la capital, mismo criterio que churchBuilt/specialCastleBuilt.
+      mercadoBuilt: f.mercadoBuilt,
+      arsenalBuilt: f.arsenalBuilt,
+      murallaRealBuilt: f.murallaRealBuilt,
+      coronaBuilt: f.coronaBuilt,
+      // Bono de defensa pasiva de la habilidad especial "Muralla" (hab6) +
+      // el nivel 7 de industria "Muralla real" — agrupados en un único
+      // número para el cliente, igual que towerDefenseBonus/
+      // wonderDefenseBonus/museumDefenseBonus de arriba (ver
+      // rules/combat.js para el desglose real usado en el cálculo).
+      specialDefenseBonus: specialAbilityDefenseBonus(f) + industryTier7DefenseBonus(f),
+      atWarThisRound: f.atWarThisRound,
       killsCaused: f.killsCaused,
-      // Cuantas maravillas posee esta facción AHORA MISMO (ver
-      // rules/wonders.js sección 30) — se cuenta en vivo a partir de quién
-      // controla la casilla de cada una, igual que su bono de industria/
-      // defensa; usado en la clasificación (leaderboard).
-      wondersCount: match.wonders.filter((w) => match.tiles[w.tileId].ownerFactionNumber === f.number).length,
+      // Cuantas maravillas ha CONQUISTADO esta facción (ver
+      // rules/wonders.js sección 39) — desde v0.4.7 ya no depende de quién
+      // controle la casilla ahora mismo, solo de haberle ganado el combate;
+      // usado en la clasificación (leaderboard).
+      wondersCount: match.wonders.filter((w) => w.defeated && w.conqueredByFactionNumber === f.number).length,
       // Torres terminadas (ver rules/towers.js) — para el resumen compacto
       // del popup de la sección 35, no solo el bonus de defensa ya expuesto
       // arriba en towerDefenseBonus.
@@ -1063,11 +1122,12 @@ function getPublicState() {
         defensePower: Number(structureDefensePower(s).toFixed(2)),
       };
     }),
-    // Maravillas (ver rules/wonders.js, docs/ACCIONES.md sección 30):
-    // posición y bono fijos toda la partida, `ownerFactionNumber` se calcula
-    // aquí en vivo a partir de quién controla `tileId` ahora mismo — no hace
-    // falta ningún comando para "conquistarlas", basta con poseer la
-    // casilla (`!ataque`/`!expansion` normales).
+    // Maravillas (ver rules/wonders.js, docs/ACCIONES.md sección 39):
+    // posición y bono fijos toda la partida. Desde v0.4.7 llevan guarnición
+    // propia (`attackPower`/`defensePower`, mismo mecanismo que un boss) y
+    // hay que ganarles el combate con `!maravilla` — `ownerFactionNumber`
+    // ahora es quien la CONQUISTÓ (null mientras `defeated` sea false), ya
+    // NO quien controla la casilla ahora mismo (ver resolveWonder()).
     wonders: match.wonders.map((w) => ({
       tileId: w.tileId,
       x: w.x,
@@ -1077,7 +1137,10 @@ function getPublicState() {
       icon: w.icon,
       bonusType: w.bonusType,
       bonusAmount: w.bonusAmount,
-      ownerFactionNumber: match.tiles[w.tileId].ownerFactionNumber,
+      attackPower: Number(w.attackPower.toFixed(2)),
+      defensePower: Number(w.defensePower.toFixed(2)),
+      defeated: w.defeated,
+      ownerFactionNumber: w.conqueredByFactionNumber,
     })),
     // Bosses (ver rules/bosses.js, docs/ACCIONES.md sección 31): posición y
     // tipo fijos toda la partida, `defeated` es lo único mutable — el

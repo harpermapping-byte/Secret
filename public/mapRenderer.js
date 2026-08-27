@@ -468,7 +468,7 @@
       // animan a 60fps, y `markersEl` es del tamaño del mundo entero —
       // limpiarlo y repintarlo en cada frame seria carisimo. Aqui solo se le
       // pasa a esa capa el estado nuevo para que recalcule a donde va cada uno.
-      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX, structures, bosses });
+      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX, structures, wonders, bosses });
 
       if (!markersEl) return;
       const ctx = markersEl.getContext('2d');
@@ -700,8 +700,14 @@
           }
         }
 
+        // Sin conquistar: el nombre lleva SU guarnición (⚔ ataque, 🛡
+        // defensa) en vez del bono — todavía no es de nadie, hay que
+        // ganarle el combate con !maravilla (ver rules/wonders.js sección
+        // 39). Conquistada: vuelve al bono de siempre.
         const bonusIcon = w.bonusType === 'industry' ? '⚒️' : '🛡️';
-        const label = `${w.icon || ''} ${w.name}  +${w.bonusAmount} ${bonusIcon}`;
+        const label = w.defeated
+          ? `${w.icon || ''} ${w.name}  +${w.bonusAmount} ${bonusIcon}`
+          : `${w.icon || ''} ${w.name}  ⚔${w.attackPower} 🛡${w.defensePower}`;
         const owner = w.ownerFactionNumber != null ? (factions || []).find((f) => f.number === w.ownerFactionNumber) : null;
 
         ctx.font = '13px system-ui, sans-serif';
@@ -1685,7 +1691,7 @@
      * recalcula el destino de cada uno segun el comando que tenga escrito.
      * Se llama en cada `state:*`, no en cada frame.
      */
-    function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures, bosses }) {
+    function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures, wonders, bosses }) {
       if (!layout) return;
       // Vidas (ver rules/shared.js handleTroopWipeout(), panel de admin):
       // nadie tiene nunca más vidas que las que empezó con, así que el
@@ -1695,7 +1701,7 @@
       const maxLives = Math.max(1, ...(players || []).map((p) => p.lives || 0));
       walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1, maxLives };
       if (!cow) spawnCow();
-      syncSiteWalkers(structures || [], factions || []);
+      syncSiteWalkers(structures || [], factions || [], wonders || []);
       syncBossWalkers(bosses || []);
 
       const alive = new Set();
@@ -2139,8 +2145,24 @@
     // -----------------------------------------------------------------------
 
     /** Cuantos caminantes de que tipo le tocan a un sitio, sin listar posiciones todavia. */
-    function desiredSiteSpecs(structures, factions) {
+    function desiredSiteSpecs(structures, factions, wonders) {
       const sites = new Map(); // siteKey -> { home:{x,y}, factionColor, buildingKind, specs: [{spriteKey, n}] }
+
+      // Maravillas sin conquistar (ver rules/wonders.js sección 39): un par
+      // de guardias 'barbaro' paseando junto al placeholder, igual criterio
+      // que la guarnición de un castillo/aldea/puerto sin conquistar más
+      // abajo — "sus tropitas dando vueltas alrededor". Una vez conquistada
+      // no deja aldeanos ni nada (su premio es el bono permanente, no
+      // decoración extra).
+      (wonders || []).forEach((w) => {
+        if (w.defeated || w.x == null || w.y == null) return;
+        sites.set(`wonder:${w.tileId}:${w.key}`, {
+          home: { x: w.x * walkerWorld.blockPx, y: w.y * walkerWorld.blockPx },
+          factionColor: null,
+          buildingKind: null,
+          specs: [{ spriteKey: 'barbaro', n: 2 }],
+        });
+      });
 
       (structures || []).forEach((s) => {
         if (s.x == null || s.y == null) return; // partida vieja/estado incompleto: sin posicion no hay donde pintar
@@ -2309,8 +2331,8 @@
      * "teletransporte" a nadie: los soldados barbaros que sobran se borran y
      * los aldeanos nuevos aparecen cerca de la casa, sin más.
      */
-    function syncSiteWalkers(structures, factions) {
-      const desired = desiredSiteSpecs(structures, factions);
+    function syncSiteWalkers(structures, factions, wonders) {
+      const desired = desiredSiteSpecs(structures, factions, wonders);
 
       for (const key of [...siteWalkers.keys()]) {
         if (!desired.has(key)) siteWalkers.delete(key);

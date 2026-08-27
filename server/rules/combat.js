@@ -1,12 +1,14 @@
 'use strict';
 
 const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
-const { sumRandomPower, applyTroopCascadeDamageAndWipeouts } = require('./shared');
+const { sumRandomPower, applyTroopCascadeDamageAndWipeouts, applyTroopCascadeDirectKillAndWipeouts } = require('./shared');
 const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
 const { towerDefenseBonus } = require('./towers');
 const { alliedFactionsOf } = require('./alliances');
 const { wonderDefenseBonus } = require('./wonders');
 const { museumDefenseBonus } = require('./bosses');
+const { specialAbilityDefenseBonus } = require('./specialAbilities');
+const { industryTier7DefenseBonus } = require('./industry');
 const { rainDefensePenalty } = require('./weather');
 
 /**
@@ -20,15 +22,20 @@ const { rainDefensePenalty } = require('./weather');
  * `!defender` en la Fase de Accion, cada uno aportando su propia tirada
  * (ver COMBAT_RANDOM_MIN/MAX en rules/shared.js).
  *
- * Cuatro excepciones a lo anterior, todas sumadas tal cual (sin
+ * Cinco excepciones a lo anterior, todas sumadas tal cual (sin
  * combatModifier) al final del calculo correspondiente:
  * - Las torres (`!torre`, ver rules/towers.js) dan +0.5 de defensa pasiva
  *   CADA UNA, siempre, aunque nadie vote `!defender` esa ronda.
  * - Las maravillas de tipo 'defense' (Ruinas de Numancia/Kebab/Contrato
  *   indefinido, ver rules/wonders.js) dan +4 de defensa pasiva cada una
- *   MIENTRAS la facción posea la casilla en la que salieron.
+ *   MIENTRAS la facción las tenga conquistadas (ver rules/wonders.js).
  * - Los museos (trofeo de `!boss`, ver rules/bosses.js) dan +2 de defensa
  *   pasiva cada uno, sin tope.
+ * - La habilidad especial "Muralla" (hab6, ver rules/specialAbilities.js)
+ *   da +1 de defensa pasiva PERMANENTE en cuanto se activa.
+ * - El nivel 7 de industria "Muralla real" (ver rules/industry.js) da OTRO
+ *   +1 de defensa pasiva PERMANENTE, acumulable con la habilidad especial
+ *   de arriba (son cosas distintas pese al nombre parecido).
  *
  * Combate JUGADOR contra JUGADOR (esta función — !dungeon/!boss/!conquista
  * son combates aparte contra guarnición neutral, con su propia resolución en
@@ -46,7 +53,33 @@ const { rainDefensePenalty } = require('./weather');
  * era su última vida es la muerte real de siempre (dispara
  * `checkFactionElimination()`). Esto pasa igual en ataque que en defensa: no
  * hace falta perder la casilla para perder una vida, ni al revés.
+ *
+ * Ganar también cuesta (v0.4.7): antes de esto, solo el bando que PERDÍA la
+ * comparación de poder sufría bajas — el que ganaba salía siempre gratis, en
+ * los dos sentidos. Ahora el bando ganador TAMBIÉN pierde tropas, solo que
+ * menos que el perdedor: `WINNER_LOSS_FACTOR` de las TROPAS (no puntos de
+ * poder) que ya perdió el perdedor, matadas con
+ * `applyTroopCascadeDirectKillAndWipeouts()` (rules/shared.js) — un número
+ * de tropas FIJO, no una cantidad de daño en puntos de poder convertida
+ * después a tropas. Por qué no puntos de poder: un bando con mucho stock de
+ * tropas "baratas" (AI_TROOP_COMBAT_BONUS=0.1/unidad) puede perder MUCHAS
+ * más tropas por un puñado de puntos que el bando perdedor por un margen
+ * mucho mayor, si a este último ya casi no le quedaban tropas de antes (tope
+ * por disponibilidad, no por la fórmula) — pasó de verdad en pruebas con
+ * partidas largas donde un bando llevaba varias rondas perdiendo. Matando un
+ * número FIJO de tropas (`floor(tropas_perdidas_por_el_perdedor * factor)`)
+ * la relación "el ganador pierde menos que el perdedor" queda garantizada
+ * por construcción, sea cual sea el stock de cada bando. El reparto entre
+ * varios combatientes de un mismo bando usa el mismo criterio que ya se
+ * usaba para repartir las bajas del perdedor entre varios atacantes
+ * (`share = sus votantes / total`). Quién es "ganador" se decide por la
+ * comparación de PODER (attackPower vs defensePower), no por si al final se
+ * conquista la casilla: un ataque que gana el cálculo pero no dejó sin
+ * tropas a los defensores ("defender_held") sigue costando a los dos bandos
+ * igual que uno que sí conquista.
  */
+const WINNER_LOSS_FACTOR = 0.3;
+
 function resolveCombat(match, context) {
   const incomingByDefender = groupIncomingAttacks(match, context);
 
@@ -81,7 +114,9 @@ function resolveCombat(match, context) {
       sumRandomPower(match, defenderUserIds, 'defense') * combatModifier(match, defenderNumber, 'defense') +
         towerDefenseBonus(match, defenderFaction) +
         wonderDefenseBonus(match, defenderFaction) +
-        museumDefenseBonus(defenderFaction) -
+        museumDefenseBonus(defenderFaction) +
+        specialAbilityDefenseBonus(defenderFaction) +
+        industryTier7DefenseBonus(defenderFaction) -
         rainDefensePenalty(match) // clima: lluvia resta -2 de defensa PvP esta ronda, ver rules/weather.js
     );
 
@@ -99,6 +134,25 @@ function resolveCombat(match, context) {
       const { diedUserIds, troopsBefore, troopsAfter } = applyTroopCascadeDamageAndWipeouts(match, defenderUserIds, rawDamage);
       if (diedUserIds.length > 0) checkFactionElimination(match, context, defenderNumber, winningAttacker.factionNumber);
       const defendersWiped = defenderUserIds.length === 0 || totalRemainingTroops(match, defenderUserIds) === 0;
+
+      // El bando ganador (los atacantes) TAMBIÉN paga un coste, repartido
+      // proporcionalmente entre las facciones atacantes por su aporte de
+      // votantes — ver WINNER_LOSS_FACTOR y applyTroopCascadeDirectKill...()
+      // en la cabecera del archivo (número de TROPAS, no puntos de poder).
+      const defenderTroopsLostForFactor = troopsBefore - troopsAfter;
+      const winnerKillPool = Math.floor(defenderTroopsLostForFactor * WINNER_LOSS_FACTOR);
+      const attackerLosses = new Map(); // factionNumber -> { troopsLost, diedCount }
+      for (const attacker of attackers) {
+        const share = attacker.userIds.length / totalAttackers;
+        const rawAttackerKill = Math.round(winnerKillPool * share);
+        const result = applyTroopCascadeDirectKillAndWipeouts(match, attacker.userIds, rawAttackerKill);
+        if (result.diedUserIds.length > 0) checkFactionElimination(match, context, attacker.factionNumber, defenderNumber);
+        attackerLosses.set(attacker.factionNumber, {
+          troopsLost: result.troopsBefore - result.troopsAfter,
+          diedCount: result.diedUserIds.length,
+        });
+      }
+
       // Detalle para la Fase de Resolución (ver gameEngine.js
       // buildResolutionEvents()) — no lo usa nada de la lógica de arriba,
       // solo lo lee el cliente para el popup de resultado.
@@ -111,10 +165,13 @@ function resolveCombat(match, context) {
 
       if (!defendersWiped) {
         for (const attacker of attackers) {
+          const loss = attackerLosses.get(attacker.factionNumber);
           context.roundEvents.combats.push({
             attackerFactionNumber: attacker.factionNumber,
             defenderFactionNumber: defenderNumber,
             outcome: 'defender_held',
+            attackerTroopsLost: loss.troopsLost,
+            attackerDiedCount: loss.diedCount,
             ...detail,
           });
         }
@@ -136,11 +193,14 @@ function resolveCombat(match, context) {
 
       match.lastAttackerOf[defenderNumber] = winningAttacker.factionNumber;
       for (const attacker of attackers) {
+        const loss = attackerLosses.get(attacker.factionNumber);
         context.roundEvents.combats.push({
           attackerFactionNumber: attacker.factionNumber,
           defenderFactionNumber: defenderNumber,
           outcome: attacker.factionNumber === winningAttacker.factionNumber ? 'attacker_won' : 'attacker_lost',
           tileId: attacker.factionNumber === winningAttacker.factionNumber ? conqueredTileId : null,
+          attackerTroopsLost: loss.troopsLost,
+          attackerDiedCount: loss.diedCount,
           ...detail,
         });
       }
@@ -149,19 +209,52 @@ function resolveCombat(match, context) {
       // proporcionales a su aporte (cascada igual que arriba) — quien se
       // queda sin ninguna pierde una vida, igual que en la rama de arriba.
       const excess = Math.round(defensePower - attackPower);
+
+      // Primero el bando PERDEDOR (los atacantes), igual que siempre.
+      let totalAttackerTroopsLost = 0;
+      const attackerResults = new Map(); // factionNumber -> { troopsLost, diedCount }
       for (const attacker of attackers) {
         const share = attacker.userIds.length / totalAttackers;
         const rawDamage = Math.round(excess * share);
         const { diedUserIds, troopsBefore, troopsAfter } = applyTroopCascadeDamageAndWipeouts(match, attacker.userIds, rawDamage);
         if (diedUserIds.length > 0) checkFactionElimination(match, context, attacker.factionNumber, defenderNumber);
+        const troopsLost = troopsBefore - troopsAfter;
+        totalAttackerTroopsLost += troopsLost;
+        attackerResults.set(attacker.factionNumber, { troopsLost, diedCount: diedUserIds.length });
+      }
+
+      // El bando ganador (los defensores) TAMBIÉN paga un coste — ver
+      // WINNER_LOSS_FACTOR y applyTroopCascadeDirectKill...() en la
+      // cabecera del archivo: número de TROPAS (fracción de las que YA
+      // perdió el bando atacante), no puntos de poder. Se aplica a la lista
+      // conjunta de defensores (propios + aliada, ver defenderUserIds más
+      // arriba) de una vez: la cascada ya decide sola qué tropas concretas
+      // se pierden dentro de ese grupo.
+      const winnerKillPool = Math.floor(totalAttackerTroopsLost * WINNER_LOSS_FACTOR);
+      let defenderTroopsLost = 0;
+      let defenderDiedCount = 0;
+      if (winnerKillPool > 0 && defenderUserIds.length > 0) {
+        const result = applyTroopCascadeDirectKillAndWipeouts(match, defenderUserIds, winnerKillPool);
+        defenderTroopsLost = result.troopsBefore - result.troopsAfter;
+        defenderDiedCount = result.diedUserIds.length;
+        if (result.diedUserIds.length > 0) {
+          const biggestAttacker = attackers.sort((a, b) => b.userIds.length - a.userIds.length)[0];
+          checkFactionElimination(match, context, defenderNumber, biggestAttacker.factionNumber);
+        }
+      }
+
+      for (const attacker of attackers) {
+        const loss = attackerResults.get(attacker.factionNumber);
         context.roundEvents.combats.push({
           attackerFactionNumber: attacker.factionNumber,
           defenderFactionNumber: defenderNumber,
           outcome: 'defender_held',
           attackPower: Math.round(attackPower * 10) / 10,
           defensePower: Math.round(defensePower * 10) / 10,
-          attackerTroopsLost: troopsBefore - troopsAfter,
-          attackerDiedCount: diedUserIds.length,
+          attackerTroopsLost: loss.troopsLost,
+          attackerDiedCount: loss.diedCount,
+          defenderTroopsLost,
+          defenderDiedCount,
         });
       }
     }

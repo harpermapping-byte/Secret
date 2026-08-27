@@ -42,4 +42,13 @@ module.exports = {
    * instancia (a diferencia de una guarnición, un boss no tiene "tropas").
    */
   BOSS_POWER_RANGE: [5, 10],
+
+  /**
+   * Ataque y defensa de la guarnición de una maravilla (`!maravilla`, ver
+   * rules/wonders.js) — mismo mecanismo que un boss (un único número fijo
+   * por instancia, sin guarnición desglosada por tipo), pero más fuerte de
+   * partida: son las 6 maravillas del mapa, escasas y con premio grande
+   * (industria/defensa permanente), así que cuestan más que un boss.
+   */
+  WONDER_POWER_RANGE: [7, 10],
 };
