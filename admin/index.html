@@ -125,6 +125,9 @@
 
     <label><input type="checkbox" id="alliancesEnabled" style="width:auto" checked /> Alianzas activadas</label>
 
+    <label title="Cuántas rondas dura una alianza pactada. Una alianza se forma cuando DOS facciones se votan !alianza mutuamente en la misma Fase de Acción (cada una superando el % de alianza de abajo): durante esas rondas no pueden atacarse entre sí y defienden como una sola facción (los !defender de una cuentan también en los combates de la otra). Al acabar vuelven a ser independientes.">Duración de alianza (rondas, 1-99)</label>
+    <input type="number" id="allianceDurationRounds" value="5" min="1" max="99" />
+
     <label title="Si se activa, cada facción recibe al azar (al crear la partida, con posible repetición) una de las 6 habilidades especiales del catálogo, activable con !especial cuando llegue al % de votantes de abajo. Todavía sin efecto definido (hab1-hab6, ver botón de ayuda) — este interruptor solo prepara el reparto."><input type="checkbox" id="specialAbilitiesEnabled" style="width:auto" /> Habilidades especiales activadas</label>
 
     <div class="row">
@@ -299,6 +302,7 @@
         key: document.getElementById('mapKey').value,
       },
       alliancesEnabled: document.getElementById('alliancesEnabled').checked,
+      allianceDurationRounds: Number(document.getElementById('allianceDurationRounds').value),
       specialAbilitiesEnabled: document.getElementById('specialAbilitiesEnabled').checked,
       troopLimitPerPlayer: Number(document.getElementById('troopLimitPerPlayer').value),
       startingLives: Number(document.getElementById('startingLives').value),

@@ -4,6 +4,7 @@ const { ACTION_ATTACK, ACTION_DEFEND } = require('../commands');
 const { sumRandomPower, applyTroopCascadeDamageAndWipeouts } = require('./shared');
 const { transferTile, pickBorderTileToConquer, factionByNumber, checkFactionElimination } = require('./territory');
 const { towerDefenseBonus } = require('./towers');
+const { alliedFactionsOf } = require('./alliances');
 const { wonderDefenseBonus } = require('./wonders');
 const { museumDefenseBonus } = require('./bosses');
 const { rainDefensePenalty } = require('./weather');
@@ -55,7 +56,18 @@ function resolveCombat(match, context) {
 
     const attackerUserIds = attackers.flatMap((a) => a.userIds);
     const totalAttackers = attackerUserIds.length;
-    const defenderUserIds = context.votesByFactionAndType.get(defenderNumber)[ACTION_DEFEND];
+    // Defensa conjunta de aliadas (ver rules/alliances.js sección 38):
+    // mientras dure la alianza, los !defender de la facción aliada cuentan
+    // TAMBIÉN en este combate, como si fueran una sola facción — sin dejar
+    // de contar en el de la suya propia si también la atacan esta ronda.
+    // Duplicados imposibles: un jugador solo puede estar en el DEFEND de su
+    // propia facción (o en el de UNA ajena vía !apoyar, que lo mete en el
+    // bucket ajeno en vez del suyo, ver tallyActions()).
+    const defenderUserIds = [...context.votesByFactionAndType.get(defenderNumber)[ACTION_DEFEND]];
+    for (const allyNumber of alliedFactionsOf(match, defenderNumber)) {
+      const allyBucket = context.votesByFactionAndType.get(allyNumber);
+      if (allyBucket) defenderUserIds.push(...allyBucket[ACTION_DEFEND]);
+    }
 
     // Cada tirada depende de QUIEN vota (soldado o caballero, ver
     // rules/shared.js) — incluida su tropa especial si la lleva, ya integrada

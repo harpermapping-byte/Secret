@@ -94,6 +94,11 @@ html, body {
    para que no interfiera con el arrastre/zoom del mapa (los gestiona
    #mapViewport, no las capas de canvas). */
 #mapMarkers { position:absolute; top:0; left:0; transform-origin:0 0; pointer-events:none; }
+/* Efectos de la Fase de Resolución (polvareda de combate/carromato): el
+   ÚLTIMO canvas del mapa, por encima de #mapMarkers, para que ningún
+   edificio/chapa/nube tape la animación — ver drawResolutionEffects() en
+   mapRenderer.js. Solo existe en la web pública. */
+#mapEffects { position:absolute; top:0; left:0; pointer-events:none; }
 
 /* ---------------------------------------------------------------------------
    Barras de madera (arriba y abajo)

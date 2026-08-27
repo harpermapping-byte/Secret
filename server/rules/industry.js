@@ -68,7 +68,7 @@ const SPECIAL_TROOP_CAP = 10;
  *   3 'iglesia'           -> aparece una iglesia junto a la capital de la
  *                            faccion (placeholder decorativo, ver
  *                            public/mapRenderer.js, mismo mecanismo de
- *                            anillo que estatua/museo), que da +50 al
+ *                            anillo que estatua/museo), que da +25 al
  *                            limite de tropas de CADA jugador de esa
  *                            faccion (ver CHURCH_TROOP_LIMIT_BONUS/
  *                            effectiveTroopLimit() en rules/shared.js) —
@@ -227,7 +227,7 @@ function applyIndustryTier(match, context, faction, tierKey) {
       grantSpecialTroops(match, faction, SPECIAL_CASTLE_INITIAL_TROOPS);
       return;
     case 'iglesia':
-      // Efecto permanente y automatico: +50 al limite de tropas de cada
+      // Efecto permanente y automatico: +25 al limite de tropas de cada
       // jugador de la faccion desde este momento, ver
       // effectiveTroopLimit()/CHURCH_TROOP_LIMIT_BONUS en rules/shared.js.
       // `churchBuilt` es tambien lo que usa el cliente para pintar el

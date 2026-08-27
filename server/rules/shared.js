@@ -40,19 +40,19 @@ const CAVALRY_DEFENSE_BONUS = 0.2;
 // de industria), así que aporta más por unidad.
 const SPECIAL_TROOP_COMBAT_BONUS = 0.4;
 
-// Iglesia (nivel 3 de industria, ver rules/industry.js): +50 al límite de
+// Iglesia (nivel 3 de industria, ver rules/industry.js): +25 al límite de
 // tropas de match.config.troopLimitPerPlayer, pero SOLO para los jugadores
 // de la facción que la construyó — ver effectiveTroopLimit() más abajo,
 // único punto que combina los dos números.
-const CHURCH_TROOP_LIMIT_BONUS = 50;
+const CHURCH_TROOP_LIMIT_BONUS = 25;
 
-// Viviendas (!casas, ver rules/housing.js): +5 al límite de tropas de CADA
+// Viviendas (!casas, ver rules/housing.js): +10 al límite de tropas de CADA
 // jugador de la facción por vivienda construida, máximo MAX_HOUSES_PER_FACTION
 // (10) — igual que la iglesia, se suma al límite base del panel de admin.
-const HOUSE_TROOP_LIMIT_BONUS = 5;
+const HOUSE_TROOP_LIMIT_BONUS = 10;
 const MAX_HOUSES_PER_FACTION = 10;
 
-/** Límite real de tropas de un jugador de `faction`: el del panel de admin, +50 si su facción ya tiene iglesia, +5 por cada vivienda que haya construido. */
+/** Límite real de tropas de un jugador de `faction`: el del panel de admin, +25 si su facción ya tiene iglesia, +10 por cada vivienda que haya construido. */
 function effectiveTroopLimit(match, faction) {
   return (
     match.config.troopLimitPerPlayer +

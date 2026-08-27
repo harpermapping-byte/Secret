@@ -42,12 +42,12 @@ const ACTION_BOSS = 'BOSS';
 // jugador de la facción +5 por vivienda, máximo 10 por facción (+50 en
 // total). Ver rules/housing.js y docs/ACCIONES.md.
 const ACTION_CASAS = 'CASAS';
-// Manda tu jugador (con tus propias tropas) a apoyar la defensa de la
-// capital de OTRO jugador de OTRA facción — no cambia de facción ni forma
-// una alianza permanente, solo suma tu defensa a la suya si esa facción
-// recibe algún ataque ESTA ronda (igual que un !defender normal, pero para
-// una facción que no es la tuya). Ver rules/gameEngine.js handleChatCommand
-// (resuelve el nombre a una facción) y docs/ACCIONES.md.
+// Manda tus tropas ese turno a defender a OTRA facción — no cambias de
+// facción ni formas una alianza permanente, solo tu defensa se suma a la
+// suya si esa facción recibe algún ataque ESTA ronda (igual que un
+// !defender normal, pero para una facción que no es la tuya). El objetivo
+// es un NUMERO de facción, como !ataque/!alianza (antes era un nombre de
+// usuario). Ver docs/ACCIONES.md.
 const ACTION_APOYAR = 'APOYAR';
 
 // En que fase es valido cada tipo de accion.
@@ -85,7 +85,7 @@ const DUNGEON_RE = /^!dungeon$/i;
 const TOWER_RE = /^!torre$/i;
 const BOSS_RE = /^!boss$/i;
 const CASAS_RE = /^!casas$/i;
-const APOYAR_RE = /^!apoyar\s+(\S+)$/i;
+const APOYAR_RE = /^!apoyar\s+(\d+)$/i;
 
 /**
  * Convierte un mensaje de chat en { type, targetFactionNumber } o null si no es un comando reconocido.
@@ -128,7 +128,7 @@ function parseCommand(rawText) {
   if (CASAS_RE.test(text)) return { type: ACTION_CASAS, targetFactionNumber: null };
 
   match = text.match(APOYAR_RE);
-  if (match) return { type: ACTION_APOYAR, targetFactionNumber: null, targetUsername: match[1] };
+  if (match) return { type: ACTION_APOYAR, targetFactionNumber: Number(match[1]) };
 
   return null;
 }

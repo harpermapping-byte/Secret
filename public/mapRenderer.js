@@ -198,7 +198,7 @@
   // medio camino para que se note el tinte de facción sin tapar el terreno.
   const ALPHA_BY_KIND = { [KIND_OCEAN]: 0, [KIND_COAST]: 90, [KIND_BORDER]: 235, [KIND_LAND]: 130 };
 
-  function createMapController({ viewportEl, canvasEl, markersEl, terrainBgEl, objectsEl, showLabels = true }) {
+  function createMapController({ viewportEl, canvasEl, markersEl, terrainBgEl, objectsEl, effectsEl, showLabels = true }) {
     let layout = null; // { cols, rows, cellTileIds, centroids }
     let offscreen = null; // canvas pequeño (1px por celda de raster) para pintar rapido con ImageData
     let cellRenderKind = null; // Uint8Array, una entrada por celda de raster — ver computeCellRenderKind()
@@ -216,7 +216,7 @@
     let overlayRepaintPending = false; // ver scheduleOverlayRepaint()
 
     // --- capa de objetos (arboles/rocas/etc.), ver createObjectLayer() mas abajo ---
-    const objectLayer = objectsEl ? createObjectLayer(objectsEl, viewportEl) : null;
+    const objectLayer = objectsEl ? createObjectLayer(objectsEl, viewportEl, effectsEl) : null;
 
     function setLayout(newLayout) {
       // El servidor manda `cellTileIds` empaquetado (`cellTileIdsPacked`) en
@@ -891,6 +891,32 @@
       return true;
     }
 
+    /**
+     * Fase de Resolución: la cámara SIGUE a un efecto en movimiento
+     * (carromato de conquista, ejército yendo a un boss/dungeon/conquista)
+     * durante toda su animación, recalculando su posición con la misma
+     * interpolación lineal que usa drawResolutionEffects() — así se ve
+     * avanzar en el centro de la pantalla en vez de un salto seco de cámara.
+     * Al terminar el recorrido la cámara se queda en el destino (donde
+     * después estalla la polvareda del combate). `entry` es lo que devuelve
+     * playResolutionEffect(); un arrastre manual no lo corta (dura pocos
+     * segundos), pero clearResolutionEffects() sí.
+     */
+    let followEffectRAF = null;
+    function followResolutionEffect(entry, scale) {
+      if (!entry) return;
+      const useScale = scale || FOCUS_SCALE;
+      if (followEffectRAF) cancelAnimationFrame(followEffectRAF);
+      const step = () => {
+        const t = Math.min(1, (performance.now() - entry.startedAt) / entry.durationMs);
+        const wx = entry.fromX + (entry.toX - entry.fromX) * t;
+        const wy = entry.fromY + (entry.toY - entry.fromY) * t;
+        setView(useScale, viewportEl.clientWidth / 2 - wx * useScale, viewportEl.clientHeight / 2 - wy * useScale);
+        followEffectRAF = t < 1 ? requestAnimationFrame(step) : null;
+      };
+      followEffectRAF = requestAnimationFrame(step);
+    }
+
     /** Posición (px de mundo) del centro de una casilla, o `null` — usado por la Fase de Resolución para el carromato/polvareda. */
     function tileWorldCenter(tileId) {
       if (!layout || tileId == null) return null;
@@ -1060,9 +1086,13 @@
       focusOnPlayer,
       focusOnTile,
       tileWorldCenter,
-      /** Fase de Resolución (ver public/index.html playResolutionQueue()): añade/quita un efecto visual (polvareda de combate o carromato de conquista) — ver createObjectLayer() más abajo. */
+      /** Fase de Resolución (ver public/index.html playResolutionQueue()): añade/quita un efecto visual (polvareda de combate, carromato de conquista, o ejército en marcha) — ver createObjectLayer() más abajo. */
       playResolutionEffect: (effect) => (objectLayer ? objectLayer.addResolutionEffect(effect) : null),
-      clearResolutionEffects: () => { if (objectLayer) objectLayer.clearResolutionEffects(); },
+      clearResolutionEffects: () => {
+        if (followEffectRAF) { cancelAnimationFrame(followEffectRAF); followEffectRAF = null; }
+        if (objectLayer) objectLayer.clearResolutionEffects();
+      },
+      followResolutionEffect,
       /**
        * Popup de resumen de facción al pasar el ratón (ver docs/ACCIONES.md
        * sección 35): dado un punto en coordenadas de pantalla RELATIVAS a
@@ -1341,9 +1371,16 @@
   const dust1Img = loadSprite('dust-1');
   const dust2Img = loadSprite('dust-2');
   const wagonImg = loadSprite('wagon');
-  const DUST_SPRITE_WORLD_W = spriteSize('dust-1', 46);
+  const DUST_SPRITE_WORLD_W = spriteSize('dust-1', 92);
   const WAGON_SPRITE_WORLD_W = spriteSize('wagon', 56);
   const DUST_FRAME_MS = 220; // cuanto dura cada sprite antes de alternar al otro
+  // Ejército en marcha hacia un combate PvE (!boss/!dungeon/!conquista, ver
+  // playNextResolutionEvent() en public/index.html): una banda de soldados
+  // avanzando desde territorio propio hasta el sitio exacto del combate,
+  // antes de que estalle allí la polvareda — así se VE que la pelea es en
+  // ese punto del mapa, no un fogonazo sin contexto.
+  const armySoldierImg = loadSprite('soldier-right');
+  const ARMY_SPRITE_WORLD_W = spriteSize('soldier-right', 22);
   const CASA_SPRITE_WORLD_W = spriteSize('casa', 40);
   const CASA_RING_RADIUS = IGLESIA_RING_RADIUS + 40;
   // Castillo especial del nivel 4 de industria (ver rules/industry.js): UNA
@@ -1454,7 +1491,7 @@
     return ((h >>> 0) % 100000) / 100000;
   }
 
-  function createObjectLayer(objectsEl, viewportEl) {
+  function createObjectLayer(objectsEl, viewportEl, effectsEl) {
     let objs = null; // { count, type: Uint8Array, x: Uint16Array, y: Uint16Array, r: Uint8Array }
     let grid = null; // Map<bucketKey, number[]> (indices en objs)
     let gridCols = 0, gridRows = 0;
@@ -1560,6 +1597,12 @@
     let nextCloudSpawnAt = 0;
 
     const ctx = objectsEl.getContext('2d');
+    // Canvas de efectos de la Fase de Resolución (polvareda/carromato) POR
+    // ENCIMA de todo lo demás del mapa, incluido el canvas de marcadores
+    // (#mapMarkers va después de #mapObjects en el DOM, así que sin esta
+    // capa aparte los edificios/chapas taparían la polvareda). Opcional: si
+    // la página no lo tiene (panel de admin), se pinta en `ctx` como antes.
+    const effectsCtx = effectsEl ? effectsEl.getContext('2d') : null;
 
     fetch('/terrain/objects.bin')
       .then((r) => {
@@ -1782,8 +1825,16 @@
       resolutionEffects = [];
     }
 
-    /** Dibuja los efectos vivos de la Fase de Resolución y quita los que ya cumplieron su tiempo. */
+    /**
+     * Dibuja los efectos vivos de la Fase de Resolución y quita los que ya
+     * cumplieron su tiempo. Pintan en su PROPIO canvas (#mapEffects, ver
+     * `effectsCtx` arriba) por encima de TODOS los demás PNG del mapa —
+     * edificios, caminantes, nubes y chapas del canvas de marcadores
+     * incluidos: la polvareda/carromato es lo que hay que ver en esa fase.
+     */
     function drawResolutionEffects(w, h) {
+      const ectx = effectsCtx || ctx;
+      if (effectsCtx) effectsCtx.clearRect(0, 0, w, h);
       if (!resolutionEffects.length) return;
       const { x: vx, y: vy, scale } = currentView;
       const now = performance.now();
@@ -1799,7 +1850,25 @@
           const drawW = WAGON_SPRITE_WORLD_W * scale;
           const drawH = drawW * (wagonImg.naturalHeight / wagonImg.naturalWidth);
           const sx = wx * scale + vx, sy = wy * scale + vy;
-          ctx.drawImage(wagonImg, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+          ectx.drawImage(wagonImg, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+        } else if (e.type === 'army') {
+          // Banda de 3 soldados marchando en cuña hacia el combate PvE
+          // (!boss/!dungeon/!conquista) — mismo avance lineal que el
+          // carromato, con un pelin de balanceo vertical para que se lea
+          // como marcha y no como deslizamiento.
+          if (!armySoldierImg.complete || !armySoldierImg.naturalWidth) return;
+          const wx = e.fromX + (e.toX - e.fromX) * t;
+          const wy = e.fromY + (e.toY - e.fromY) * t;
+          const drawW = ARMY_SPRITE_WORLD_W * scale;
+          const drawH = drawW * (armySoldierImg.naturalHeight / armySoldierImg.naturalWidth);
+          const now2 = performance.now();
+          const offsets = [ { dx: 0, dy: 0 }, { dx: -0.9, dy: -0.55 }, { dx: -0.9, dy: 0.55 } ];
+          offsets.forEach((o, i) => {
+            const bob = Math.sin((now2 / 130) + i * 1.7) * 2;
+            const sx = (wx + o.dx * ARMY_SPRITE_WORLD_W) * scale + vx;
+            const sy = (wy + o.dy * ARMY_SPRITE_WORLD_W) * scale + vy + bob;
+            ectx.drawImage(armySoldierImg, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+          });
         } else {
           // 'dust': quieta sobre el punto de combate, alternando entre los
           // dos sprites cada DUST_FRAME_MS — el intercalado en sí ya da la
@@ -1809,7 +1878,7 @@
           const drawW = DUST_SPRITE_WORLD_W * scale;
           const drawH = drawW * (frame.naturalHeight / frame.naturalWidth);
           const sx = e.toX * scale + vx, sy = e.toY * scale + vy;
-          ctx.drawImage(frame, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+          ectx.drawImage(frame, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
         }
       });
     }
@@ -2396,7 +2465,7 @@
           const gx = home.x * scale + vx, gy = home.y * scale + vy;
           drawBuildingGlow(gx, gy, gw, gh);
           ctx.drawImage(iglesiaImg, gx - gw / 2, gy - gh, gw, gh);
-          // "+50 tropas": para que se sepa de un vistazo el beneficio que da,
+          // "+25 tropas": para que se sepa de un vistazo el beneficio que da,
           // igual estilo que el cartel de un boss (sombra oscura + relleno
           // claro, sin caja).
           ctx.font = '11px system-ui, sans-serif';
@@ -2404,9 +2473,9 @@
           ctx.textBaseline = 'bottom';
           ctx.lineWidth = 3;
           ctx.strokeStyle = 'rgba(6,18,26,.85)';
-          ctx.strokeText('+50 tropas', gx, gy - gh - 4);
+          ctx.strokeText('+25 tropas', gx, gy - gh - 4);
           ctx.fillStyle = '#8be08b';
-          ctx.fillText('+50 tropas', gx, gy - gh - 4);
+          ctx.fillText('+25 tropas', gx, gy - gh - 4);
         } else if (inView && group.buildingKind === 'casa' && casaImg.complete && casaImg.naturalWidth) {
           const hw = CASA_SPRITE_WORLD_W * scale;
           const hh = hw * (casaImg.naturalHeight / casaImg.naturalWidth);
@@ -3146,6 +3215,13 @@
       objectsEl.style.width = w + 'px';
       objectsEl.style.height = h + 'px';
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (effectsEl) {
+        effectsEl.width = Math.round(w * dpr);
+        effectsEl.height = Math.round(h * dpr);
+        effectsEl.style.width = w + 'px';
+        effectsEl.style.height = h + 'px';
+        effectsCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
     }
 
     function scheduleRedraw() {
@@ -3189,8 +3265,11 @@
       drawBossWalkers(w, h);
       drawCow(w, h);
       drawWalkers(w, h);
-      drawResolutionEffects(w, h);
       drawClouds(w, h);
+      // La polvareda/carromato de la Fase de Resolución va la ÚLTIMA de
+      // todas y en su propio canvas por encima del de marcadores (ver
+      // drawResolutionEffects): nada del mapa debe taparla, ni las nubes.
+      drawResolutionEffects(w, h);
     }
 
     /** Arboles/rocas/etc. de `objects.bin` (si ese asset llego a generarse). */

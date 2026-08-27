@@ -106,6 +106,24 @@
   .joinFactionLabel { font-family:var(--font-title); font-size:12px; color:var(--gold); flex:0 0 auto;
                        text-shadow:0 1px 1px rgba(45,25,5,.85); }
   .joinFactionBar .cmdBtn { border-left:3px solid transparent; }
+  /* Bocadillo de "últimas acciones" (ver docs/ACCIONES.md sección 38):
+     abajo-derecha, apoyado en el borde de la maderita inferior, solo visible
+     durante la Fase de Acción — enseña en vivo los últimos comandos
+     aceptados (quién y qué), con su pico de bocadillo hacia la madera. */
+  .actionFeed { position:fixed; right:14px; bottom:calc(var(--map-margin-y) + 12px); z-index:18;
+                 width:240px; max-height:200px; overflow:hidden;
+                 background-image:url('/ui/parchment.png'); background-size:160px 160px;
+                 border:2px solid #4a331c; border-radius:4px; padding:8px 10px;
+                 color:var(--ink); font-family:var(--font-serif); font-size:12px;
+                 box-shadow:0 8px 24px rgba(0,0,0,.5); }
+  .actionFeed.hidden { display:none; }
+  .actionFeed::after { content:''; position:absolute; bottom:-9px; right:26px;
+                        border:9px solid transparent; border-bottom:none; border-top:9px solid #4a331c; }
+  .actionFeedTitle { font-family:var(--font-title); font-size:12px; margin-bottom:4px; }
+  .actionFeedLine { display:flex; align-items:baseline; gap:5px; line-height:1.5; white-space:nowrap;
+                     overflow:hidden; text-overflow:ellipsis; }
+  .actionFeedLine .dot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; align-self:center; }
+  .actionFeedEmpty { opacity:.65; font-style:italic; }
   /* Selector de objetivo junto a un botón de comando (ver docs/ACCIONES.md
      sección 37): !ataque/!alianza piden facción, !apoyar pide un nombre. */
   .cmdTargetPicker { position:fixed; z-index:97; background-image:url('/ui/parchment.png');
@@ -247,6 +265,10 @@
     <canvas id="mapCanvas"></canvas>
     <canvas id="mapObjects"></canvas>
     <canvas id="mapMarkers"></canvas>
+    <!-- Efectos de la Fase de Resolución (polvareda/carromato): su propio
+         canvas POR ENCIMA del de marcadores para que ningún edificio/chapa
+         los tape — ver drawResolutionEffects() en mapRenderer.js. -->
+    <canvas id="mapEffects"></canvas>
   </div>
 
   <!-- Música de fondo: ver docs/ACCIONES.md sección 6 "Música de fondo" para
@@ -262,6 +284,9 @@
   <!-- Unirse a facción desde la web (ver docs/ACCIONES.md sección 37):
        solo visible durante la Fase de Reclutamiento. -->
   <div id="joinFactionBar" class="joinFactionBar hidden"></div>
+  <!-- Bocadillo de últimas acciones (ver docs/ACCIONES.md sección 38):
+       solo visible durante la Fase de Acción. -->
+  <div id="actionFeed" class="actionFeed hidden"></div>
 
   <div class="mapToolbar">
     <button onclick="mapCtrl.zoom(1.25)" title="Acercar">+</button>
@@ -274,7 +299,7 @@
       <!-- Numero de version: sube esto en cada entrega nueva (empezamos en 0.1.0, a peticion del streamer).
            Convencion pedida: sube el ULTIMO numero en cada entrega; al llegar a 9 el del medio sube
            uno y el ultimo vuelve a 0 (...0.4.9 -> 0.5.0 -> 0.5.1...), progresivamente. -->
-      <h1>Version 0.4.5</h1>
+      <h1>Version 0.4.6</h1>
       <button class="headerBtn" id="musicToggle" onclick="toggleMusic()" title="Música de fondo">🎵</button>
       <input type="range" id="musicVolume" class="volumeSlider" min="0" max="100" value="50"
              oninput="setMusicVolume(this.value)" title="Volumen de la música" />
@@ -527,7 +552,9 @@
     handleMatchEndModal(state);
     handleTransitionBanner(state);
     handleWeatherState(state);
+    handleAllianceState(state);
     handleJoinFactionBar(state);
+    renderActionFeed(state);
   }
 
   // ---------------------------------------------------------------------
@@ -639,6 +666,41 @@
       }
       lastActiveWeather = weather;
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Alianzas por pacto mutuo (ver server/rules/alliances.js, docs/ACCIONES.md
+  // sección 38): cuando aparece una pareja nueva en `state.activeAlliances`
+  // se anuncia con el mismo cartel centrado del clima — "sois aliadas, no
+  // podréis atacaros en N rondas". El cartel es global (la web pública es
+  // una sola vista compartida), así lo ven las dos facciones y el resto.
+  // ---------------------------------------------------------------------
+  let knownAlliancePairs = new Set();
+
+  function showCenterBanner(html, ms = 5500) {
+    document.getElementById('weatherAnnounceText').innerHTML = html;
+    const banner = document.getElementById('weatherAnnounce');
+    banner.classList.remove('hidden');
+    requestAnimationFrame(() => banner.classList.add('show'));
+    clearTimeout(banner._hideTimer);
+    banner._hideTimer = setTimeout(() => {
+      banner.classList.remove('show');
+      setTimeout(() => banner.classList.add('hidden'), 500);
+    }, ms);
+  }
+
+  function handleAllianceState(state) {
+    const alliances = state.activeAlliances || [];
+    const current = new Set(alliances.map((a) => `${a.factionA}-${a.factionB}`));
+    for (const a of alliances) {
+      if (knownAlliancePairs.has(`${a.factionA}-${a.factionB}`)) continue;
+      showCenterBanner(
+        `<div style="font-size:34px">🤝</div>¡Alianza!` +
+        `<div style="font-size:12px;font-family:var(--font-serif);opacity:.85;margin-top:4px">` +
+        `${fchip(state, a.factionA)} y ${fchip(state, a.factionB)} son aliadas: no podrán atacarse durante ${a.roundsLeft} rondas y defienden como una sola facción.</div>`
+      );
+    }
+    knownAlliancePairs = current;
   }
 
   // ---------------------------------------------------------------------
@@ -823,6 +885,7 @@
     markersEl: document.getElementById('mapMarkers'),
     terrainBgEl: document.getElementById('mapTerrainBg'),
     objectsEl: document.getElementById('mapObjects'),
+    effectsEl: document.getElementById('mapEffects'),
   });
 
   // Ciclo día/noche (ver dayNightTick() más arriba): arranca aquí porque
@@ -936,7 +999,27 @@
     if (!resolutionFastMode) {
       mapCtrl.focusOnTile(ev.focusTileId, RESOLUTION_FOCUS_SCALE);
       if (ev.kind === 'conquest') {
-        mapCtrl.playResolutionEffect({ type: 'wagon', focusTileId: ev.focusTileId, originTileId: ev.originTileId, durationMs: ev.durationMs });
+        // La cámara SIGUE al carromato durante todo su trayecto (ver
+        // followResolutionEffect() en mapRenderer.js) en vez de saltar al
+        // destino y esperar a que llegue.
+        const fx = mapCtrl.playResolutionEffect({ type: 'wagon', focusTileId: ev.focusTileId, originTileId: ev.originTileId, durationMs: ev.durationMs });
+        if (fx) mapCtrl.followResolutionEffect(fx, RESOLUTION_FOCUS_SCALE);
+      } else if (ev.kind === 'pve_fight' && ev.originTileId != null) {
+        // !boss/!dungeon/!conquista: primero el ejército MARCHA desde
+        // territorio propio hasta el objetivo (cámara siguiéndolo), y al
+        // llegar estalla allí la polvareda del combate — así se ve que la
+        // pelea es en ese sitio exacto del mapa.
+        const travelMs = Math.min(2000, Math.round(ev.durationMs * 0.4));
+        const fx = mapCtrl.playResolutionEffect({ type: 'army', focusTileId: ev.focusTileId, originTileId: ev.originTileId, durationMs: travelMs });
+        if (fx) mapCtrl.followResolutionEffect(fx, RESOLUTION_FOCUS_SCALE);
+        const idxAtSchedule = resolutionIndex;
+        setTimeout(() => {
+          // Solo si seguimos en ESTE mismo evento (no se cerró la cola ni
+          // pasó al siguiente mientras marchaba el ejército).
+          if (resolutionIndex === idxAtSchedule && resolutionRoundKey !== null && !resolutionFastMode) {
+            mapCtrl.playResolutionEffect({ type: 'dust', focusTileId: ev.focusTileId, durationMs: ev.durationMs - travelMs });
+          }
+        }, travelMs);
       } else {
         mapCtrl.playResolutionEffect({ type: 'dust', focusTileId: ev.focusTileId, durationMs: ev.durationMs });
       }
@@ -1008,6 +1091,7 @@
       summarySection('Eliminaciones', (byKind.eliminations || []).map((e) => eliminationLine(state, e))),
       summarySection('Estructuras conquistadas', (byKind.structureConquests || []).map((c) => structureConquestLine(state, c))),
       summarySection('Bosses derrotados', (byKind.bossKills || []).map((c) => bossKillLine(state, c))),
+      summarySection('Alianzas', (byKind.newAlliances || []).map((a) => allianceLine(state, a))),
     ].join('');
   }
 
@@ -1025,6 +1109,10 @@
     return `<span class="fchip"><span class="dot" style="background:${escapeHtml(f.color)}"></span>${escapeHtml(f.name)}</span>`;
   }
 
+  function allianceLine(state, a) {
+    return `🤝 ${fchip(state, a.factionA)} y ${fchip(state, a.factionB)} pactan una alianza de ${a.durationRounds} rondas: no pueden atacarse y defienden juntas`;
+  }
+
   function conquestLine(state, c) {
     const origin = c.fromFactionNumber != null ? fchip(state, c.fromFactionNumber) : 'territorio neutral';
     return c.conquestKind === 'expansion'
@@ -1035,7 +1123,7 @@
   const TIER_LABELS = {
     caballero: '1 caballero 🐴',
     industria_extra: '3 industrias gratis',
-    iglesia: 'Iglesia ⛪ junto a tu capital (+50 al límite de tropas de cada uno)',
+    iglesia: 'Iglesia ⛪ junto a tu capital (+25 al límite de tropas de cada uno)',
     castillo_especial: 'Castillo especial 🏯 junto a tu capital (2 tropas especiales, +1/ronda)',
     // Niveles 5-8: preparados, sin efecto todavía (ver docs/ACCIONES.md
     // sección 35) — se etiquetan igual que el resto para que el resumen no
@@ -1164,14 +1252,14 @@
     { cmd: '!industria', phase: 'Acción', short: 'Levantas una industria: +0.5 por ronda para siempre.', desc: 'Levantas una industria en un terreno al azar de tu facción. Cada industria da +0.5 por ronda, para siempre, además del +0.1 que da cada terreno por sí solo. Si te conquistan ese terreno, la industria se va con él. La industria acumulada de tu facción (la probeta de su tarjeta) desbloquea 8 mejoras automáticas, EN ORDEN, sin que nadie vote nada — saltan solas al cruzar cada marca:<br><br>' +
       '<strong>Nivel 1</strong> — 1 soldado al azar pasa a caballero 🐴 (tira más fuerte en combate y se mueve más rápido por el mapa).<br>' +
       '<strong>Nivel 2</strong> — se levantan 3 industrias más de golpe, gratis (como si 3 personas hubieran votado !industria).<br>' +
-      '<strong>Nivel 3</strong> — aparece una iglesia ⛪ junto a tu capital: +50 al límite de tropas de CADA jugador de tu facción, para siempre.<br>' +
+      '<strong>Nivel 3</strong> — aparece una iglesia ⛪ junto a tu capital: +25 al límite de tropas de CADA jugador de tu facción, para siempre.<br>' +
       '<strong>Nivel 4</strong> — aparece un castillo especial 🏯 junto a tu capital: trae 2 tropas especiales al construirse y 1 más cada ronda después (hasta 10 por facción), cada una con 0.4 fijo de ataque Y defensa, y siguen a quien las lleve como cualquier otra tropa.<br>' +
       '<strong>Niveles 5 a 8</strong> — preparados para más adelante, todavía sin efecto (se avisará en el resumen de ronda igualmente al cruzarlos, y la probeta se llena hasta el final).' },
     { cmd: '!ataque <N>', phase: 'Acción', short: 'Atacas a la facción N (solo si tenéis frontera).', desc: 'Atacas a la facción número N (solo si tenéis frontera). Cada atacante aporta entre 0.7 y 1.3 de fuerza (al azar) — o entre 0.9 y 1.4 si es un caballero 🐴 — así que el mismo número de gente no siempre gana. En el mapa sale una espada roja ⚔ sobre la facción atacada con cuántos la atacáis.' },
     { cmd: '!defender', phase: 'Acción', short: 'Defiendes a tu facción esta ronda.', desc: 'Defiendes a tu facción esta ronda, aportando entre 0.7 y 1.3 de defensa (al azar) — o entre 0.9 y 1.4 si eres caballero 🐴. ¡Importante! El territorio NO se defiende solo: si nadie escribe !defender, tu facción entra al combate con 0 de defensa. En el mapa sale un escudo verde 🛡 con cuántos estáis defendiendo.' },
     { cmd: '!expansion', phase: 'Acción', short: 'Ocupáis terreno neutral vecino.', desc: 'Ocupáis terreno neutral vecino: hacen falta 2 personas por cada terreno nuevo (1 o 2 votos = 1 terreno, 4 votos = 2 terrenos...). No hace nada si la partida es de "reparto total", sin neutrales.' },
     { cmd: '!especial', phase: 'Acción', short: 'Vota para activar la habilidad especial de tu facción — solo si el admin las activó.', desc: 'Votas para activar la habilidad especial de tu facción cuando llegue al % de votantes necesario (una sola vez por partida) — solo funciona si el admin activó las habilidades especiales al crear la partida. Cada facción recibe UNA al azar del catálogo de 6 al empezar la partida (con más de 6 facciones, se repiten) — de momento se llaman "hab1" a "hab6" porque todavía no tienen un efecto definido, es solo la primera parte del sistema (el catálogo real vendrá más adelante). Pasa el ratón por el nombre de tu facción, por su capital en el mapa, o por tu propio personaje, para ver qué habilidad le tocó.' },
-    { cmd: '!alianza <N>', phase: 'Acción', short: 'Vota proponer una alianza con la facción N.', desc: 'Votas para proponer una alianza con la facción número N (solo si el admin activó alianzas al crear la partida).' },
+    { cmd: '!alianza <N>', phase: 'Acción', short: 'Propón una alianza a la facción N — si ellos también os la proponen, pactáis por varias rondas.', desc: 'Votas para proponer una alianza a la facción número N (solo si el admin activó alianzas). Si en la MISMA ronda tu facción se lo propone a la suya Y ellos os lo proponen a la vuestra (cada una superando su % de votos), se forma una alianza que dura las rondas que haya configurado el admin: mientras dure NO podéis atacaros entre vosotras y defendéis como una sola facción (los !defender de una cuentan también en los combates de la otra). Al acabar volvéis a ser independientes. Si solo una de las dos lo propone, no pasa nada esa ronda.' },
     { cmd: '!levas', phase: 'Acción', short: 'Levanta una barraca 🏕️: +5 soldados de IA, +1/ronda después.', desc: 'Levantas una barraca 🏕️ en un terreno al azar de tu facción (igual que !industria) y te lleva de inmediato +5 soldados de IA que te siguen por el mapa. Cada soldado te suma +0.1 fijo tanto en ataque como en defensa. Además, cada barraca en pie da +1 soldado por ronda a partir de la siguiente, repartido entre tu facción priorizando a quien menos tenga. Si te conquistan el terreno, la barraca pasa a producir para el nuevo dueño.' },
     { cmd: '!arqueros', phase: 'Acción', short: 'Levanta un campo de arquería 🏹: +5 arqueros de IA, +1/ronda después.', desc: 'Levantas un campo de arquería 🏹 (igual mecánica que !levas) y te da +5 arqueros de IA al momento, +1 por ronda después por cada campo en pie. Los arqueros son especialistas de ataque: +0.2 fijo atacando, 0 defendiendo.' },
     { cmd: '!caballeros', phase: 'Acción', short: 'Levanta una caballeriza 🐎: +5 caballeros de IA, +1/ronda después.', desc: 'Levantas una caballeriza 🐎 (igual mecánica que !levas) y te da +5 caballeros de IA al momento, +1 por ronda después por cada caballeriza en pie. Los caballeros de IA son especialistas de defensa: +0.2 fijo defendiendo, 0 atacando (no confundir con el caballero 🐴 de la mejora de industria, que es un jugador que cambia de sprite).' },
@@ -1179,8 +1267,8 @@
     { cmd: '!dungeon', phase: 'Acción', short: 'Ataca a un dungeon (orcos/goblins) de tu territorio — solo si el admin los activó.', desc: 'Ataca a un dungeon 💀 (guarnición de orcos y goblins, ver marcador sobre él) que esté dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 5 por mapa). Misma mecánica de grupo que !conquista: todos los que voten !dungeon esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no — aquí sí se puede morir, y si eso pasa la guarnición se queda debilitada para el siguiente intento (no se cura). Si lo derrotáis, la guarnición desaparece para siempre y tu facción gana una estatua junto a su capital (con sus propios aldeanos alrededor) — a diferencia de castillo/aldea/puerto, un dungeon no da producción para la casilla.' },
     { cmd: '!torre', phase: 'Acción', short: 'Construye una torre 🗼 en 2 rondas: +0.5 de defensa pasiva, máx. 10 por facción.', desc: 'Empiezas a construir una torre 🗼 en un terreno al azar de tu facción. Esta ronda queda "en obras" (sin efecto todavía); a la ronda siguiente se termina sola, sin que tengas que volver a votar. Cada torre terminada da +0.5 de defensa pasiva a tu facción PARA SIEMPRE, incluso si nadie escribe !defender esa ronda — es la única excepción a "el territorio no se defiende solo". Máximo 10 torres por facción (contando las que están en obras). Si te conquistan el terreno donde está, la torre se la lleva quien te lo conquiste, esté terminada o a medias.' },
     { cmd: '!boss', phase: 'Acción', short: 'Ataca a un boss de tu territorio — solo si el admin los activó.', desc: 'Ataca a un boss (un ogro 👹, un troll 🧌 o un behemot 🐗, según cuál haya salido) que esté vagando dentro de tu propio territorio — solo aparecen si el admin los activó al crear la partida (1 a 3 por mapa, cada uno atado a la casilla en la que salió). Misma mecánica de grupo que !conquista/!dungeon: todos los que voten !boss esa ronda atacan juntos. Tu ataque contra su defensa decide si lo derrotáis; su ataque contra vuestra defensa os causa bajas SIEMPRE, ganéis o no — su ataque y su defensa (entre 5 y 10, sorteado por partida) se ven encima de su cabeza. Aquí sí se puede morir: si alguien muere en el intento, el boss se queda con el ataque y la defensa que le quedaban tras ESA batalla (no vuelve a estar a tope), así que cada intento fallido con bajas lo va desgastando para el siguiente. Si lo derrotáis, tu facción gana un museo 🏛️ junto a su capital: +1 leva/ronda, +1 industria/ronda y +2 de defensa base, PARA SIEMPRE — si matas más de un boss, se crea otro museo más, y los bonos se suman.' },
-    { cmd: '!casas', phase: 'Acción', short: 'Construye una vivienda 🏠 junto a tu capital: +5 al límite de tropas de cada uno, máx. 10 por facción.', desc: 'Construyes una vivienda 🏠 junto a tu capital, en un anillo propio como la iglesia/estatua/museo, sin solaparse con ellos. No da tropas: sube el LÍMITE MÁXIMO de tropas que puede llevar CADA jugador de tu facción +5 por cada vivienda que tenga la facción, hasta un máximo de 10 (+50 en total) — se suma al límite base que pone el admin, y también al +50 de la iglesia si la tenéis, sin tope combinado entre las dos.' },
-    { cmd: '!apoyar <usuario>', phase: 'Acción', short: 'Manda tus propias tropas a reforzar la defensa de OTRO jugador de OTRA facción, solo esta ronda.', desc: 'Escribe el nombre de un jugador de OTRA facción (no la tuya) para mandar tus propias tropas a reforzar la defensa de SU facción, como si hubieras escrito !defender por ellos — una especie de ayuda puntual entre facciones, sin ser una alianza permanente. Solo tiene efecto si esa facción recibe algún ataque ESTA MISMA ronda (si nadie la ataca, tu apoyo no hace nada, igual que un !defender sin ataque entrante). Sigues siendo de TU facción — no cambias de bando — pero tus tropas entran en ESE combate: si se quedan a 0, pierdes una vida como en cualquier otro combate, y si tu facción se queda sin nadie vivo por esto, también puede desaparecer. Rechazado si el jugador no existe, está muerto, o es de tu propia facción.' },
+    { cmd: '!casas', phase: 'Acción', short: 'Construye una vivienda 🏠 junto a tu capital: +10 al límite de tropas de cada uno, máx. 10 por facción.', desc: 'Construyes una vivienda 🏠 junto a tu capital, en un anillo propio como la iglesia/estatua/museo, sin solaparse con ellos. No da tropas: sube el LÍMITE MÁXIMO de tropas que puede llevar CADA jugador de tu facción +10 por cada vivienda que tenga la facción, hasta un máximo de 10 (+100 en total) — se suma al límite base que pone el admin, y también al +25 de la iglesia si la tenéis, sin tope combinado entre las dos.' },
+    { cmd: '!apoyar <N>', phase: 'Acción', short: 'Manda tus tropas este turno a defender a la facción N en sus combates.', desc: 'Escribe el número de OTRA facción (no la tuya) para mandar tus propias tropas a defender en SUS combates esta ronda, como si hubieras escrito !defender por ellos — una ayuda puntual entre facciones, sin ser una alianza. Solo tiene efecto si esa facción recibe algún ataque ESTA MISMA ronda (si nadie la ataca, tu apoyo no hace nada, igual que un !defender sin ataque entrante). Sigues siendo de TU facción — no cambias de bando — pero tus tropas entran en ESE combate: si se quedan a 0, pierdes una vida como en cualquier otro combate. Rechazado si la facción no existe, está eliminada, o es la tuya.' },
   ];
 
   // ---------------------------------------------------------------------
@@ -1191,7 +1279,7 @@
   // (!ataque/!alianza piden un número de facción, !apoyar pide un nombre de
   // usuario) abren un mini selector junto al botón antes de mandar nada.
   // ---------------------------------------------------------------------
-  const CMD_TARGET_TYPE = { '!ataque': 'faction', '!alianza': 'faction', '!apoyar': 'username' };
+  const CMD_TARGET_TYPE = { '!ataque': 'faction', '!alianza': 'faction', '!apoyar': 'faction' };
 
   function renderCommandBar() {
     const bar = document.getElementById('commandBar');
@@ -1334,6 +1422,53 @@
       bar.appendChild(btn);
     });
     bar.classList.remove('hidden');
+  }
+
+  // ---------------------------------------------------------------------
+  // Bocadillo de últimas acciones (ver docs/ACCIONES.md sección 38): en la
+  // Fase de Acción enseña en vivo los últimos comandos ACEPTADOS que manda
+  // el servidor en `state.actionFeed` (quién, de qué facción, qué hizo y a
+  // quién), para que se sepa qué está pasando en el mapa sin esperar a la
+  // resolución. Fuera de esa fase se oculta entero.
+  // ---------------------------------------------------------------------
+  const FEED_ACTION_LABEL = {
+    INDUSTRY: '🏭 industria', ATTACK: '⚔️ ataca a', DEFEND: '🛡️ defiende', EXPAND: '🚩 se expande',
+    SPECIAL: '✨ especial', ALLIANCE: '🤝 propone alianza a', LEVAS: '🏕️ levas', ARQUEROS: '🏹 arqueros',
+    CABALLEROS: '🐎 caballeros', CONQUISTA: '🏰 conquista', DUNGEON: '💀 dungeon', TOWER: '🗼 torre',
+    BOSS: '👹 boss', CASAS: '🏠 casas', APOYAR: '🤲 apoya a',
+  };
+
+  function renderActionFeed(state) {
+    const box = document.getElementById('actionFeed');
+    if (state.phase !== 'action') { box.classList.add('hidden'); return; }
+    const feed = state.actionFeed || [];
+    box.innerHTML = '';
+    const title = document.createElement('div');
+    title.className = 'actionFeedTitle';
+    title.textContent = '📜 Últimas acciones';
+    box.appendChild(title);
+    if (!feed.length) {
+      const empty = document.createElement('div');
+      empty.className = 'actionFeedEmpty';
+      empty.textContent = 'Nadie ha movido ficha todavía...';
+      box.appendChild(empty);
+    }
+    for (const entry of feed) {
+      const line = document.createElement('div');
+      line.className = 'actionFeedLine';
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      const faction = factionByNumber(state, entry.factionNumber);
+      dot.style.background = faction ? faction.color : '#999';
+      line.appendChild(dot);
+      const text = document.createElement('span');
+      const label = FEED_ACTION_LABEL[entry.type] || entry.type;
+      const target = entry.targetFactionNumber ? factionByNumber(state, entry.targetFactionNumber) : null;
+      text.textContent = `${entry.username} ${label}${target ? ` ${target.name}` : ''}`;
+      line.appendChild(text);
+      box.appendChild(line);
+    }
+    box.classList.remove('hidden');
   }
 
   // ---------------------------------------------------------------------

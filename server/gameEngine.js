@@ -106,13 +106,13 @@ function createMatch(config) {
     industryPenaltyNextRound: false, // armado por Sabotaje esta ronda, se activa en la siguiente
     industryPenaltyActive: false, // Sabotaje activo ESTA ronda (armado la ronda anterior)
     // Iglesia (nivel 3 de industria, ver rules/industry.js): efecto
-    // permanente en cuanto se pone a true, sin fase de "armado" — +50 al
+    // permanente en cuanto se pone a true, sin fase de "armado" — +25 al
     // limite de tropas de cada jugador de la faccion (ver
     // effectiveTroopLimit() en rules/shared.js) y el cliente pinta el
     // edificio junto a la capital.
     churchBuilt: false,
     // Viviendas construidas con !casas (ver rules/housing.js): 0 a
-    // MAX_HOUSES_PER_FACTION (10), +5 al limite de tropas de cada jugador
+    // MAX_HOUSES_PER_FACTION (10), +10 al limite de tropas de cada jugador
     // de la faccion por cada una (ver effectiveTroopLimit() en
     // rules/shared.js) — acumulable con la iglesia, a diferencia de esta
     // no es un interruptor sino un contador.
@@ -220,7 +220,14 @@ function createMatch(config) {
     round: 0,
     roundActions: new Map(),
     lastAttackerOf: {},
-    activeAlliancePairsThisRound: new Set(),
+    // Alianzas activas por pacto mutuo (ver rules/alliances.js): Map de
+    // "A-B" (A<B) -> última ronda en la que sigue activa.
+    activeAlliances: new Map(),
+    // Feed de "últimas acciones" de la Fase de Acción en curso (ver
+    // castAction() y el bocadillo de abajo-derecha en public/index.html):
+    // cada comando ACEPTADO deja aquí su rastro en orden de llegada, se
+    // vacía al empezar cada ronda. Solo informativo, ninguna regla lo lee.
+    actionFeed: [],
     combatModifiers: {},
     summaryBlocks: [],
     // Fase de Resolución (ver buildResolutionEvents()): [] hasta que se
@@ -290,6 +297,10 @@ function normalizeConfig(config) {
     // 2-5 = vidas extra. Panel de admin, por defecto 3.
     startingLives: clampInt(config.startingLives, 1, 5, 3),
     alliancesEnabled: !!config.alliancesEnabled,
+    // Cuántas rondas dura una alianza pactada (ver rules/alliances.js:
+    // pacto mutuo de !alianza en la misma Fase de Acción). Panel de admin,
+    // 1-99, por defecto 5.
+    allianceDurationRounds: clampInt(config.allianceDurationRounds, 1, 99, 5),
     // Habilidades especiales activas en esta partida (ver
     // rules/specialAbilities.js, docs/ACCIONES.md sección 35). Único
     // interruptor global — ya no se eligen ni activan por facción desde el
@@ -344,26 +355,10 @@ function handleChatCommand(userId, username, channel, text) {
     return;
   }
 
-  // !apoyar <usuario>: el comando solo trae un nombre de usuario (no un
-  // número de facción como !ataque/!alianza) — se resuelve aquí a la
-  // facción de ESE jugador (tiene que existir, estar vivo, y ser de otra
-  // facción que la de quien vota) antes de tratarlo como cualquier otra
-  // acción con objetivo. Ver rules/gameEngine.js resolveRound() ->
+  // !apoyar <facción>: mismo formato de objetivo que !ataque/!alianza (un
+  // número de facción — antes era un nombre de usuario). castAction() ya
+  // valida que la facción exista, esté viva y no sea la del votante; ver
   // tallyActions() para cómo se convierte en un !defender prestado.
-  if (parsed.type === ACTION_APOYAR) {
-    const caller = match.players.get(userId);
-    const target = findPlayerByUsername(match, parsed.targetUsername);
-    if (!caller || !target || !target.alive || target.factionNumber === caller.factionNumber) {
-      console.log(`[gameEngine] ${username} -> APOYAR "${parsed.targetUsername}": RECHAZADO (jugador inexistente, muerto, o de tu propia facción)`);
-      pushChatLog({ username, text, ok: false, reason: 'jugador de apoyo inválido (no existe, está muerto, o es de tu propia facción)' });
-      return;
-    }
-    const ok = castAction(userId, ACTION_APOYAR, target.factionNumber);
-    console.log(`[gameEngine] ${username} -> APOYAR a ${target.username} (facción ${target.factionNumber}): ${ok ? 'OK' : 'RECHAZADO'}`);
-    pushChatLog({ username, text, ok, reason: ok ? `apoyando a ${target.username}` : 'rechazado' });
-    return;
-  }
-
   const ok = castAction(userId, parsed.type, parsed.targetFactionNumber);
   console.log(`[gameEngine] ${username} -> ${parsed.type}: ${ok ? 'OK' : 'RECHAZADO (revisa si esta unido y vivo)'}`);
   pushChatLog({ username, text, ok, reason: ok ? 'aceptado' : 'rechazado (revisa si está unido a una facción y vivo)' });
@@ -450,6 +445,17 @@ function castAction(userId, actionType, targetFactionNumber) {
   }
 
   match.roundActions.set(userId, { type: actionType, targetFactionNumber });
+  // Feed de últimas acciones (bocadillo abajo-derecha del cliente): solo
+  // acciones ACEPTADAS, en orden de llegada. Tope de 40 por ronda para que
+  // una partida multitudinaria no infle el estado público — el cliente solo
+  // enseña las últimas de todas formas.
+  match.actionFeed.push({
+    username: player.username,
+    factionNumber: player.factionNumber,
+    type: actionType,
+    targetFactionNumber: targetFactionNumber || null,
+  });
+  if (match.actionFeed.length > 40) match.actionFeed.shift();
   notifyStateChange();
   return true;
 }
@@ -492,6 +498,7 @@ function closeRecruitment() {
 
   match.round = 1;
   match.roundActions.clear();
+  match.actionFeed = [];
   enterTransition('first-action', match.round, () => {
     match.phase = PHASE_ACTION;
     // Clima de esta ronda (ver rules/weather.js, docs/ACCIONES.md sección
@@ -640,7 +647,12 @@ function buildResolutionEvents(context) {
   }
 
   for (const f of context.roundEvents.pveFights) {
-    events.push({ kind: 'pve_fight', baseDurationMs: PVE_FIGHT_BASE_MS, focusTileId: f.tileId, ...f });
+    // De dónde sale el ejército que marcha hasta el combate (ver el efecto
+    // 'army' en public/mapRenderer.js): una casilla vecina que ya sea de la
+    // facción atacante — null si no hay ninguna (el cliente pone solo la
+    // polvareda, sin marcha).
+    const originTileId = pickOriginNeighborTileId(f.tileId, f.factionNumber);
+    events.push({ kind: 'pve_fight', baseDurationMs: PVE_FIGHT_BASE_MS, focusTileId: f.tileId, originTileId, ...f });
   }
 
   for (const cq of context.roundEvents.conquests) {
@@ -686,6 +698,7 @@ function advanceRound() {
 
   match.round += 1;
   match.roundActions.clear();
+  match.actionFeed = [];
   enterTransition('next-round', match.round, () => {
     match.phase = PHASE_ACTION;
     match.activeWeather = rollWeather(match);
@@ -776,7 +789,7 @@ function tallyActions() {
     forceInactive: new Set(),
     // Sucesos de la ronda que van llenando resolveExpansion/resolveCombat/resolveIndustry a medida
     // que ocurren, para poder construir despues el resumen por fases (ver docs/ACCIONES.md seccion 6).
-    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [], bossKills: [], support, pveFights: [] },
+    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [], bossKills: [], support, pveFights: [], newAlliances: [] },
   };
 }
 
@@ -803,6 +816,7 @@ function buildRoundSummary(context) {
   if (context.roundEvents.eliminations.length > 0) blocks.push({ kind: 'eliminations', data: context.roundEvents.eliminations });
   if (context.roundEvents.structureConquests.length > 0) blocks.push({ kind: 'structureConquests', data: context.roundEvents.structureConquests });
   if (context.roundEvents.bossKills.length > 0) blocks.push({ kind: 'bossKills', data: context.roundEvents.bossKills });
+  if (context.roundEvents.newAlliances.length > 0) blocks.push({ kind: 'newAlliances', data: context.roundEvents.newAlliances });
 
   const casualties = [...match.players.values()]
     .filter((p) => p.diedOnRound === match.round)
@@ -890,10 +904,12 @@ function getPublicState() {
       bosses: [],
       players: [],
       summaryBlocks: [],
+      actionFeed: [],
       resolutionEvents: [],
       resolutionSkipRequestedAt: null,
       activeWeather: null,
       weatherEnabled: false,
+      activeAlliances: [],
       startingLives: 3,
       winnerFactionNumber: null,
       timerEndsAt: null,
@@ -913,6 +929,15 @@ function getPublicState() {
     // día/noche, que se apaga entero junto con el clima).
     activeWeather: match.activeWeather,
     weatherEnabled: match.config.futureFeatures.weather,
+    // Alianzas activas por pacto mutuo (ver rules/alliances.js sección 38):
+    // el cliente enseña el popup al formarse (kind 'newAlliances' en
+    // summaryBlocks) y el estado vigente con las rondas que quedan aquí.
+    activeAlliances: [...match.activeAlliances.entries()]
+      .filter(([, expiresAfterRound]) => match.round <= expiresAfterRound)
+      .map(([key, expiresAfterRound]) => {
+        const [a, b] = key.split('-').map(Number);
+        return { factionA: a, factionB: b, roundsLeft: expiresAfterRound - match.round + 1 };
+      }),
     factions: match.factions.map((f) => ({
       number: f.number,
       name: f.name,
@@ -934,7 +959,7 @@ function getPublicState() {
       dungeonTrophies: f.dungeonTrophies,
       // Iglesia del nivel 3 de industria (ver rules/industry.js): el
       // cliente pinta el edificio junto a la capital en cuanto es true, con
-      // el mismo anillo anti-solape que estatua/museo. El +50 al limite de
+      // el mismo anillo anti-solape que estatua/museo. El +25 al limite de
       // tropas ya esta aplicado del lado del servidor (ver
       // effectiveTroopLimit() en rules/shared.js), esto es solo la señal
       // visual.
@@ -1116,6 +1141,10 @@ function getPublicState() {
       };
     }),
     summaryBlocks: match.phase === PHASE_SUMMARY ? match.summaryBlocks : [],
+    // Feed de últimas acciones de la ronda en curso (ver castAction()):
+    // solo las últimas 8 y solo durante la Fase de Acción — es el bocadillo
+    // de "qué está pasando" de abajo-derecha, no un histórico.
+    actionFeed: match.phase === PHASE_ACTION ? match.actionFeed.slice(-8) : [],
     // Fase de Resolución (ver buildResolutionEvents() más arriba): la lista
     // ordenada de combates/PvE/conquistas de la ronda, con cámara y
     // duración ya decididas por el servidor — solo se expone mientras dura
@@ -1206,16 +1235,6 @@ function getMapLayout() {
  */
 function findInFactionList(factions, number) {
   return factions.find((f) => f.number === number);
-}
-
-/** Jugador por nombre exacto (sin mayúsculas), o `null` si no existe — usado por !apoyar. */
-function findPlayerByUsername(match, name) {
-  if (!name) return null;
-  const needle = name.trim().toLowerCase();
-  for (const player of match.players.values()) {
-    if (player.username.toLowerCase() === needle) return player;
-  }
-  return null;
 }
 
 function assertPhase(expectedPhase) {

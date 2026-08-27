@@ -904,3 +904,44 @@ Petición del usuario, respondida primero como pregunta de diseño antes de prog
   - `!apoyar` → campo de texto con el nombre del jugador a apoyar.
 - **Unirse a facción** (`!faccionN`, nueva fila `#joinFactionBar`): no estaba en la barra de comandos (esa es solo de Fase de Acción) — fila propia, solo visible durante la Fase de Reclutamiento, un botón por facción, apilada encima de la barra de comandos y del `.mapToolbar` de zoom (z-index más alto que el panel lateral de Facciones, que si no se lo tapaba cuando estaba auto-abierto — ver `handleFactionsPanelAutoOpen()`, sección 33).
 - Verificado con Playwright contra el motor real, sin ningún atajo: crear partida por el flujo real de admin, un jugador se une a Halcones pulsando el botón de la web (`engine.getPublicState()` confirma que el jugador quedó unido de verdad), otro se une a Lobos simulando Twitch (`engine.joinFaction()` directo), y desde la web ese mismo jugador manda `!industria` y `!ataque 2` (con el selector de facción mostrando correctamente solo Lobos, su única opción válida al excluir su propia facción) — las tres acciones aparecen en `chatLog` como `ok:true`, confirmando que Twitch y web conviven en la MISMA partida sin chocar. `npm test` verde.
+
+## 38. Alianzas por pacto mutuo, !apoyar por facción, feed en vivo y cinemática mejorada (v0.4.6)
+
+Lote pedido junto con dos ajustes de balance y la tanda de simulaciones de late game.
+
+**Balance (rules/shared.js):**
+- Iglesia: `CHURCH_TROOP_LIMIT_BONUS` baja de **+50 a +25** al límite de tropas.
+- Viviendas: `HOUSE_TROOP_LIMIT_BONUS` sube de **+5 a +10** por casa (tope `MAX_HOUSES_PER_FACTION=10` intacto, o sea hasta +100 por facción). Textos de ayuda/`mapRenderer` ("+25 tropas" sobre la iglesia) actualizados a juego.
+
+**Alianzas por pacto MUTUO (rules/alliances.js reescrito):**
+- Ya no existe la alianza unilateral de una ronda. Ahora una alianza SOLO se forma si las DOS facciones se votan `!alianza` mutuamente en la MISMA Fase de Acción, cada una superando el `% alianza` de siempre dentro de su facción.
+- Dura `allianceDurationRounds` rondas (campo nuevo del panel de admin, 1-99, por defecto 5). Estado en `match.activeAlliances` (Map `"A-B"` → última ronda activa); se expira sola.
+- Mientras dura: (1) los `!ataque` entre aliadas se ANULAN (votante pierde el turno, igual que antes); (2) **defienden como una sola facción**: en `resolveCombat()` los `!defender` de la aliada se suman a los defensores del combate (ver `alliedFactionsOf()`), sin dejar de contar en el suyo propio si también la atacan esa ronda.
+- Oferta unilateral que supera el umbral pero no es correspondida: no pasa nada (los votantes no pierden el turno — actuaron de buena fe). Voto de alianza que NI llega al umbral de su facción: anula el turno de esos votantes, como siempre.
+- Anuncio: bloque `newAlliances` en el resumen de ronda + popup centrado (mismo cartel del clima) "🤝 ¡Alianza! X e Y son aliadas: no podrán atacarse durante N rondas y defienden como una sola facción". `state.activeAlliances` expone `[{factionA, factionB, roundsLeft}]`.
+- Re-votarse estando ya aliadas NO reinicia el contador.
+
+**`!apoyar <facción>` (antes `<usuario>`):**
+- El objetivo pasa a ser un número de facción, como `!ataque`/`!alianza` (`APOYAR_RE` en commands.js). Mismo efecto de siempre: tus tropas defienden ese turno en los combates de ESA facción (te metes en su bucket de `!defender` vía `tallyActions()`). Se eliminó `findPlayerByUsername()` (ya sin usos). El selector del botón web pasa de campo de texto a lista de facciones.
+
+**Feed de últimas acciones (bocadillo abajo-derecha):**
+- Servidor: `match.actionFeed` — cada comando ACEPTADO en `castAction()` deja `{username, factionNumber, type, targetFactionNumber}` (tope 40/ronda), se vacía al abrir cada ronda, y `getPublicState()` expone las últimas 8 SOLO durante la Fase de Acción.
+- Cliente: `#actionFeed`, pergamino con pico de bocadillo apoyado en la maderita inferior derecha, una línea por acción con el puntito del color de la facción ("Pani ⚔️ ataca a Lobos"). Se oculta fuera de la Fase de Acción.
+
+**Cinemática de la Fase de Resolución:**
+- **Polvareda al doble** (`spriteSizes.js` dust-1/dust-2: 46 → 92) y SIEMPRE por delante de todo: nuevo canvas `#mapEffects` por encima de `#mapMarkers` (el orden DOM hacía que edificios/chapas taparan la polvareda al pintarse en `#mapObjects`). `drawResolutionEffects()` pinta ahí (con fallback al canvas de objetos si la página no lo tiene, p.ej. el admin), y se dibuja el ÚLTIMO, después incluso de las nubes.
+- **La cámara SIGUE al carromato** en conquistas/expansiones (`followResolutionEffect()` en mapRenderer.js: rAF que recalcula la posición interpolada del efecto y recentra la vista cada frame, quedándose en el destino al acabar).
+- **PvE en su sitio real** (`!boss`/`!dungeon`/`!conquista`): el evento lleva ahora `originTileId` (casilla vecina propia, `pickOriginNeighborTileId()`) y el cliente reproduce una MARCHA del ejército (efecto `army`: 3 soldados en cuña con balanceo) desde ahí hasta el objetivo — cámara siguiéndolos — y al llegar estalla la polvareda en ese punto exacto. Sin vecino propio (casilla aislada): polvareda directa, como antes.
+
+Verificado (testAlliances.js/testAlliances2.js contra el motor real + verifyBatch46b.js con Playwright y el flujo real de admin): pacto mutuo se forma con su bloque de resumen y su popup; oferta unilateral no hace nada; ataque a la aliada anulado (cero combates esa ronda); defensa conjunta real (facción atacada sin defensores propios aguanta con defensa >0 gracias al `!defender` de su aliada); expiración al agotar las rondas; `!apoyar 3` aceptado, `!apoyar` a tu propia facción rechazado y `!apoyar <nombre>` ya ni parsea; feed con las 3 acciones y oculto fuera de fase; polvareda con miles de píxeles pintados en `#mapEffects`; transform del mapa cambiando entre frames mientras marcha el carromato y el ejército; polvareda en el destino tras la marcha. `npm test` verde. Nota para futuros tests: `forceAdvancePhase()` durante la Fase de Resolución solo acorta el timer (~900ms/evento) y CADA llamada lo re-arma — machacarlo en un bucle de sondeo la eterniza; pedir el salto UNA vez y esperar.
+
+### Simulaciones de late game (v0.4.6, informe)
+
+10 partidas completas simuladas contra el motor real (sin navegador), 45 rondas máx, con 24-32 jugadores repartidos en estrategias fijas (agresivo/tortuga/industrial/constructor/incursor/diplomático/expansor): 4x8 total, 4x8 neutral, 8x3, 2x12 y 4x6 con clima y diplomáticos. Hallazgos:
+
+1. **El early game funciona**: en las partidas con agresores, 11-14 de las primeras 14 rondas tienen cambios de territorio, hay eliminaciones entre las rondas 5-16, y 3 de 10 partidas terminan con ganador (rondas 8-22) por bola de nieve legítima (cuota de territorio del líder 0.25 → 0.96).
+2. **El late game se BLOQUEA**: en 6 de 10 partidas, CERO cambios de territorio en las últimas 15 rondas. Causa aritmética: conquistar exige dejar a los defensores SIN NINGUNA tropa, el daño por combate es ~(ataque−defensa) = unas pocas tropas por ronda, pero la producción (barracas/campos/caballerizas +1/ronda cada uno, museos, castillo especial) añade más de lo que el combate quita, y el límite efectivo por jugador llega a 50+25 (iglesia) +100 (casas) = 175. Con 80-128 tropas/jugador al final, ninguna defensa es rompible jamás → tablas permanentes.
+3. **Las alianzas mutuas al 50% NO salen solas**: 0 alianzas formadas en las 10 partidas, incluida la config con 2 diplomáticos por facción de 6 (2/6=33% < 50%). El pacto exige coordinar a la MITAD de las dos facciones en la MISMA ronda — con el umbral por defecto es casi imposible sin coordinación de chat de verdad. El admin ya puede bajar el `% alianza` (25-33% lo haría viable); queda como recomendación de configuración, no se cambió el defecto.
+4. **El duelo 2 facciones es una moneda al aire**: o el rush de la ronda 1-3 conquista antes de que existan tropas (victoria en 8 rondas) o la defensa aguanta la primera y ya nunca jamás cae (0 cambios en 45 rondas).
+
+Propuestas de ajuste (PENDIENTES de decidir con las reglas de combate, no implementadas): (a) que el daño escale con el margen de victoria (p.ej. daño = margen × factor creciente con la ronda) para que la producción no supere siempre al desgaste; (b) o un desgaste de asedio: atacar la misma facción varias rondas seguidas acumula un multiplicador; (c) o tope de producción por ronda cuando la facción está "en guerra"; (d) revisar el umbral de alianza por defecto (50% → 33%).
