@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Generador de muebles/props en vóxeles</title>
+<style>
+  :root{
+    --paper:#EFE9DD;
+    --ink:#2B2825;
+    --wood:#B96A2C;
+    --wood-dark:#8A4E20;
+    --blue:#3A5A78;
+    --line:#D9D0BC;
+    --panel:#F7F3E9;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);
+    font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;}
+  #app{max-width:920px;margin:0 auto;padding:28px 20px 40px;}
+  header{display:flex;align-items:baseline;justify-content:space-between;
+    border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:18px;}
+  h1{font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:700;
+    margin:0;letter-spacing:.2px;}
+  .tag{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--wood-dark);}
+  .row{display:flex;gap:10px;margin-bottom:10px;}
+  .key-row{display:flex;gap:10px;margin-bottom:14px;align-items:center;}
+  input[type=text], input[type=password]{flex:1;padding:10px 12px;border:1.5px solid var(--ink);
+    background:var(--panel);color:var(--ink);font-family:inherit;font-size:14px;border-radius:2px;}
+  input[type=text]:focus, input[type=password]:focus{outline:2px solid var(--wood);outline-offset:1px;}
+  button{border:1.5px solid var(--ink);background:var(--ink);color:var(--paper);
+    padding:10px 16px;font-family:inherit;font-size:13px;cursor:pointer;border-radius:2px;
+    text-transform:uppercase;letter-spacing:.5px;}
+  button:hover{background:var(--wood-dark);border-color:var(--wood-dark);}
+  button:disabled{opacity:.4;cursor:default;}
+  button.ghost{background:transparent;color:var(--ink);}
+  button.ghost:hover{background:var(--line);}
+  button.ghost.active{background:var(--wood);color:#fff;border-color:var(--wood-dark);}
+  #status{font-size:12px;color:var(--blue);min-height:16px;margin-bottom:10px;}
+  #status.err{color:#a3372d;}
+  #stage-wrap{border:1.5px solid var(--ink);background:#E4DDCB;position:relative;
+    border-radius:2px;overflow:hidden;}
+  #stage{width:100%;height:460px;display:block;cursor:grab;}
+  #stage:active{cursor:grabbing;}
+  #hud{position:absolute;top:10px;left:12px;font-size:11px;color:var(--ink);
+    background:rgba(247,243,233,.85);padding:4px 8px;border:1px solid var(--line);
+    text-transform:uppercase;letter-spacing:1px;}
+  #controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center;}
+  #exportRow{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center;}
+  #presets{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
+  #presets button{padding:6px 10px;font-size:11px;}
+  .divider{width:1px;height:22px;background:var(--line);margin:0 4px;}
+  footer{margin-top:16px;font-size:11px;color:#8A8577;line-height:1.6;}
+  .spin{display:inline-block;width:10px;height:10px;border:2px solid var(--blue);
+    border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;
+    margin-right:6px;vertical-align:-1px;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Taller de vóxeles</h1>
+    <span class="tag">IA Groq (gratis) · Modelo 3D descargable</span>
+  </header>
+
+  <div class="key-row">
+    <input type="password" id="apiKey" placeholder="Pega aquí tu API Key gratuita de Groq (gsk_...)" style="font-size:12px;">
+  </div>
+
+  <div id="presets"></div>
+
+  <div class="row">
+    <input type="text" id="desc" value="silla de madera" placeholder="ej. silla de madera, mesa de centro, estantería, torre de vigía">
+    <button id="genBtn">Generar</button>
+  </div>
+  <div id="status"></div>
+
+  <div id="stage-wrap">
+    <canvas id="stage"></canvas>
+    <div id="hud">arrastra para girar · rueda para zoom</div>
+  </div>
+
+  <div id="controls">
+    <button class="ghost" data-view="front">Frontal</button>
+    <button class="ghost" data-view="side">Lateral</button>
+    <button class="ghost" data-view="back">Trasera</button>
+    <button class="ghost" data-view="top">Superior</button>
+    <div class="divider"></div>
+    <button class="ghost" id="autoBtn">Auto-girar</button>
+  </div>
+
+  <div id="exportRow">
+    <button class="ghost" id="glbBtn" disabled>Descargar .glb</button>
+    <button class="ghost" id="jsonBtn" disabled>Descargar JSON del modelo</button>
+  </div>
+
+  <footer>
+    Modelado impulsado gratis por la API de Groq. Obtén tu clave gratuita en
+    <a href="https://console.groq.com" target="_blank" style="color:var(--wood-dark);">console.groq.com</a>
+    (se guarda solo en tu navegador, nunca se sube a ningún repositorio).
+    Este archivo es standalone: ábrelo tal cual con doble clic en cualquier
+    navegador, sin servidor ni instalación, y funciona igual descargado que
+    en local. El <code>.glb</code> que descargues es un modelo 3D real
+    (glTF binario) que puedes cargar con Three.js/Babylon/Unity/Blender, etc.
+    donde tengas montado el visor 3D del juego.
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/exporters/GLTFExporter.js"></script>
+<script>
+(function(){
+  const canvas = document.getElementById('stage');
+  const statusEl = document.getElementById('status');
+  const genBtn = document.getElementById('genBtn');
+  const descInput = document.getElementById('desc');
+  const apiKeyInput = document.getElementById('apiKey');
+  const autoBtn = document.getElementById('autoBtn');
+  const glbBtn = document.getElementById('glbBtn');
+  const jsonBtn = document.getElementById('jsonBtn');
+  const presetsEl = document.getElementById('presets');
+
+  const PRESETS = [
+    'silla de madera', 'mesa de centro', 'estantería de madera', 'banco de madera',
+    'barril de madera', 'cofre del tesoro', 'armario ropero', 'cama con dosel',
+    'sofá de dos plazas', 'lámpara de pie', 'mesa de comedor con sillas',
+    'estufa de leña', 'baúl de mimbre', 'espejo de pie con marco'
+  ];
+  PRESETS.forEach(p=>{
+    const b = document.createElement('button');
+    b.className = 'ghost'; b.textContent = p; b.type = 'button';
+    b.addEventListener('click', ()=>{ descInput.value = p; generate(); });
+    presetsEl.appendChild(b);
+  });
+
+  // Recuperar API key del almacenamiento local si ya se guardó antes
+  const savedKey = localStorage.getItem('groq_api_key');
+  if(savedKey) apiKeyInput.value = savedKey;
+
+  apiKeyInput.addEventListener('change', ()=>{
+    localStorage.setItem('groq_api_key', apiKeyInput.value.trim());
+  });
+
+  const MAX_EXPANDED_VOXELS = 12000;
+
+  let renderer, scene, camera, group;
+  let radius = 9, theta = Math.PI*0.28, phi = Math.PI*0.36;
+  let autoRotate = false;
+  let dragging = false, lastX=0, lastY=0;
+  let lastModel = null;
+
+  function initScene(){
+    renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+
+    const amb = new THREE.AmbientLight(0xffffff, 0.65);
+    scene.add(amb);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    dir.position.set(5,8,6);
+    scene.add(dir);
+    const dir2 = new THREE.DirectionalLight(0xffffff, 0.35);
+    dir2.position.set(-6,3,-4);
+    scene.add(dir2);
+
+    group = new THREE.Group();
+    scene.add(group);
+
+    resize();
+    window.addEventListener('resize', resize);
+    animate();
+  }
+
+  function resize(){
+    const w = canvas.clientWidth || canvas.parentElement.clientWidth;
+    const h = 460;
+    renderer.setSize(w, h, false);
+    camera.aspect = w/h;
+    camera.updateProjectionMatrix();
+  }
+
+  function updateCamera(){
+    camera.position.x = radius * Math.sin(phi) * Math.cos(theta);
+    camera.position.z = radius * Math.sin(phi) * Math.sin(theta);
+    camera.position.y = radius * Math.cos(phi);
+    camera.lookAt(0,0,0);
+  }
+
+  function animate(){
+    requestAnimationFrame(animate);
+    if(autoRotate){ theta += 0.006; }
+    updateCamera();
+    renderer.render(scene, camera);
+  }
+
+  canvas.addEventListener('pointerdown', e=>{dragging=true; lastX=e.clientX; lastY=e.clientY; autoRotate=false; setAutoLabel();});
+  window.addEventListener('pointerup', ()=>dragging=false);
+  window.addEventListener('pointermove', e=>{
+    if(!dragging) return;
+    const dx = e.clientX-lastX, dy = e.clientY-lastY;
+    lastX=e.clientX; lastY=e.clientY;
+    theta -= dx*0.006;
+    phi = Math.min(Math.PI-0.05, Math.max(0.05, phi - dy*0.006));
+  });
+  canvas.addEventListener('wheel', e=>{
+    e.preventDefault();
+    radius = Math.min(24, Math.max(3, radius + e.deltaY*0.01));
+  }, {passive:false});
+
+  document.querySelectorAll('[data-view]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      autoRotate=false; setAutoLabel();
+      const v = btn.dataset.view;
+      if(v==='front'){ theta = Math.PI*0.5; phi = Math.PI*0.42; }
+      if(v==='side'){ theta = 0; phi = Math.PI*0.42; }
+      if(v==='back'){ theta = -Math.PI*0.5; phi = Math.PI*0.42; }
+      if(v==='top'){ theta = Math.PI*0.5; phi = 0.15; }
+    });
+  });
+
+  autoBtn.addEventListener('click', ()=>{ autoRotate = !autoRotate; setAutoLabel(); });
+  function setAutoLabel(){ autoBtn.classList.toggle('active', autoRotate); }
+
+  function clearGroup(){
+    while(group.children.length){
+      const c = group.children.pop();
+      c.geometry && c.geometry.dispose();
+      if(c.material){ Array.isArray(c.material) ? c.material.forEach(m=>m.dispose()) : c.material.dispose(); }
+    }
+  }
+
+  function expandCajas(cajas, cap){
+    const byColor = new Map();
+    let total = 0, truncated = false;
+    outer:
+    for(const [x0,y0,z0,x1,y1,z1,hex] of cajas){
+      for(let x=x0; x<=x1; x++){
+        for(let y=y0; y<=y1; y++){
+          for(let z=z0; z<=z1; z++){
+            if(total>=cap){ truncated = true; break outer; }
+            if(!byColor.has(hex)) byColor.set(hex, []);
+            byColor.get(hex).push([x,y,z]);
+            total++;
+          }
+        }
+      }
+    }
+    return {byColor, total, truncated};
+  }
+
+  function buildVoxelModel(byColor, grid){
+    clearGroup();
+    const maxDim = Math.max(grid[0], grid[1], grid[2]);
+    const unit = 6/maxDim;
+    const cubeGeo = new THREE.BoxGeometry(unit*0.92, unit*0.92, unit*0.92);
+    const offX = (grid[0]-1)/2, offZ = (grid[2]-1)/2;
+    const dummy = new THREE.Object3D();
+
+    byColor.forEach((positions, hex)=>{
+      const mat = new THREE.MeshStandardMaterial({color: hex, roughness:0.78, metalness:0.05});
+      const mesh = new THREE.InstancedMesh(cubeGeo, mat, positions.length);
+      positions.forEach((p,i)=>{
+        dummy.position.set((p[0]-offX)*unit, p[1]*unit + unit*0.5, (p[2]-offZ)*unit);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      group.add(mesh);
+    });
+
+    const gridHelper = new THREE.GridHelper(8, 8, 0xC9BFA6, 0xDCD3BE);
+    group.add(gridHelper);
+  }
+
+  function setStatus(msg, isErr){
+    statusEl.innerHTML = msg;
+    statusEl.className = isErr ? 'err' : '';
+  }
+
+  function extractJSON(text){
+    let t = text.trim();
+    t = t.replace(/^```json\s*/i,'').replace(/^```\s*/,'').replace(/```\s*$/,'');
+    const start = t.indexOf('{');
+    if(start===-1) throw new Error('sin JSON');
+    t = t.slice(start);
+
+    const end = t.lastIndexOf('}');
+    if(end!==-1){
+      try{ return {model: JSON.parse(t.slice(0,end+1)), partial:false}; }catch(e){}
+    }
+    const lastBracket = t.lastIndexOf(']');
+    if(lastBracket===-1) throw new Error('sin JSON');
+    let repaired = t.slice(0, lastBracket+1);
+    let openBrace=0, openBracket=0;
+    for(const ch of repaired){
+      if(ch==='{') openBrace++;
+      else if(ch==='}') openBrace--;
+      else if(ch==='[') openBracket++;
+      else if(ch===']') openBracket--;
+    }
+    repaired += ']'.repeat(Math.max(0,openBracket)) + '}'.repeat(Math.max(0,openBrace));
+    try{ return {model: JSON.parse(repaired), partial:true}; }
+    catch(e){ throw new Error('sin JSON'); }
+  }
+
+  function resolveCajas(model){
+    const paleta = model.paleta || [];
+    let cajas = model.cajas;
+    if(!cajas && model.voxeles){
+      cajas = model.voxeles.map(v=>[v[0],v[1],v[2],v[0],v[1],v[2],v[3]]);
+    }
+    if(!cajas || !cajas.length) return null;
+    return cajas.map(c=>{
+      let [x0,y0,z0,x1,y1,z1,p] = c;
+      if(x1<x0){ const t=x0; x0=x1; x1=t; }
+      if(y1<y0){ const t=y0; y0=y1; y1=t; }
+      if(z1<z0){ const t=z0; z0=z1; z1=t; }
+      let hex;
+      if(typeof p==='number' && paleta[p]) hex = paleta[p];
+      else if(typeof p==='string') hex = p;
+      else hex = '#B08D57';
+      return [x0,y0,z0,x1,y1,z1,hex];
+    });
+  }
+
+  async function generate(){
+    const desc = descInput.value.trim();
+    const apiKey = apiKeyInput.value.trim();
+    if(!desc){ setStatus('Escribe qué mueble quieres.', true); return; }
+    if(!apiKey){ setStatus('Por favor, introduce tu API Key gratuita de Groq arriba.', true); return; }
+
+    localStorage.setItem('groq_api_key', apiKey);
+
+    genBtn.disabled = true;
+    glbBtn.disabled = true;
+    jsonBtn.disabled = true;
+    setStatus('<span class="spin"></span>La IA en la nube (Groq) está generando "'+desc+'"…');
+
+    const systemPrompt = 'Eres un generador de modelos 3D de muebles, optimizado para maxima resolucion visual con una respuesta muy compacta. '+
+      'Responde UNICAMENTE con JSON compacto (sin espacios innecesarios, sin markdown, sin explicaciones): '+
+      '{"nombre":"...","grid":[gx,gy,gz],"paleta":["#RRGGBB",...],"cajas":[[x0,y0,z0,x1,y1,z1,p],...]}. '+
+      '"grid" es la resolucion total (hasta 22x22x30; x=ancho,y=altura,z=profundidad). '+
+      '"paleta" es una lista de hasta 12 colores hex. '+
+      'Cada "caja" es un bloque rectangular SOLIDO de voxeles: x0,y0,z0,x1,y1,z1 (coordenadas) y p (indice en paleta). '+
+      'Describe el mueble como piezas reales de carpinteria: cada pata es una caja, el asiento otra, el respaldo otra, cada liston/cajon/reposabrazos otra, etc. '+
+      'Maximo 70 cajas. No añadas texto explicativo.';
+
+    // Modelo Groq vigente con buen soporte de JSON mode. Si Groq retira este
+    // modelo en el futuro, cambia solo este string por el que indique
+    // console.groq.com/docs/models.
+    const GROQ_MODEL = 'llama-3.3-70b-versatile';
+
+    try{
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [
+            {role: 'system', content: systemPrompt},
+            {role: 'user', content: 'Genera el modelo de maxima resolucion (usando bloques rectangulares) para: ' + desc}
+          ],
+          temperature: 0.2,
+          response_format: { type: "json_object" }
+        })
+      });
+
+      if(!response.ok){
+        const errData = await response.json().catch(()=>({}));
+        throw new Error((errData.error && errData.error.message) || ('Error de API '+response.status));
+      }
+
+      const data = await response.json();
+      const rawContent = data.choices[0].message.content;
+      const {model, partial} = extractJSON(rawContent);
+
+      if(!model.grid) throw new Error('JSON incompleto');
+      const cajas = resolveCajas(model);
+      if(!cajas) throw new Error('JSON incompleto');
+
+      const {byColor, total, truncated} = expandCajas(cajas, MAX_EXPANDED_VOXELS);
+      buildVoxelModel(byColor, model.grid);
+
+      lastModel = { nombre: model.nombre || desc, grid: model.grid, cajas };
+      glbBtn.disabled = false;
+      jsonBtn.disabled = false;
+
+      let nota = truncated ? ' (recortado al límite de renderizado)' : '';
+      setStatus((model.nombre||desc)+' — '+total.toLocaleString('es')+' vóxeles renderizados a partir de '+cajas.length+' bloques'+nota, false);
+    }catch(err){
+      console.error(err);
+      setStatus('Error: '+err.message, true);
+    }finally{
+      genBtn.disabled = false;
+    }
+  }
+
+  function slug(s){
+    return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+      .replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'mueble';
+  }
+
+  function downloadBlob(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  }
+
+  jsonBtn.addEventListener('click', ()=>{
+    if(!lastModel) return;
+    const blob = new Blob([JSON.stringify(lastModel, null, 2)], {type:'application/json'});
+    downloadBlob(blob, slug(lastModel.nombre)+'.json');
+  });
+
+  glbBtn.addEventListener('click', ()=>{
+    if(!lastModel) return;
+    if(typeof THREE.GLTFExporter === 'undefined'){
+      setStatus('El exportador .glb no cargó.', true);
+      return;
+    }
+    const exporter = new THREE.GLTFExporter();
+    exporter.parse(group, function(result){
+      const blob = new Blob([result], {type:'model/gltf-binary'});
+      downloadBlob(blob, slug(lastModel.nombre)+'.glb');
+    }, function(err){
+      console.error(err);
+      setStatus('Fallo al exportar el .glb.', true);
+    }, {binary:true});
+  });
+
+  genBtn.addEventListener('click', generate);
+  descInput.addEventListener('keydown', e=>{ if(e.key==='Enter') generate(); });
+
+  initScene();
+})();
+</script>
+</body>
+</html>
