@@ -198,7 +198,7 @@
   // medio camino para que se note el tinte de facción sin tapar el terreno.
   const ALPHA_BY_KIND = { [KIND_OCEAN]: 0, [KIND_COAST]: 90, [KIND_BORDER]: 235, [KIND_LAND]: 130 };
 
-  function createMapController({ viewportEl, canvasEl, markersEl, terrainBgEl, objectsEl, showLabels = true }) {
+  function createMapController({ viewportEl, canvasEl, markersEl, terrainBgEl, objectsEl, effectsEl, showLabels = true }) {
     let layout = null; // { cols, rows, cellTileIds, centroids }
     let offscreen = null; // canvas pequeño (1px por celda de raster) para pintar rapido con ImageData
     let cellRenderKind = null; // Uint8Array, una entrada por celda de raster — ver computeCellRenderKind()
@@ -216,7 +216,7 @@
     let overlayRepaintPending = false; // ver scheduleOverlayRepaint()
 
     // --- capa de objetos (arboles/rocas/etc.), ver createObjectLayer() mas abajo ---
-    const objectLayer = objectsEl ? createObjectLayer(objectsEl, viewportEl) : null;
+    const objectLayer = objectsEl ? createObjectLayer(objectsEl, viewportEl, effectsEl) : null;
 
     function setLayout(newLayout) {
       // El servidor manda `cellTileIds` empaquetado (`cellTileIdsPacked`) en
@@ -468,7 +468,7 @@
       // animan a 60fps, y `markersEl` es del tamaño del mundo entero —
       // limpiarlo y repintarlo en cada frame seria carisimo. Aqui solo se le
       // pasa a esa capa el estado nuevo para que recalcule a donde va cada uno.
-      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX, structures, bosses });
+      if (objectLayer) objectLayer.setWalkerWorld({ tiles, factions, players, layout, blockPx: BLOCK_PX, structures, wonders, bosses });
 
       if (!markersEl) return;
       const ctx = markersEl.getContext('2d');
@@ -700,8 +700,14 @@
           }
         }
 
+        // Sin conquistar: el nombre lleva SU guarnición (⚔ ataque, 🛡
+        // defensa) en vez del bono — todavía no es de nadie, hay que
+        // ganarle el combate con !maravilla (ver rules/wonders.js sección
+        // 39). Conquistada: vuelve al bono de siempre.
         const bonusIcon = w.bonusType === 'industry' ? '⚒️' : '🛡️';
-        const label = `${w.icon || ''} ${w.name}  +${w.bonusAmount} ${bonusIcon}`;
+        const label = w.defeated
+          ? `${w.icon || ''} ${w.name}  +${w.bonusAmount} ${bonusIcon}`
+          : `${w.icon || ''} ${w.name}  ⚔${w.attackPower} 🛡${w.defensePower}`;
         const owner = w.ownerFactionNumber != null ? (factions || []).find((f) => f.number === w.ownerFactionNumber) : null;
 
         ctx.font = '13px system-ui, sans-serif';
@@ -891,6 +897,32 @@
       return true;
     }
 
+    /**
+     * Fase de Resolución: la cámara SIGUE a un efecto en movimiento
+     * (carromato de conquista, ejército yendo a un boss/dungeon/conquista)
+     * durante toda su animación, recalculando su posición con la misma
+     * interpolación lineal que usa drawResolutionEffects() — así se ve
+     * avanzar en el centro de la pantalla en vez de un salto seco de cámara.
+     * Al terminar el recorrido la cámara se queda en el destino (donde
+     * después estalla la polvareda del combate). `entry` es lo que devuelve
+     * playResolutionEffect(); un arrastre manual no lo corta (dura pocos
+     * segundos), pero clearResolutionEffects() sí.
+     */
+    let followEffectRAF = null;
+    function followResolutionEffect(entry, scale) {
+      if (!entry) return;
+      const useScale = scale || FOCUS_SCALE;
+      if (followEffectRAF) cancelAnimationFrame(followEffectRAF);
+      const step = () => {
+        const t = Math.min(1, (performance.now() - entry.startedAt) / entry.durationMs);
+        const wx = entry.fromX + (entry.toX - entry.fromX) * t;
+        const wy = entry.fromY + (entry.toY - entry.fromY) * t;
+        setView(useScale, viewportEl.clientWidth / 2 - wx * useScale, viewportEl.clientHeight / 2 - wy * useScale);
+        followEffectRAF = t < 1 ? requestAnimationFrame(step) : null;
+      };
+      followEffectRAF = requestAnimationFrame(step);
+    }
+
     /** Posición (px de mundo) del centro de una casilla, o `null` — usado por la Fase de Resolución para el carromato/polvareda. */
     function tileWorldCenter(tileId) {
       if (!layout || tileId == null) return null;
@@ -1060,9 +1092,13 @@
       focusOnPlayer,
       focusOnTile,
       tileWorldCenter,
-      /** Fase de Resolución (ver public/index.html playResolutionQueue()): añade/quita un efecto visual (polvareda de combate o carromato de conquista) — ver createObjectLayer() más abajo. */
+      /** Fase de Resolución (ver public/index.html playResolutionQueue()): añade/quita un efecto visual (polvareda de combate, carromato de conquista, o ejército en marcha) — ver createObjectLayer() más abajo. */
       playResolutionEffect: (effect) => (objectLayer ? objectLayer.addResolutionEffect(effect) : null),
-      clearResolutionEffects: () => { if (objectLayer) objectLayer.clearResolutionEffects(); },
+      clearResolutionEffects: () => {
+        if (followEffectRAF) { cancelAnimationFrame(followEffectRAF); followEffectRAF = null; }
+        if (objectLayer) objectLayer.clearResolutionEffects();
+      },
+      followResolutionEffect,
       /**
        * Popup de resumen de facción al pasar el ratón (ver docs/ACCIONES.md
        * sección 35): dado un punto en coordenadas de pantalla RELATIVAS a
@@ -1073,8 +1109,6 @@
        * en cada `mousemove` sobre el mapa.
        */
       hitTestFactionAt: (x, y) => (objectLayer ? objectLayer.hitTestFactionAt(x, y) : null),
-      /** Ciclo día/noche (ver docs/ACCIONES.md sección 36): activa/desactiva el resplandor nocturno de capital/iglesia/casas/castillo especial/estatuas/museos. El velo oscuro en sí lo pinta public/index.html con un `<div>` encima, esto es solo la luz DETRÁS de los edificios. */
-      setNightMode: (active) => { if (objectLayer) objectLayer.setNightMode(active); },
       /**
        * Posicion actual de cada marcador de jugador, en pixeles de mundo:
        * Map<userId, {x, y, color, username}>. La usa `focusOnPlayer()` por
@@ -1341,9 +1375,16 @@
   const dust1Img = loadSprite('dust-1');
   const dust2Img = loadSprite('dust-2');
   const wagonImg = loadSprite('wagon');
-  const DUST_SPRITE_WORLD_W = spriteSize('dust-1', 46);
+  const DUST_SPRITE_WORLD_W = spriteSize('dust-1', 92);
   const WAGON_SPRITE_WORLD_W = spriteSize('wagon', 56);
   const DUST_FRAME_MS = 220; // cuanto dura cada sprite antes de alternar al otro
+  // Ejército en marcha hacia un combate PvE (!boss/!dungeon/!conquista, ver
+  // playNextResolutionEvent() en public/index.html): una banda de soldados
+  // avanzando desde territorio propio hasta el sitio exacto del combate,
+  // antes de que estalle allí la polvareda — así se VE que la pelea es en
+  // ese punto del mapa, no un fogonazo sin contexto.
+  const armySoldierImg = loadSprite('soldier-right');
+  const ARMY_SPRITE_WORLD_W = spriteSize('soldier-right', 22);
   const CASA_SPRITE_WORLD_W = spriteSize('casa', 40);
   const CASA_RING_RADIUS = IGLESIA_RING_RADIUS + 40;
   // Castillo especial del nivel 4 de industria (ver rules/industry.js): UNA
@@ -1454,7 +1495,7 @@
     return ((h >>> 0) % 100000) / 100000;
   }
 
-  function createObjectLayer(objectsEl, viewportEl) {
+  function createObjectLayer(objectsEl, viewportEl, effectsEl) {
     let objs = null; // { count, type: Uint8Array, x: Uint16Array, y: Uint16Array, r: Uint8Array }
     let grid = null; // Map<bucketKey, number[]> (indices en objs)
     let gridCols = 0, gridRows = 0;
@@ -1528,31 +1569,6 @@
       return best ? best.factionNumber : null;
     }
 
-    // Ciclo día/noche (ver docs/ACCIONES.md sección 36, controlado por
-    // public/index.html — reloj real del cliente, como las nubes, no viaja
-    // por el servidor): de noche, capital y sus edificios anexos (iglesia,
-    // casas, castillo especial, estatuas, museos) llevan un resplandor
-    // cálido detrás para que parezca que tienen luz propia y no se pierdan
-    // bajo el velo oscuro — la luz va DETRÁS, el sprite se dibuja encima tal
-    // cual siempre (ver setNightMode()/drawBuildingGlow() más abajo).
-    let nightMode = false;
-    function setNightMode(active) {
-      nightMode = active;
-    }
-    /** Resplandor cálido centrado en el sprite (bottom-anchored: cx,cyBottom,w,h son los mismos 4 valores que ya usa cada ctx.drawImage de un edificio). Se llama justo ANTES de dibujar el sprite, para que quede detrás. */
-    function drawBuildingGlow(cx, cyBottom, w, h) {
-      if (!nightMode) return;
-      const cy = cyBottom - h / 2;
-      const r = Math.max(w, h) * 0.85;
-      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-      grad.addColorStop(0, 'rgba(255,214,120,.5)');
-      grad.addColorStop(1, 'rgba(255,214,120,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
     // Nubes del cielo (decorativo, ver stepClouds()/drawClouds()): pocas a
     // la vez, en pantalla (no en coordenadas de mundo), cruzando solo la
     // franja del mapa.
@@ -1560,6 +1576,12 @@
     let nextCloudSpawnAt = 0;
 
     const ctx = objectsEl.getContext('2d');
+    // Canvas de efectos de la Fase de Resolución (polvareda/carromato) POR
+    // ENCIMA de todo lo demás del mapa, incluido el canvas de marcadores
+    // (#mapMarkers va después de #mapObjects en el DOM, así que sin esta
+    // capa aparte los edificios/chapas taparían la polvareda). Opcional: si
+    // la página no lo tiene (panel de admin), se pinta en `ctx` como antes.
+    const effectsCtx = effectsEl ? effectsEl.getContext('2d') : null;
 
     fetch('/terrain/objects.bin')
       .then((r) => {
@@ -1642,7 +1664,7 @@
      * recalcula el destino de cada uno segun el comando que tenga escrito.
      * Se llama en cada `state:*`, no en cada frame.
      */
-    function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures, bosses }) {
+    function setWalkerWorld({ tiles, factions, players, layout, blockPx, structures, wonders, bosses }) {
       if (!layout) return;
       // Vidas (ver rules/shared.js handleTroopWipeout(), panel de admin):
       // nadie tiene nunca más vidas que las que empezó con, así que el
@@ -1652,7 +1674,7 @@
       const maxLives = Math.max(1, ...(players || []).map((p) => p.lives || 0));
       walkerWorld = { tiles: tiles || [], factions: factions || [], layout, blockPx: blockPx || 1, maxLives };
       if (!cow) spawnCow();
-      syncSiteWalkers(structures || [], factions || []);
+      syncSiteWalkers(structures || [], factions || [], wonders || []);
       syncBossWalkers(bosses || []);
 
       const alive = new Set();
@@ -1782,8 +1804,16 @@
       resolutionEffects = [];
     }
 
-    /** Dibuja los efectos vivos de la Fase de Resolución y quita los que ya cumplieron su tiempo. */
+    /**
+     * Dibuja los efectos vivos de la Fase de Resolución y quita los que ya
+     * cumplieron su tiempo. Pintan en su PROPIO canvas (#mapEffects, ver
+     * `effectsCtx` arriba) por encima de TODOS los demás PNG del mapa —
+     * edificios, caminantes, nubes y chapas del canvas de marcadores
+     * incluidos: la polvareda/carromato es lo que hay que ver en esa fase.
+     */
     function drawResolutionEffects(w, h) {
+      const ectx = effectsCtx || ctx;
+      if (effectsCtx) effectsCtx.clearRect(0, 0, w, h);
       if (!resolutionEffects.length) return;
       const { x: vx, y: vy, scale } = currentView;
       const now = performance.now();
@@ -1799,7 +1829,25 @@
           const drawW = WAGON_SPRITE_WORLD_W * scale;
           const drawH = drawW * (wagonImg.naturalHeight / wagonImg.naturalWidth);
           const sx = wx * scale + vx, sy = wy * scale + vy;
-          ctx.drawImage(wagonImg, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+          ectx.drawImage(wagonImg, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+        } else if (e.type === 'army') {
+          // Banda de 3 soldados marchando en cuña hacia el combate PvE
+          // (!boss/!dungeon/!conquista) — mismo avance lineal que el
+          // carromato, con un pelin de balanceo vertical para que se lea
+          // como marcha y no como deslizamiento.
+          if (!armySoldierImg.complete || !armySoldierImg.naturalWidth) return;
+          const wx = e.fromX + (e.toX - e.fromX) * t;
+          const wy = e.fromY + (e.toY - e.fromY) * t;
+          const drawW = ARMY_SPRITE_WORLD_W * scale;
+          const drawH = drawW * (armySoldierImg.naturalHeight / armySoldierImg.naturalWidth);
+          const now2 = performance.now();
+          const offsets = [ { dx: 0, dy: 0 }, { dx: -0.9, dy: -0.55 }, { dx: -0.9, dy: 0.55 } ];
+          offsets.forEach((o, i) => {
+            const bob = Math.sin((now2 / 130) + i * 1.7) * 2;
+            const sx = (wx + o.dx * ARMY_SPRITE_WORLD_W) * scale + vx;
+            const sy = (wy + o.dy * ARMY_SPRITE_WORLD_W) * scale + vy + bob;
+            ectx.drawImage(armySoldierImg, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+          });
         } else {
           // 'dust': quieta sobre el punto de combate, alternando entre los
           // dos sprites cada DUST_FRAME_MS — el intercalado en sí ya da la
@@ -1809,7 +1857,7 @@
           const drawW = DUST_SPRITE_WORLD_W * scale;
           const drawH = drawW * (frame.naturalHeight / frame.naturalWidth);
           const sx = e.toX * scale + vx, sy = e.toY * scale + vy;
-          ctx.drawImage(frame, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
+          ectx.drawImage(frame, sx - drawW / 2, sy - drawH / 2, drawW, drawH);
         }
       });
     }
@@ -2070,8 +2118,24 @@
     // -----------------------------------------------------------------------
 
     /** Cuantos caminantes de que tipo le tocan a un sitio, sin listar posiciones todavia. */
-    function desiredSiteSpecs(structures, factions) {
+    function desiredSiteSpecs(structures, factions, wonders) {
       const sites = new Map(); // siteKey -> { home:{x,y}, factionColor, buildingKind, specs: [{spriteKey, n}] }
+
+      // Maravillas sin conquistar (ver rules/wonders.js sección 39): un par
+      // de guardias 'barbaro' paseando junto al placeholder, igual criterio
+      // que la guarnición de un castillo/aldea/puerto sin conquistar más
+      // abajo — "sus tropitas dando vueltas alrededor". Una vez conquistada
+      // no deja aldeanos ni nada (su premio es el bono permanente, no
+      // decoración extra).
+      (wonders || []).forEach((w) => {
+        if (w.defeated || w.x == null || w.y == null) return;
+        sites.set(`wonder:${w.tileId}:${w.key}`, {
+          home: { x: w.x * walkerWorld.blockPx, y: w.y * walkerWorld.blockPx },
+          factionColor: null,
+          buildingKind: null,
+          specs: [{ spriteKey: 'barbaro', n: 2 }],
+        });
+      });
 
       (structures || []).forEach((s) => {
         if (s.x == null || s.y == null) return; // partida vieja/estado incompleto: sin posicion no hay donde pintar
@@ -2240,8 +2304,8 @@
      * "teletransporte" a nadie: los soldados barbaros que sobran se borran y
      * los aldeanos nuevos aparecen cerca de la casa, sin más.
      */
-    function syncSiteWalkers(structures, factions) {
-      const desired = desiredSiteSpecs(structures, factions);
+    function syncSiteWalkers(structures, factions, wonders) {
+      const desired = desiredSiteSpecs(structures, factions, wonders);
 
       for (const key of [...siteWalkers.keys()]) {
         if (!desired.has(key)) siteWalkers.delete(key);
@@ -2347,7 +2411,6 @@
           const cw = CAPITAL_SPRITE_WORLD_W * scale;
           const chh = cw * (capitalSpriteImg.naturalHeight / capitalSpriteImg.naturalWidth);
           const ccx = home.x * scale + vx, ccy = home.y * scale + vy;
-          drawBuildingGlow(ccx, ccy, cw, chh);
           ctx.drawImage(capitalSpriteImg, ccx - cw / 2, ccy - chh, cw, chh);
           if (group.factionNumber != null) {
             hoverTargets.push({ factionNumber: group.factionNumber, x: ccx, y: ccy - chh / 2, radius: Math.max(cw, chh) / 2 });
@@ -2378,25 +2441,21 @@
         } else if (inView && group.buildingKind === 'estatua' && estatuaImg.complete && estatuaImg.naturalWidth) {
           const ew = ESTATUA_SPRITE_WORLD_W * scale;
           const eh = ew * (estatuaImg.naturalHeight / estatuaImg.naturalWidth);
-          drawBuildingGlow(home.x * scale + vx, home.y * scale + vy, ew, eh);
           ctx.drawImage(estatuaImg, home.x * scale + vx - ew / 2, home.y * scale + vy - eh, ew, eh);
         } else if (inView && group.buildingKind === 'castilloEspecial' && castilloEspecialImg.complete && castilloEspecialImg.naturalWidth) {
           const kw = CASTILLO_ESPECIAL_SPRITE_WORLD_W * scale;
           const kh = kw * (castilloEspecialImg.naturalHeight / castilloEspecialImg.naturalWidth);
-          drawBuildingGlow(home.x * scale + vx, home.y * scale + vy, kw, kh);
           drawTintedSprite(castilloEspecialImg, home.x * scale + vx - kw / 2, home.y * scale + vy - kh, kw, kh, group.factionColor, 0.65);
         } else if (inView && group.buildingKind === 'museo' && museoImg.complete && museoImg.naturalWidth) {
           const mw = MUSEO_SPRITE_WORLD_W * scale;
           const mh = mw * (museoImg.naturalHeight / museoImg.naturalWidth);
-          drawBuildingGlow(home.x * scale + vx, home.y * scale + vy, mw, mh);
           ctx.drawImage(museoImg, home.x * scale + vx - mw / 2, home.y * scale + vy - mh, mw, mh);
         } else if (inView && group.buildingKind === 'iglesia' && iglesiaImg.complete && iglesiaImg.naturalWidth) {
           const gw = IGLESIA_SPRITE_WORLD_W * scale;
           const gh = gw * (iglesiaImg.naturalHeight / iglesiaImg.naturalWidth);
           const gx = home.x * scale + vx, gy = home.y * scale + vy;
-          drawBuildingGlow(gx, gy, gw, gh);
           ctx.drawImage(iglesiaImg, gx - gw / 2, gy - gh, gw, gh);
-          // "+50 tropas": para que se sepa de un vistazo el beneficio que da,
+          // "+25 tropas": para que se sepa de un vistazo el beneficio que da,
           // igual estilo que el cartel de un boss (sombra oscura + relleno
           // claro, sin caja).
           ctx.font = '11px system-ui, sans-serif';
@@ -2404,13 +2463,12 @@
           ctx.textBaseline = 'bottom';
           ctx.lineWidth = 3;
           ctx.strokeStyle = 'rgba(6,18,26,.85)';
-          ctx.strokeText('+50 tropas', gx, gy - gh - 4);
+          ctx.strokeText('+25 tropas', gx, gy - gh - 4);
           ctx.fillStyle = '#8be08b';
-          ctx.fillText('+50 tropas', gx, gy - gh - 4);
+          ctx.fillText('+25 tropas', gx, gy - gh - 4);
         } else if (inView && group.buildingKind === 'casa' && casaImg.complete && casaImg.naturalWidth) {
           const hw = CASA_SPRITE_WORLD_W * scale;
           const hh = hw * (casaImg.naturalHeight / casaImg.naturalWidth);
-          drawBuildingGlow(home.x * scale + vx, home.y * scale + vy, hw, hh);
           ctx.drawImage(casaImg, home.x * scale + vx - hw / 2, home.y * scale + vy - hh, hw, hh);
         }
 
@@ -3146,6 +3204,13 @@
       objectsEl.style.width = w + 'px';
       objectsEl.style.height = h + 'px';
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (effectsEl) {
+        effectsEl.width = Math.round(w * dpr);
+        effectsEl.height = Math.round(h * dpr);
+        effectsEl.style.width = w + 'px';
+        effectsEl.style.height = h + 'px';
+        effectsCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
     }
 
     function scheduleRedraw() {
@@ -3189,8 +3254,11 @@
       drawBossWalkers(w, h);
       drawCow(w, h);
       drawWalkers(w, h);
-      drawResolutionEffects(w, h);
       drawClouds(w, h);
+      // La polvareda/carromato de la Fase de Resolución va la ÚLTIMA de
+      // todas y en su propio canvas por encima del de marcadores (ver
+      // drawResolutionEffects): nada del mapa debe taparla, ni las nubes.
+      drawResolutionEffects(w, h);
     }
 
     /** Arboles/rocas/etc. de `objects.bin` (si ese asset llego a generarse). */
@@ -3384,7 +3452,7 @@
 
     return {
       onLayout, onViewChanged, onResize, setDecorations, setWalkerWorld, getMarkerPositions, getCowPosition,
-      addResolutionEffect, clearResolutionEffects, hitTestFactionAt, setNightMode,
+      addResolutionEffect, clearResolutionEffects, hitTestFactionAt,
     };
   }
 

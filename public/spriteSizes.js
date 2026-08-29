@@ -147,7 +147,7 @@ window.SPRITE_SIZES = {
   // Fase de Resolución (ver docs/ACCIONES.md): polvareda de combate
   // (dos sprites intercalados) y carromato de conquista/expansión.
   // ------------------------------------------------------------------
-  'dust-1': 46,
-  'dust-2': 46,
+  'dust-1': 92,
+  'dust-2': 92,
   wagon: 56,
 };

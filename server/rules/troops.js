@@ -28,6 +28,21 @@ function totalTroops(p) {
   return (p.aiTroops || 0) + (p.archerTroops || 0) + (p.cavalryTroops || 0) + (p.specialTroops || 0);
 }
 
+// Sugerencia 3 del informe de balance de late game (v0.4.6, ver
+// docs/ACCIONES.md): la facción que combatió de VERDAD esta ronda (PvP, ver
+// faction.atWarThisRound en gameEngine.resolveRound()) produce tropas
+// pasivas a MITAD de ritmo esa misma ronda — objetivo: que el desgaste del
+// combate pueda algún día superar a la producción en partidas largas, en
+// vez de que un asedio sea matemáticamente imposible en cuanto ambos
+// bandos superan cierto tamaño (las 10 simulaciones mostraron 6/10
+// partidas totalmente bloqueadas en el late game por esto). Solo afecta a
+// la producción PASIVA repartida por distributeTroops() (leva por
+// territorio, edificios de tropa ya en pie, museos, Mercado) — el bono
+// directo de construir un edificio esta ronda (BUILDING_INITIAL_BONUS en
+// troopBuildings.js) NO se recorta, porque es una acción activa del
+// jugador, no producción automática.
+const WAR_PRODUCTION_FACTOR = 0.5;
+
 /**
  * `effectiveTroopLimit()` (panel de admin, 1-200, por defecto 50, +50 si la
  * facción ya tiene iglesia — ver rules/shared.js): un jugador que ya lleva
@@ -38,6 +53,7 @@ function totalTroops(p) {
  * — "si no hay más usuario en esa facción no se generarán tropas".
  */
 function distributeTroops(match, faction, count, fieldName) {
+  if (faction.atWarThisRound) count = Math.floor(count * WAR_PRODUCTION_FACTOR);
   if (count <= 0) return;
   const limit = effectiveTroopLimit(match, faction);
   const living = [...match.players.values()].filter(
@@ -55,16 +71,26 @@ function distributeTroops(match, faction, count, fieldName) {
   }
 }
 
+// Nivel 5 de industria "Mercado" (ver rules/industry.js sección 39): +1
+// tropa de IA/ronda PERMANENTE para toda la facción en cuanto se activa —
+// se lee `faction.mercadoBuilt` directamente en vez de importar una función
+// de rules/industry.js, porque industry.js ya requiere ESTE archivo (para
+// distributeTroops), así que un require en sentido contrario crearía un
+// ciclo (mismo motivo que documenta industry.js junto a este flag).
+const MERCADO_LEVA_BONUS = 1;
+
 /**
  * 1 tropa (soldado) nueva por cada casilla que controle la facción esta
  * ronda, para cada facción viva — MÁS 1 por cada museo que tenga (trofeo de
- * boss, ver rules/bosses.js sección 31), acumulable sin tope.
+ * boss, ver rules/bosses.js sección 31), acumulable sin tope, MÁS 1 si ya
+ * tiene el Mercado (nivel 5 de industria, ver MERCADO_LEVA_BONUS arriba).
  */
 function resolveAiTroops(match) {
   for (const faction of match.factions) {
     if (faction.territoryIds.length === 0) continue;
-    distributeTroops(match, faction, faction.territoryIds.length + museumLevaBonus(faction), 'aiTroops');
+    const mercado = faction.mercadoBuilt ? MERCADO_LEVA_BONUS : 0;
+    distributeTroops(match, faction, faction.territoryIds.length + museumLevaBonus(faction) + mercado, 'aiTroops');
   }
 }
 
-module.exports = { resolveAiTroops, distributeTroops, totalTroops };
+module.exports = { resolveAiTroops, distributeTroops, totalTroops, WAR_PRODUCTION_FACTOR };

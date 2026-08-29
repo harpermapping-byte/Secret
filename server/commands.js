@@ -42,13 +42,19 @@ const ACTION_BOSS = 'BOSS';
 // jugador de la facción +5 por vivienda, máximo 10 por facción (+50 en
 // total). Ver rules/housing.js y docs/ACCIONES.md.
 const ACTION_CASAS = 'CASAS';
-// Manda tu jugador (con tus propias tropas) a apoyar la defensa de la
-// capital de OTRO jugador de OTRA facción — no cambia de facción ni forma
-// una alianza permanente, solo suma tu defensa a la suya si esa facción
-// recibe algún ataque ESTA ronda (igual que un !defender normal, pero para
-// una facción que no es la tuya). Ver rules/gameEngine.js handleChatCommand
-// (resuelve el nombre a una facción) y docs/ACCIONES.md.
+// Manda tus tropas ese turno a defender a OTRA facción — no cambias de
+// facción ni formas una alianza permanente, solo tu defensa se suma a la
+// suya si esa facción recibe algún ataque ESTA ronda (igual que un
+// !defender normal, pero para una facción que no es la tuya). El objetivo
+// es un NUMERO de facción, como !ataque/!alianza (antes era un nombre de
+// usuario). Ver docs/ACCIONES.md.
 const ACTION_APOYAR = 'APOYAR';
+// Ataca a la guarnición de una maravilla (placeholder grande, ataque/defensa
+// 7-10) que esté en TU territorio y siga sin conquistar — solo aparecen si
+// el admin las activó (2 a 6 por mapa). Al ganarle el combate, la facción se
+// queda con su bono (industria o defensa) para siempre, aunque después
+// pierda la casilla. Ver rules/wonders.js y docs/ACCIONES.md sección 39.
+const ACTION_WONDER = 'MARAVILLA';
 
 // En que fase es valido cada tipo de accion.
 const VALID_PHASE_BY_ACTION = {
@@ -68,6 +74,7 @@ const VALID_PHASE_BY_ACTION = {
   [ACTION_BOSS]: PHASE_ACTION,
   [ACTION_CASAS]: PHASE_ACTION,
   [ACTION_APOYAR]: PHASE_ACTION,
+  [ACTION_WONDER]: PHASE_ACTION,
 };
 
 const JOIN_RE = /^!faccion(\d+)$/i;
@@ -85,7 +92,8 @@ const DUNGEON_RE = /^!dungeon$/i;
 const TOWER_RE = /^!torre$/i;
 const BOSS_RE = /^!boss$/i;
 const CASAS_RE = /^!casas$/i;
-const APOYAR_RE = /^!apoyar\s+(\S+)$/i;
+const APOYAR_RE = /^!apoyar\s+(\d+)$/i;
+const WONDER_RE = /^!maravilla$/i;
 
 /**
  * Convierte un mensaje de chat en { type, targetFactionNumber } o null si no es un comando reconocido.
@@ -128,7 +136,9 @@ function parseCommand(rawText) {
   if (CASAS_RE.test(text)) return { type: ACTION_CASAS, targetFactionNumber: null };
 
   match = text.match(APOYAR_RE);
-  if (match) return { type: ACTION_APOYAR, targetFactionNumber: null, targetUsername: match[1] };
+  if (match) return { type: ACTION_APOYAR, targetFactionNumber: Number(match[1]) };
+
+  if (WONDER_RE.test(text)) return { type: ACTION_WONDER, targetFactionNumber: null };
 
   return null;
 }
@@ -150,6 +160,7 @@ module.exports = {
   ACTION_BOSS,
   ACTION_CASAS,
   ACTION_APOYAR,
+  ACTION_WONDER,
   VALID_PHASE_BY_ACTION,
   parseCommand,
 };

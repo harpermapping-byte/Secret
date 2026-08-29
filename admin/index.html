@@ -125,7 +125,10 @@
 
     <label><input type="checkbox" id="alliancesEnabled" style="width:auto" checked /> Alianzas activadas</label>
 
-    <label title="Si se activa, cada facción recibe al azar (al crear la partida, con posible repetición) una de las 6 habilidades especiales del catálogo, activable con !especial cuando llegue al % de votantes de abajo. Todavía sin efecto definido (hab1-hab6, ver botón de ayuda) — este interruptor solo prepara el reparto."><input type="checkbox" id="specialAbilitiesEnabled" style="width:auto" /> Habilidades especiales activadas</label>
+    <label title="Cuántas rondas dura una alianza pactada. Una alianza se forma cuando DOS facciones se votan !alianza mutuamente en la misma Fase de Acción (cada una superando el % de alianza de abajo): durante esas rondas no pueden atacarse entre sí y defienden como una sola facción (los !defender de una cuentan también en los combates de la otra). Al acabar vuelven a ser independientes.">Duración de alianza (rondas, 1-99)</label>
+    <input type="number" id="allianceDurationRounds" value="5" min="1" max="99" />
+
+    <label title="Si se activa, cada facción recibe al azar (al crear la partida, con posible repetición) una de las 6 habilidades especiales del catálogo, activable con !especial cuando llegue al % de votantes de abajo: Refuerzo, Escudo, Frenesí, Sabotaje, Fervor o Muralla (ver botón de ayuda)."><input type="checkbox" id="specialAbilitiesEnabled" style="width:auto" /> Habilidades especiales activadas</label>
 
     <div class="row">
       <div style="flex:1">
@@ -144,11 +147,11 @@
 
     <label title="Si se activa, aparecen de 1 a 5 dungeons al azar en el mapa (guarnición de orcos/goblins) — atacables con !dungeon dentro de tu propio territorio. Al derrotarlos, la facción gana una estatua junto a su capital."><input type="checkbox" id="ffDungeons" style="width:auto" /> Dungeons (!dungeon)</label>
 
-    <label title="Si se activa, aparecen de 2 a 6 maravillas al azar en el mapa (Guggenheim, Ruinas de Numancia, La Moncloa, plataforma SpaceX, Kebab, Contrato indefinido — nunca se repite ninguna), cada una con su nombre y su bono (+4 industria/ronda o +4 defensa base) encima. No hace falta ningún comando: se poseen simplemente teniendo el terreno en el que salieron."><input type="checkbox" id="ffWonders" style="width:auto" /> Maravillas</label>
+    <label title="Si se activa, aparecen de 2 a 6 maravillas al azar en el mapa (Guggenheim, Ruinas de Numancia, La Moncloa, plataforma SpaceX, Kebab, Contrato indefinido — nunca se repite ninguna), cada una con su nombre, su guarnición (ataque/defensa 7-10) y su bono (+4 industria/ronda o +4 defensa base) encima. Hay que ganarles el combate con !maravilla dentro de tu territorio para quedártela — el bono es permanente desde que la conquistas, aunque luego pierdas la casilla."><input type="checkbox" id="ffWonders" style="width:auto" /> Maravillas</label>
 
     <label title="Si se activa, aparecen de 1 a 3 bosses al azar en el mapa (ogro/troll/behemot, nunca se repite ninguno), vagando dentro de la casilla en la que salieron, con su ataque/defensa (5-10) encima de la cabeza — atacables con !boss dentro de tu propio territorio. Al derrotarlos, la facción gana un museo junto a su capital (+1 leva/ronda, +1 industria/ronda, +2 defensa base, acumulable por cada boss derrotado)."><input type="checkbox" id="ffBosses" style="width:auto" /> Bosses (!boss)</label>
 
-    <label title="Si se activa: (1) ciclo día/noche puramente visual cada 3 minutos reales (2 de día, 1 de noche); y (2) cada ronda hay una posibilidad de que salga un clima — niebla (bloquea !ataque), lluvia (-2 defensa PvP), nieve (bloquea ataque/conquista/dungeon/boss/expansion) o día soleado, el más probable (+1 ataque y +1 defensa PvE) — dura esa ronda y avisa con un cartel + sonido."><input type="checkbox" id="ffWeather" style="width:auto" /> Clima (día/noche + niebla/lluvia/nieve/sol)</label>
+    <label title="Si se activa, cada ronda hay una posibilidad de que salga un clima — niebla (bloquea !ataque), lluvia (-2 defensa PvP), nieve (bloquea ataque/conquista/dungeon/boss/expansion) o día soleado, el más probable (+1 ataque y +1 defensa PvE) — dura esa ronda y avisa con un cartel + sonido."><input type="checkbox" id="ffWeather" style="width:auto" /> Clima (niebla/lluvia/nieve/sol)</label>
 
     <h3>Próximamente (sin efecto todavía)</h3>
     <div class="row" style="flex-wrap:wrap; gap:4px 16px">
@@ -299,6 +302,7 @@
         key: document.getElementById('mapKey').value,
       },
       alliancesEnabled: document.getElementById('alliancesEnabled').checked,
+      allianceDurationRounds: Number(document.getElementById('allianceDurationRounds').value),
       specialAbilitiesEnabled: document.getElementById('specialAbilitiesEnabled').checked,
       troopLimitPerPlayer: Number(document.getElementById('troopLimitPerPlayer').value),
       startingLives: Number(document.getElementById('startingLives').value),

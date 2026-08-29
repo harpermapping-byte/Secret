@@ -40,19 +40,28 @@ const CAVALRY_DEFENSE_BONUS = 0.2;
 // de industria), así que aporta más por unidad.
 const SPECIAL_TROOP_COMBAT_BONUS = 0.4;
 
-// Iglesia (nivel 3 de industria, ver rules/industry.js): +50 al límite de
+// Nivel 6 de industria "Arsenal" (ver rules/industry.js sección 39): +0.1
+// de combate fijo, en ataque Y EN defensa, por cada tropa de IA (aiTroops)
+// de una facción que ya lo tenga — se SUMA a AI_TROOP_COMBAT_BONUS, no lo
+// sustituye. Se lee `faction.arsenalBuilt` directamente en sumRandomPower()
+// en vez de importar una función de rules/industry.js: industry.js ya
+// requiere ESTE archivo (para `shuffle`), así que un require en sentido
+// contrario crearía un ciclo.
+const ARSENAL_TROOP_BONUS = 0.1;
+
+// Iglesia (nivel 3 de industria, ver rules/industry.js): +25 al límite de
 // tropas de match.config.troopLimitPerPlayer, pero SOLO para los jugadores
 // de la facción que la construyó — ver effectiveTroopLimit() más abajo,
 // único punto que combina los dos números.
-const CHURCH_TROOP_LIMIT_BONUS = 50;
+const CHURCH_TROOP_LIMIT_BONUS = 25;
 
-// Viviendas (!casas, ver rules/housing.js): +5 al límite de tropas de CADA
+// Viviendas (!casas, ver rules/housing.js): +10 al límite de tropas de CADA
 // jugador de la facción por vivienda construida, máximo MAX_HOUSES_PER_FACTION
 // (10) — igual que la iglesia, se suma al límite base del panel de admin.
-const HOUSE_TROOP_LIMIT_BONUS = 5;
+const HOUSE_TROOP_LIMIT_BONUS = 10;
 const MAX_HOUSES_PER_FACTION = 10;
 
-/** Límite real de tropas de un jugador de `faction`: el del panel de admin, +50 si su facción ya tiene iglesia, +5 por cada vivienda que haya construido. */
+/** Límite real de tropas de un jugador de `faction`: el del panel de admin, +25 si su facción ya tiene iglesia, +10 por cada vivienda que haya construido. */
 function effectiveTroopLimit(match, faction) {
   return (
     match.config.troopLimitPerPlayer +
@@ -87,6 +96,12 @@ function sumRandomPower(match, userIds, kind) {
     total += (kind === 'attack' ? ARCHER_ATTACK_BONUS : ARCHER_DEFENSE_BONUS) * (player?.archerTroops || 0);
     total += (kind === 'attack' ? CAVALRY_ATTACK_BONUS : CAVALRY_DEFENSE_BONUS) * (player?.cavalryTroops || 0);
     total += SPECIAL_TROOP_COMBAT_BONUS * (player?.specialTroops || 0);
+    // Nivel 6 de industria "Arsenal" (ver ARSENAL_TROOP_BONUS arriba): +0.1
+    // extra por tropa de IA si la facción de este jugador ya lo activó.
+    if (player) {
+      const faction = factionByNumber(match, player.factionNumber);
+      if (faction?.arsenalBuilt) total += ARSENAL_TROOP_BONUS * (player.aiTroops || 0);
+    }
   }
   return total;
 }
@@ -201,6 +216,72 @@ function applyTroopCascadeDamage(match, userIds, damage) {
   return Math.max(0, Math.round(remaining));
 }
 
+/**
+ * Mata EXACTAMENTE `killCount` tropas de `userIds` (no una cantidad de daño
+ * en puntos de poder) en el mismo orden de prioridad que
+ * `applyTroopCascadeDamage()` (caballero->arquero->leva->especial), pero SIN
+ * pasar por el bonus de defensa de cada tipo: aquí cada unidad cuenta 1,
+ * llevar más tropas de un tipo "caro" (specialTroops, defensa 0.4) no las
+ * protege más que un soldado normal. Hace falta esta variante aparte de
+ * `applyTroopCascadeDamage()` para el coste del bando GANADOR de un combate
+ * (ver WINNER_LOSS_FACTOR en rules/combat.js): expresar su coste como
+ * puntos de poder tenía un problema real — un bando con muchas tropas
+ * "baratas" en stock (AI_TROOP_COMBAT_BONUS=0.1/unidad) podía perder MÁS
+ * tropas por un puñado de puntos que el bando perdedor por un margen mucho
+ * mayor, si el perdedor ya se había quedado casi sin tropas de antes (tope
+ * por disponibilidad). Matando un número de tropas FIJO en vez de puntos de
+ * daño, la relación "el ganador pierde menos tropas que el perdedor" queda
+ * garantizada por construcción sea cual sea el stock de cada bando: basta
+ * con pasar aquí `killCount = floor(tropas_perdidas_por_el_perdedor * factor)`.
+ * Devuelve cuántas tropas NO se pudieron matar por falta de stock (0 si
+ * había suficientes).
+ */
+function applyTroopCascadeDirectKill(match, userIds, killCount) {
+  let remaining = Math.max(0, Math.round(killCount));
+  for (const { field } of TROOP_CASCADE_PRIORITY) {
+    if (remaining <= 0) break;
+
+    const pool = [];
+    for (const userId of userIds) {
+      const player = match.players.get(userId);
+      if (!player) continue;
+      for (let i = 0; i < (player[field] || 0); i++) pool.push(player);
+    }
+    if (pool.length === 0) continue;
+
+    const killable = Math.min(pool.length, remaining);
+    shuffle(pool);
+    for (let i = 0; i < killable; i++) pool[i][field] = Math.max(0, pool[i][field] - 1);
+    remaining -= killable;
+  }
+  return remaining;
+}
+
+/**
+ * Igual que `applyTroopCascadeDamageAndWipeouts()` pero usando
+ * `applyTroopCascadeDirectKill()` por debajo (mata un número FIJO de
+ * tropas, no una cantidad de daño en puntos) — ver ese comentario y
+ * WINNER_LOSS_FACTOR en rules/combat.js.
+ */
+function applyTroopCascadeDirectKillAndWipeouts(match, userIds, killCount) {
+  const before = new Map(userIds.map((id) => [id, totalPlayerTroops(match, id)]));
+  let troopsBefore = 0;
+  for (const v of before.values()) troopsBefore += v;
+  applyTroopCascadeDirectKill(match, userIds, killCount);
+  const wipedOutUserIds = [];
+  const diedUserIds = [];
+  let troopsAfter = 0;
+  for (const userId of userIds) {
+    const after = totalPlayerTroops(match, userId);
+    troopsAfter += after;
+    if ((before.get(userId) || 0) > 0 && after === 0) {
+      wipedOutUserIds.push(userId);
+      if (handleTroopWipeout(match, userId)) diedUserIds.push(userId);
+    }
+  }
+  return { wipedOutUserIds, diedUserIds, troopsBefore, troopsAfter };
+}
+
 function killPlayer(match, userId) {
   const player = match.players.get(userId);
   if (!player || !player.alive) return false;
@@ -291,6 +372,7 @@ module.exports = {
   applyCasualties,
   applyTroopCascadeDamage,
   applyTroopCascadeDamageAndWipeouts,
+  applyTroopCascadeDirectKillAndWipeouts,
   handleTroopWipeout,
   totalPlayerTroops,
   killPlayer,

@@ -13,9 +13,9 @@ const {
 const commands = require('./commands');
 const { generateMap, DEFAULT_MAP_KEY } = require('./mapTemplates');
 const { resolveAlliances } = require('./rules/alliances');
-const { resolveSpecialAbilities, pickRandomAbility } = require('./rules/specialAbilities');
+const { resolveSpecialAbilities, pickRandomAbility, specialAbilityDefenseBonus } = require('./rules/specialAbilities');
 const { resolveCombat } = require('./rules/combat');
-const { resolveIndustry, industryThresholdsFor } = require('./rules/industry');
+const { resolveIndustry, industryThresholdsFor, industryTier7DefenseBonus } = require('./rules/industry');
 const { resolveAiTroops } = require('./rules/troops');
 const { resolveTroopBuildings } = require('./rules/troopBuildings');
 const { resolveConquista, resolveDungeon, structureAttackPower, structureDefensePower } = require('./rules/structures');
@@ -23,7 +23,7 @@ const { resolveTowers, towerDefenseBonus, finishedTowerCountForFaction } = requi
 const { resolveBoss, museumDefenseBonus } = require('./rules/bosses');
 const { resolveCasas } = require('./rules/housing');
 const { rollWeather, weatherBlocksAction } = require('./rules/weather');
-const { wonderDefenseBonus } = require('./rules/wonders');
+const { resolveWonder, wonderDefenseBonus } = require('./rules/wonders');
 const {
   AI_TROOP_COMBAT_BONUS,
   ARCHER_ATTACK_BONUS,
@@ -49,6 +49,7 @@ const {
   ACTION_BOSS,
   ACTION_CASAS,
   ACTION_APOYAR,
+  ACTION_WONDER,
   VALID_PHASE_BY_ACTION,
 } = commands;
 
@@ -106,13 +107,13 @@ function createMatch(config) {
     industryPenaltyNextRound: false, // armado por Sabotaje esta ronda, se activa en la siguiente
     industryPenaltyActive: false, // Sabotaje activo ESTA ronda (armado la ronda anterior)
     // Iglesia (nivel 3 de industria, ver rules/industry.js): efecto
-    // permanente en cuanto se pone a true, sin fase de "armado" — +50 al
+    // permanente en cuanto se pone a true, sin fase de "armado" — +25 al
     // limite de tropas de cada jugador de la faccion (ver
     // effectiveTroopLimit() en rules/shared.js) y el cliente pinta el
     // edificio junto a la capital.
     churchBuilt: false,
     // Viviendas construidas con !casas (ver rules/housing.js): 0 a
-    // MAX_HOUSES_PER_FACTION (10), +5 al limite de tropas de cada jugador
+    // MAX_HOUSES_PER_FACTION (10), +10 al limite de tropas de cada jugador
     // de la faccion por cada una (ver effectiveTroopLimit() en
     // rules/shared.js) — acumulable con la iglesia, a diferencia de esta
     // no es un interruptor sino un contador.
@@ -150,6 +151,35 @@ function createMatch(config) {
     // grantSpecialTroops()), son tropas normales del jugador de ahí en
     // adelante.
     specialCastleBuilt: false,
+    // Niveles 5-8 de industria (ver rules/industry.js sección 39): efectos
+    // permanentes, cada uno se activa una única vez al cruzar su umbral,
+    // igual patrón que churchBuilt/specialCastleBuilt de arriba.
+    //   5 'mercado'      -> +1 tropa de IA/ronda para TODA la facción
+    //   6 'arsenal'      -> +0.1 de combate fijo (ataque Y defensa) a CADA
+    //                       tropa de IA de la facción
+    //   7 'muralla_real' -> +1 de defensa pasiva permanente
+    //   8 'corona'       -> visual + activa la conversión de industria
+    //                       sobrante en tropas (industryOverflowGranted)
+    mercadoBuilt: false,
+    arsenalBuilt: false,
+    murallaRealBuilt: false,
+    coronaBuilt: false,
+    // Cuántas conversiones de industria-sobrante-a-tropa (ver
+    // grantOverflowTroops() en rules/industry.js) ya se han pagado — solo
+    // avanza tras 'corona' (nivel 8). Sin esto, cada ronda volvería a
+    // convertir el mismo tramo ya cobrado.
+    industryOverflowGranted: 0,
+    // Sugerencia 3 del informe de balance de late game (v0.4.6, ver
+    // docs/ACCIONES.md): true cuando la facción atacó o fue atacada (PvP,
+    // ver context.roundEvents.combats) en la ronda que se acaba de
+    // resolver — resolveRound() lo recalcula cada ronda justo después de
+    // resolveCombat() y ANTES de resolveAiTroops()/resolveTroopBuildings(),
+    // así que afecta a la producción pasiva de tropas de esa MISMA ronda
+    // (ver WAR_PRODUCTION_FACTOR en rules/troops.js). Objetivo: que el
+    // desgaste del combate pueda algún día superar a la producción en
+    // partidas largas, en vez de que un asedio sea matemáticamente
+    // imposible para siempre en cuanto ambos bandos superan cierto tamaño.
+    atWarThisRound: false,
     // Museos (trofeo de `!boss`, ver rules/bosses.js sección 31): uno por
     // cada boss derrotado, sin tope — cada uno da +1 leva/ronda, +1
     // industria/ronda, +2 de defensa base, acumulables. Igual mecanismo
@@ -220,7 +250,14 @@ function createMatch(config) {
     round: 0,
     roundActions: new Map(),
     lastAttackerOf: {},
-    activeAlliancePairsThisRound: new Set(),
+    // Alianzas activas por pacto mutuo (ver rules/alliances.js): Map de
+    // "A-B" (A<B) -> última ronda en la que sigue activa.
+    activeAlliances: new Map(),
+    // Feed de "últimas acciones" de la Fase de Acción en curso (ver
+    // castAction() y el bocadillo de abajo-derecha en public/index.html):
+    // cada comando ACEPTADO deja aquí su rastro en orden de llegada, se
+    // vacía al empezar cada ronda. Solo informativo, ninguna regla lo lee.
+    actionFeed: [],
     combatModifiers: {},
     summaryBlocks: [],
     // Fase de Resolución (ver buildResolutionEvents()): [] hasta que se
@@ -290,6 +327,10 @@ function normalizeConfig(config) {
     // 2-5 = vidas extra. Panel de admin, por defecto 3.
     startingLives: clampInt(config.startingLives, 1, 5, 3),
     alliancesEnabled: !!config.alliancesEnabled,
+    // Cuántas rondas dura una alianza pactada (ver rules/alliances.js:
+    // pacto mutuo de !alianza en la misma Fase de Acción). Panel de admin,
+    // 1-99, por defecto 5.
+    allianceDurationRounds: clampInt(config.allianceDurationRounds, 1, 99, 5),
     // Habilidades especiales activas en esta partida (ver
     // rules/specialAbilities.js, docs/ACCIONES.md sección 35). Único
     // interruptor global — ya no se eligen ni activan por facción desde el
@@ -344,26 +385,10 @@ function handleChatCommand(userId, username, channel, text) {
     return;
   }
 
-  // !apoyar <usuario>: el comando solo trae un nombre de usuario (no un
-  // número de facción como !ataque/!alianza) — se resuelve aquí a la
-  // facción de ESE jugador (tiene que existir, estar vivo, y ser de otra
-  // facción que la de quien vota) antes de tratarlo como cualquier otra
-  // acción con objetivo. Ver rules/gameEngine.js resolveRound() ->
+  // !apoyar <facción>: mismo formato de objetivo que !ataque/!alianza (un
+  // número de facción — antes era un nombre de usuario). castAction() ya
+  // valida que la facción exista, esté viva y no sea la del votante; ver
   // tallyActions() para cómo se convierte en un !defender prestado.
-  if (parsed.type === ACTION_APOYAR) {
-    const caller = match.players.get(userId);
-    const target = findPlayerByUsername(match, parsed.targetUsername);
-    if (!caller || !target || !target.alive || target.factionNumber === caller.factionNumber) {
-      console.log(`[gameEngine] ${username} -> APOYAR "${parsed.targetUsername}": RECHAZADO (jugador inexistente, muerto, o de tu propia facción)`);
-      pushChatLog({ username, text, ok: false, reason: 'jugador de apoyo inválido (no existe, está muerto, o es de tu propia facción)' });
-      return;
-    }
-    const ok = castAction(userId, ACTION_APOYAR, target.factionNumber);
-    console.log(`[gameEngine] ${username} -> APOYAR a ${target.username} (facción ${target.factionNumber}): ${ok ? 'OK' : 'RECHAZADO'}`);
-    pushChatLog({ username, text, ok, reason: ok ? `apoyando a ${target.username}` : 'rechazado' });
-    return;
-  }
-
   const ok = castAction(userId, parsed.type, parsed.targetFactionNumber);
   console.log(`[gameEngine] ${username} -> ${parsed.type}: ${ok ? 'OK' : 'RECHAZADO (revisa si esta unido y vivo)'}`);
   pushChatLog({ username, text, ok, reason: ok ? 'aceptado' : 'rechazado (revisa si está unido a una facción y vivo)' });
@@ -450,6 +475,17 @@ function castAction(userId, actionType, targetFactionNumber) {
   }
 
   match.roundActions.set(userId, { type: actionType, targetFactionNumber });
+  // Feed de últimas acciones (bocadillo abajo-derecha del cliente): solo
+  // acciones ACEPTADAS, en orden de llegada. Tope de 40 por ronda para que
+  // una partida multitudinaria no infle el estado público — el cliente solo
+  // enseña las últimas de todas formas.
+  match.actionFeed.push({
+    username: player.username,
+    factionNumber: player.factionNumber,
+    type: actionType,
+    targetFactionNumber: targetFactionNumber || null,
+  });
+  if (match.actionFeed.length > 40) match.actionFeed.shift();
   notifyStateChange();
   return true;
 }
@@ -492,6 +528,7 @@ function closeRecruitment() {
 
   match.round = 1;
   match.roundActions.clear();
+  match.actionFeed = [];
   enterTransition('first-action', match.round, () => {
     match.phase = PHASE_ACTION;
     // Clima de esta ronda (ver rules/weather.js, docs/ACCIONES.md sección
@@ -543,7 +580,21 @@ function resolveRound() {
   resolveConquista(match, context);
   resolveDungeon(match, context);
   resolveBoss(match, context);
+  resolveWonder(match, context);
   resolveTowers(match, context);
+
+  // Sugerencia 3 del informe de balance (v0.4.6): quién combatió de VERDAD
+  // esta ronda (PvP, no PvE — ver context.roundEvents.combats, que solo
+  // resolveCombat() rellena) produce tropas pasivas a media velocidad la
+  // producción de ESTA MISMA ronda, ver atWarThisRound arriba y
+  // WAR_PRODUCTION_FACTOR en rules/troops.js.
+  const factionNumbersAtWar = new Set();
+  for (const c of context.roundEvents.combats) {
+    factionNumbersAtWar.add(c.attackerFactionNumber);
+    factionNumbersAtWar.add(c.defenderFactionNumber);
+  }
+  for (const faction of match.factions) faction.atWarThisRound = factionNumbersAtWar.has(faction.number);
+
   resolveIndustry(match, context);
   resolveAiTroops(match);
   resolveTroopBuildings(match, context);
@@ -640,7 +691,12 @@ function buildResolutionEvents(context) {
   }
 
   for (const f of context.roundEvents.pveFights) {
-    events.push({ kind: 'pve_fight', baseDurationMs: PVE_FIGHT_BASE_MS, focusTileId: f.tileId, ...f });
+    // De dónde sale el ejército que marcha hasta el combate (ver el efecto
+    // 'army' en public/mapRenderer.js): una casilla vecina que ya sea de la
+    // facción atacante — null si no hay ninguna (el cliente pone solo la
+    // polvareda, sin marcha).
+    const originTileId = pickOriginNeighborTileId(f.tileId, f.factionNumber);
+    events.push({ kind: 'pve_fight', baseDurationMs: PVE_FIGHT_BASE_MS, focusTileId: f.tileId, originTileId, ...f });
   }
 
   for (const cq of context.roundEvents.conquests) {
@@ -686,6 +742,7 @@ function advanceRound() {
 
   match.round += 1;
   match.roundActions.clear();
+  match.actionFeed = [];
   enterTransition('next-round', match.round, () => {
     match.phase = PHASE_ACTION;
     match.activeWeather = rollWeather(match);
@@ -728,6 +785,7 @@ function tallyActions() {
       [ACTION_TOWER]: [],
       [ACTION_BOSS]: [],
       [ACTION_CASAS]: [],
+      [ACTION_WONDER]: [],
     });
     activePlayerCountByFaction.set(faction.number, 0);
   }
@@ -776,7 +834,7 @@ function tallyActions() {
     forceInactive: new Set(),
     // Sucesos de la ronda que van llenando resolveExpansion/resolveCombat/resolveIndustry a medida
     // que ocurren, para poder construir despues el resumen por fases (ver docs/ACCIONES.md seccion 6).
-    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [], bossKills: [], support, pveFights: [] },
+    roundEvents: { conquests: [], combats: [], industryUnlocks: [], eliminations: [], structureConquests: [], bossKills: [], support, pveFights: [], newAlliances: [] },
   };
 }
 
@@ -803,6 +861,7 @@ function buildRoundSummary(context) {
   if (context.roundEvents.eliminations.length > 0) blocks.push({ kind: 'eliminations', data: context.roundEvents.eliminations });
   if (context.roundEvents.structureConquests.length > 0) blocks.push({ kind: 'structureConquests', data: context.roundEvents.structureConquests });
   if (context.roundEvents.bossKills.length > 0) blocks.push({ kind: 'bossKills', data: context.roundEvents.bossKills });
+  if (context.roundEvents.newAlliances.length > 0) blocks.push({ kind: 'newAlliances', data: context.roundEvents.newAlliances });
 
   const casualties = [...match.players.values()]
     .filter((p) => p.diedOnRound === match.round)
@@ -890,10 +949,12 @@ function getPublicState() {
       bosses: [],
       players: [],
       summaryBlocks: [],
+      actionFeed: [],
       resolutionEvents: [],
       resolutionSkipRequestedAt: null,
       activeWeather: null,
       weatherEnabled: false,
+      activeAlliances: [],
       startingLives: 3,
       winnerFactionNumber: null,
       timerEndsAt: null,
@@ -908,11 +969,18 @@ function getPublicState() {
     // Clima de la ronda en curso (ver rules/weather.js, docs/ACCIONES.md
     // sección 36) — null si esta ronda no tocó ninguno, o si el admin
     // desactivó el clima al crear la partida. `weatherEnabled` es el
-    // interruptor en sí (antes `futureFeatures.weather` era puro adorno sin
-    // exponer, ahora el cliente lo necesita para saber si arrancar el ciclo
-    // día/noche, que se apaga entero junto con el clima).
+    // interruptor en sí, expuesto por si algún cliente lo necesita.
     activeWeather: match.activeWeather,
     weatherEnabled: match.config.futureFeatures.weather,
+    // Alianzas activas por pacto mutuo (ver rules/alliances.js sección 38):
+    // el cliente enseña el popup al formarse (kind 'newAlliances' en
+    // summaryBlocks) y el estado vigente con las rondas que quedan aquí.
+    activeAlliances: [...match.activeAlliances.entries()]
+      .filter(([, expiresAfterRound]) => match.round <= expiresAfterRound)
+      .map(([key, expiresAfterRound]) => {
+        const [a, b] = key.split('-').map(Number);
+        return { factionA: a, factionB: b, roundsLeft: expiresAfterRound - match.round + 1 };
+      }),
     factions: match.factions.map((f) => ({
       number: f.number,
       name: f.name,
@@ -934,7 +1002,7 @@ function getPublicState() {
       dungeonTrophies: f.dungeonTrophies,
       // Iglesia del nivel 3 de industria (ver rules/industry.js): el
       // cliente pinta el edificio junto a la capital en cuanto es true, con
-      // el mismo anillo anti-solape que estatua/museo. El +50 al limite de
+      // el mismo anillo anti-solape que estatua/museo. El +25 al limite de
       // tropas ya esta aplicado del lado del servidor (ver
       // effectiveTroopLimit() en rules/shared.js), esto es solo la señal
       // visual.
@@ -967,12 +1035,26 @@ function getPublicState() {
       // con el mismo mecanismo de anillo que las estatuas de dungeon.
       bossTrophies: f.bossTrophies,
       museumDefenseBonus: museumDefenseBonus(f),
+      // Niveles 5-8 de industria (ver rules/industry.js sección 39) — el
+      // cliente los usa para saber qué edificios/insignias pintar junto a
+      // la capital, mismo criterio que churchBuilt/specialCastleBuilt.
+      mercadoBuilt: f.mercadoBuilt,
+      arsenalBuilt: f.arsenalBuilt,
+      murallaRealBuilt: f.murallaRealBuilt,
+      coronaBuilt: f.coronaBuilt,
+      // Bono de defensa pasiva de la habilidad especial "Muralla" (hab6) +
+      // el nivel 7 de industria "Muralla real" — agrupados en un único
+      // número para el cliente, igual que towerDefenseBonus/
+      // wonderDefenseBonus/museumDefenseBonus de arriba (ver
+      // rules/combat.js para el desglose real usado en el cálculo).
+      specialDefenseBonus: specialAbilityDefenseBonus(f) + industryTier7DefenseBonus(f),
+      atWarThisRound: f.atWarThisRound,
       killsCaused: f.killsCaused,
-      // Cuantas maravillas posee esta facción AHORA MISMO (ver
-      // rules/wonders.js sección 30) — se cuenta en vivo a partir de quién
-      // controla la casilla de cada una, igual que su bono de industria/
-      // defensa; usado en la clasificación (leaderboard).
-      wondersCount: match.wonders.filter((w) => match.tiles[w.tileId].ownerFactionNumber === f.number).length,
+      // Cuantas maravillas ha CONQUISTADO esta facción (ver
+      // rules/wonders.js sección 39) — desde v0.4.7 ya no depende de quién
+      // controle la casilla ahora mismo, solo de haberle ganado el combate;
+      // usado en la clasificación (leaderboard).
+      wondersCount: match.wonders.filter((w) => w.defeated && w.conqueredByFactionNumber === f.number).length,
       // Torres terminadas (ver rules/towers.js) — para el resumen compacto
       // del popup de la sección 35, no solo el bonus de defensa ya expuesto
       // arriba en towerDefenseBonus.
@@ -1038,11 +1120,12 @@ function getPublicState() {
         defensePower: Number(structureDefensePower(s).toFixed(2)),
       };
     }),
-    // Maravillas (ver rules/wonders.js, docs/ACCIONES.md sección 30):
-    // posición y bono fijos toda la partida, `ownerFactionNumber` se calcula
-    // aquí en vivo a partir de quién controla `tileId` ahora mismo — no hace
-    // falta ningún comando para "conquistarlas", basta con poseer la
-    // casilla (`!ataque`/`!expansion` normales).
+    // Maravillas (ver rules/wonders.js, docs/ACCIONES.md sección 39):
+    // posición y bono fijos toda la partida. Desde v0.4.7 llevan guarnición
+    // propia (`attackPower`/`defensePower`, mismo mecanismo que un boss) y
+    // hay que ganarles el combate con `!maravilla` — `ownerFactionNumber`
+    // ahora es quien la CONQUISTÓ (null mientras `defeated` sea false), ya
+    // NO quien controla la casilla ahora mismo (ver resolveWonder()).
     wonders: match.wonders.map((w) => ({
       tileId: w.tileId,
       x: w.x,
@@ -1052,7 +1135,10 @@ function getPublicState() {
       icon: w.icon,
       bonusType: w.bonusType,
       bonusAmount: w.bonusAmount,
-      ownerFactionNumber: match.tiles[w.tileId].ownerFactionNumber,
+      attackPower: Number(w.attackPower.toFixed(2)),
+      defensePower: Number(w.defensePower.toFixed(2)),
+      defeated: w.defeated,
+      ownerFactionNumber: w.conqueredByFactionNumber,
     })),
     // Bosses (ver rules/bosses.js, docs/ACCIONES.md sección 31): posición y
     // tipo fijos toda la partida, `defeated` es lo único mutable — el
@@ -1116,6 +1202,10 @@ function getPublicState() {
       };
     }),
     summaryBlocks: match.phase === PHASE_SUMMARY ? match.summaryBlocks : [],
+    // Feed de últimas acciones de la ronda en curso (ver castAction()):
+    // solo las últimas 8 y solo durante la Fase de Acción — es el bocadillo
+    // de "qué está pasando" de abajo-derecha, no un histórico.
+    actionFeed: match.phase === PHASE_ACTION ? match.actionFeed.slice(-8) : [],
     // Fase de Resolución (ver buildResolutionEvents() más arriba): la lista
     // ordenada de combates/PvE/conquistas de la ronda, con cámara y
     // duración ya decididas por el servidor — solo se expone mientras dura
@@ -1206,16 +1296,6 @@ function getMapLayout() {
  */
 function findInFactionList(factions, number) {
   return factions.find((f) => f.number === number);
-}
-
-/** Jugador por nombre exacto (sin mayúsculas), o `null` si no existe — usado por !apoyar. */
-function findPlayerByUsername(match, name) {
-  if (!name) return null;
-  const needle = name.trim().toLowerCase();
-  for (const player of match.players.values()) {
-    if (player.username.toLowerCase() === needle) return player;
-  }
-  return null;
 }
 
 function assertPhase(expectedPhase) {

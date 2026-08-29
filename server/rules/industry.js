@@ -68,7 +68,7 @@ const SPECIAL_TROOP_CAP = 10;
  *   3 'iglesia'           -> aparece una iglesia junto a la capital de la
  *                            faccion (placeholder decorativo, ver
  *                            public/mapRenderer.js, mismo mecanismo de
- *                            anillo que estatua/museo), que da +50 al
+ *                            anillo que estatua/museo), que da +25 al
  *                            limite de tropas de CADA jugador de esa
  *                            faccion (ver CHURCH_TROOP_LIMIT_BONUS/
  *                            effectiveTroopLimit() en rules/shared.js) —
@@ -83,25 +83,59 @@ const SPECIAL_TROOP_CAP = 10;
  *                            rules/combat.js). Sin aldeanos alrededor, a
  *                            diferencia de la capital.
  *
- * Niveles 5-8 ('nivel5'..'nivel8'): PREPARADOS pero SIN EFECTO todavia — a
- * proposito, pendientes de decidir que hacen (ver docs/ACCIONES.md sección
- * 35). Ya cuentan para la probeta de industria del panel de facciones (la
- * probeta lee `industryThresholds`, que sale de este mismo array, así que
- * pasa sola de 4 a 8 marcas sin tocar el cliente) y para el resumen de ronda
- * ("mejoras desbloqueadas") — `applyIndustryTier()` mas abajo simplemente no
- * hace nada al cruzarlos, exactamente igual que cualquier `tierKey`
- * desconocida.
+ * Niveles 5-8 (ver docs/ACCIONES.md sección 39), todos efectos PERMANENTES
+ * que se activan una única vez al cruzar su umbral, mismo patrón que
+ * iglesia/castillo especial de arriba:
+ *   5 'mercado'      -> +1 tropa de IA/ronda para TODA la facción (se suma
+ *                       al reparto normal de resolveAiTroops(), ver
+ *                       mercadoLevaBonus() más abajo y rules/troops.js).
+ *   6 'arsenal'      -> +0.1 de combate fijo, en ataque Y EN defensa, a
+ *                       CADA tropa de IA (aiTroops) de la facción — ver
+ *                       arsenalTroopBonus() más abajo, sumado dentro de
+ *                       sumRandomPower() en rules/shared.js.
+ *   7 'muralla_real' -> +1 de defensa pasiva permanente, quinta... sexta
+ *                       excepción a "el territorio no se defiende solo" —
+ *                       ver industryTier7DefenseBonus() más abajo y
+ *                       rules/combat.js.
+ *   8 'corona'       -> puramente decorativo en sí (corona sobre la
+ *                       capital) MÁS activa que, de aquí en adelante, la
+ *                       industria que siga acumulando la facción por
+ *                       encima de este último umbral se convierta sola en
+ *                       tropas cada cierto tramo — ver
+ *                       grantIndustryOverflowTroops() más abajo, para que
+ *                       el nivel 8 no sea un muro sin más recompensa.
  */
 const INDUSTRY_TIERS = [
   { key: 'caballero', perPlayer: 3 },
   { key: 'industria_extra', perPlayer: 8 },
   { key: 'iglesia', perPlayer: 15 },
   { key: 'castillo_especial', perPlayer: 24 },
-  { key: 'nivel5', perPlayer: 35 },
-  { key: 'nivel6', perPlayer: 48 },
-  { key: 'nivel7', perPlayer: 63 },
-  { key: 'nivel8', perPlayer: 80 },
+  { key: 'mercado', perPlayer: 35 },
+  { key: 'arsenal', perPlayer: 48 },
+  { key: 'muralla_real', perPlayer: 63 },
+  { key: 'corona', perPlayer: 80 },
 ];
+
+// Nivel 5 "Mercado": +1 tropa de IA/ronda para toda la facción, permanente
+// — el bono en sí vive en rules/troops.js resolveAiTroops() (que ya lee
+// `faction.mercadoBuilt` directamente, igual que rules/shared.js lee
+// `faction.churchBuilt`/`housesBuilt`, para no crear un require circular
+// entre industry.js <-> troops.js, que ya se requieren mutuamente).
+// Nivel 6 "Arsenal": +0.1 de combate fijo (ataque Y defensa) por cada tropa
+// de IA (aiTroops) de la facción — el bono en sí vive en rules/shared.js
+// (ARSENAL_TROOP_BONUS, dentro de sumRandomPower(), que ya lee
+// `faction.arsenalBuilt` directamente): shared.js se carga ANTES que este
+// archivo (industry.js lo requiere para `shuffle`), así que shared.js no
+// puede a su vez requerir industry.js sin crear un ciclo — mismo motivo por
+// el que el Mercado de arriba también resuelve su bono en el archivo que lo
+// consume en vez de aquí.
+// Nivel 7 "Muralla real": +1 de defensa pasiva permanente.
+const MURALLA_REAL_DEFENSE_BONUS = 1;
+// Conversión de industria sobrante en tropas tras el nivel 8 "Corona": cada
+// vez que la industria acumulada supera el umbral del nivel 8 en otro tramo
+// de este tamaño, +1 tropa de IA repartida (mismo criterio "a quien menos
+// tenga" que el resto de producción, ver distributeTroops()).
+const OVERFLOW_TROOP_COST = 20;
 
 // Suelo de jugadores al calcular los umbrales. Sin el, una faccion a la que
 // no se une nadie (o que se queda sin miembros) tendria umbral 0 y
@@ -168,6 +202,13 @@ function resolveIndustry(match, context) {
       applyIndustryTier(match, context, faction, INDUSTRY_TIERS[faction.industryTierIndex].key);
       faction.industryTierIndex++;
     }
+
+    // Nivel 8 "Corona": a partir de aquí, la industria que siga
+    // acumulándose por encima del último umbral se convierte sola en
+    // tropas cada OVERFLOW_TROOP_COST — así el nivel 8 no es un tope sin
+    // más recompensa. `industryOverflowGranted` cuenta cuántos tramos ya
+    // se han cobrado, para no repetir el mismo tramo ronda tras ronda.
+    if (faction.coronaBuilt) grantIndustryOverflowTroops(match, faction, thresholds[thresholds.length - 1]);
   }
 }
 
@@ -227,24 +268,62 @@ function applyIndustryTier(match, context, faction, tierKey) {
       grantSpecialTroops(match, faction, SPECIAL_CASTLE_INITIAL_TROOPS);
       return;
     case 'iglesia':
-      // Efecto permanente y automatico: +50 al limite de tropas de cada
+      // Efecto permanente y automatico: +25 al limite de tropas de cada
       // jugador de la faccion desde este momento, ver
       // effectiveTroopLimit()/CHURCH_TROOP_LIMIT_BONUS en rules/shared.js.
       // `churchBuilt` es tambien lo que usa el cliente para pintar el
       // edificio junto a la capital (ver public/mapRenderer.js).
       faction.churchBuilt = true;
       return;
-    case 'nivel5':
-    case 'nivel6':
-    case 'nivel7':
-    case 'nivel8':
-      // Sin efecto todavia (ver docs/ACCIONES.md sección 35) — el desbloqueo
-      // ya quedó registrado arriba (context.roundEvents.industryUnlocks) y
-      // la probeta ya se llena hasta aquí, solo falta decidir qué hacen.
+    case 'mercado':
+      // Efecto permanente y automático: +1 tropa de IA/ronda para toda la
+      // facción desde este momento, ver mercadoLevaBonus()/rules/troops.js.
+      faction.mercadoBuilt = true;
+      return;
+    case 'arsenal':
+      // Efecto permanente y automático: +0.1 de combate fijo (ataque Y
+      // defensa) por cada tropa de IA de la facción, ver
+      // arsenalTroopBonus()/rules/shared.js sumRandomPower().
+      faction.arsenalBuilt = true;
+      return;
+    case 'muralla_real':
+      // Efecto permanente y automático: +1 de defensa pasiva, ver
+      // industryTier7DefenseBonus()/rules/combat.js.
+      faction.murallaRealBuilt = true;
+      return;
+    case 'corona':
+      // Puramente decorativo en sí (corona sobre la capital) — el efecto de
+      // verdad es que activa grantIndustryOverflowTroops() en
+      // resolveIndustry() de aquí en adelante.
+      faction.coronaBuilt = true;
       return;
     default:
       return;
   }
+}
+
+/** +1 de defensa pasiva si la facción ya tiene 'muralla_real' (nivel 7) — se suma dentro de resolveCombat() en rules/combat.js. */
+function industryTier7DefenseBonus(faction) {
+  return faction.murallaRealBuilt ? MURALLA_REAL_DEFENSE_BONUS : 0;
+}
+
+/**
+ * Nivel 8 "Corona": convierte en tropas la industria acumulada por encima
+ * de `tier8Threshold` (el último umbral, ya con el tamaño de la facción
+ * aplicado), un tramo de OVERFLOW_TROOP_COST cada vez, repartida con el
+ * mismo criterio "a quien menos tenga" que el resto de producción — ver
+ * distributeTroops() en rules/troops.js. `faction.industryOverflowGranted`
+ * cuenta cuántos tramos YA se han cobrado, para no volver a dar el mismo
+ * tramo la ronda siguiente si la industria no ha subido lo bastante para
+ * el próximo.
+ */
+function grantIndustryOverflowTroops(match, faction, tier8Threshold) {
+  const overflow = Math.max(0, faction.industry - tier8Threshold);
+  const tiersEarned = Math.floor(overflow / OVERFLOW_TROOP_COST);
+  const newTiers = tiersEarned - (faction.industryOverflowGranted || 0);
+  if (newTiers <= 0) return;
+  faction.industryOverflowGranted = tiersEarned;
+  distributeTroops(match, faction, newTiers, 'aiTroops');
 }
 
 /**
@@ -275,4 +354,5 @@ module.exports = {
   SPECIAL_TROOP_CAP,
   SPECIAL_CASTLE_INITIAL_TROOPS,
   SPECIAL_CASTLE_TROOPS_PER_ROUND,
+  industryTier7DefenseBonus,
 };

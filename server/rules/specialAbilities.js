@@ -8,17 +8,27 @@ const { shuffle } = require('./shared');
 const REFUERZO_REVIVE_COUNT = 3;
 const ESCUDO_DEFENSE_BONUS_PERCENT = 30;
 const FRENESI_ATTACK_BONUS_PERCENT = 30;
+// hab5 "Fervor" (ver docs/ACCIONES.md sección 39): empujón de industria de
+// golpe, una única vez, al activarse.
+const FERVOR_INDUSTRY_BOOST_PERCENT = 30;
+// hab6 "Muralla" (ver docs/ACCIONES.md sección 39): +1 de defensa pasiva
+// PERMANENTE (a diferencia de Escudo, que es +30% y solo dura la ronda en
+// que se activa) — quinta excepción a "el territorio no se defiende solo"
+// en rules/combat.js, mismo patrón que torres/maravillas/museos.
+const MURALLA_DEFENSE_BONUS = 1;
 
 /**
- * Catálogo nuevo (ver docs/ACCIONES.md sección 35): 6 habilidades, una se le
- * asigna AL AZAR a cada facción al crear la partida (con repetición — con
- * más de 6 facciones, varias comparten la misma), en vez de que el admin
- * elija una por facción como antes. Todavía sin efecto definido a propósito
- * ("hab1".."hab6" son marcador, se deciden los efectos más adelante) —
- * `applyAbility()` de abajo las deja caer en el `default: return;` sin
- * romper nada mientras tanto, así que activar `!especial` en una facción con
- * una de estas asignadas simplemente no hace nada todavía (gasta igualmente
- * el único uso de la partida, `specialUsed`, como cualquier otra).
+ * Catálogo de las 6 habilidades (ver docs/ACCIONES.md sección 35/39): una se
+ * le asigna AL AZAR a cada facción al crear la partida (con repetición — con
+ * más de 6 facciones, varias comparten la misma). Activable una única vez
+ * por partida (`specialUsed`) cuando `!especial` llega al % de votantes
+ * configurado — ver `resolveSpecialAbilities()` más abajo.
+ *   hab1 'Refuerzo' -> revive a los 3 últimos jugadores caídos de la facción
+ *   hab2 'Escudo'   -> +30% de defensa esta ronda
+ *   hab3 'Frenesí'  -> +30% de ataque esta ronda
+ *   hab4 'Sabotaje' -> -toda la industria de la ronda siguiente al objetivo
+ *   hab5 'Fervor'   -> +30% de industria de golpe, una vez
+ *   hab6 'Muralla'  -> +1 de defensa pasiva PERMANENTE el resto de la partida
  */
 const ABILITY_POOL = ['hab1', 'hab2', 'hab3', 'hab4', 'hab5', 'hab6'];
 
@@ -58,24 +68,30 @@ function resolveSpecialAbilities(match, context) {
 
 function applyAbility(match, context, faction) {
   switch (faction.specialAbility) {
-    case 'refuerzo':
+    case 'hab1': // Refuerzo
       return applyRefuerzo(match, faction);
-    case 'escudo':
+    case 'hab2': // Escudo
       match.combatModifiers[faction.number] = {
         ...match.combatModifiers[faction.number],
         defenseBonusPercent: ESCUDO_DEFENSE_BONUS_PERCENT,
       };
       return;
-    case 'frenesi':
+    case 'hab3': // Frenesí
       match.combatModifiers[faction.number] = {
         ...match.combatModifiers[faction.number],
         attackBonusPercent: FRENESI_ATTACK_BONUS_PERCENT,
       };
       return;
-    case 'sabotaje':
+    case 'hab4': // Sabotaje
       return applySabotaje(match, context, faction);
+    case 'hab5': // Fervor: empujón de industria de golpe, una única vez.
+      faction.industry += faction.industry * (FERVOR_INDUSTRY_BOOST_PERCENT / 100);
+      return;
+    case 'hab6': // Muralla: +1 de defensa pasiva permanente (ver muralla flag + specialAbilityDefenseBonus()).
+      faction.muralla = true;
+      return;
     default:
-      return; // habilidad no configurada: no hace nada
+      return; // defensivo: no debería pasar, ABILITY_POOL solo tiene hab1-hab6
   }
 }
 
@@ -104,4 +120,9 @@ function applySabotaje(match, context, faction) {
   if (targetFaction) targetFaction.industryPenaltyNextRound = true;
 }
 
-module.exports = { resolveSpecialAbilities, ABILITY_POOL, pickRandomAbility };
+/** +1 de defensa pasiva PERMANENTE si la facción activó hab6 "Muralla" — ver rules/combat.js. */
+function specialAbilityDefenseBonus(faction) {
+  return faction.muralla ? MURALLA_DEFENSE_BONUS : 0;
+}
+
+module.exports = { resolveSpecialAbilities, specialAbilityDefenseBonus, ABILITY_POOL, pickRandomAbility };
